@@ -1,0 +1,113 @@
+use anyhow::{Context, Result};
+use bog::{
+    config::Config,
+    data::MarketFeed,
+    engine::TradingEngine,
+    execution::{ExecutionMode, Executor, LighterExecutor, SimulatedExecutor},
+    strategy::StrategyFactory,
+    utils::init_logger,
+};
+use clap::Parser;
+use std::path::PathBuf;
+use tracing::info;
+
+/// Bog - Market Maker Bot for Lighter DEX
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to configuration file
+    #[arg(short, long, default_value = "config/default.toml")]
+    config: PathBuf,
+
+    /// Override execution mode (live or simulated)
+    #[arg(long)]
+    execution_mode: Option<String>,
+
+    /// Override market ID
+    #[arg(long)]
+    market_id: Option<u64>,
+
+    /// Enable JSON logging
+    #[arg(long)]
+    json_logs: bool,
+
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long)]
+    log_level: Option<String>,
+}
+
+fn main() -> Result<()> {
+    // Parse command line arguments
+    let args = Args::parse();
+
+    // Load configuration
+    let mut config = Config::load(&args.config)
+        .with_context(|| format!("Failed to load config from {:?}", args.config))?;
+
+    // Apply CLI overrides
+    if let Some(mode) = args.execution_mode {
+        config.execution.mode = mode;
+    }
+
+    if let Some(market_id) = args.market_id {
+        config.huginn.market_id = market_id;
+    }
+
+    if let Some(log_level) = args.log_level {
+        config.metrics.log_level = log_level;
+    }
+
+    if args.json_logs {
+        config.metrics.json_logs = true;
+    }
+
+    // Initialize logger
+    init_logger(&config.metrics.log_level, config.metrics.json_logs);
+
+    info!("Starting bog trading bot v{}", env!("CARGO_PKG_VERSION"));
+    info!("Configuration loaded from: {:?}", args.config);
+
+    // Connect to Huginn market feed
+    let feed = if let Some(dex_type) = config.huginn.dex_type {
+        MarketFeed::connect_with_dex(dex_type, config.huginn.market_id)?
+    } else {
+        MarketFeed::connect(config.huginn.market_id)?
+    };
+
+    info!("Connected to Huginn market feed");
+
+    // Create strategy
+    let strategy = StrategyFactory::create(&config.strategy)
+        .context("Failed to create strategy")?;
+
+    info!("Initialized strategy: {}", strategy.name());
+
+    // Create executor
+    let executor: Box<dyn Executor> = match ExecutionMode::from_str(&config.execution.mode) {
+        Some(ExecutionMode::Live) => {
+            // Check if Lighter config exists
+            if let Some(lighter_config) = &config.execution.lighter {
+                info!("Creating Lighter DEX executor (STUB)");
+                Box::new(LighterExecutor::from_config(lighter_config)?)
+            } else {
+                anyhow::bail!("Live execution mode requires 'lighter' configuration");
+            }
+        }
+        Some(ExecutionMode::Simulated) => {
+            info!("Creating simulated executor");
+            Box::new(SimulatedExecutor::new())
+        }
+        None => {
+            anyhow::bail!("Invalid execution mode: {}", config.execution.mode);
+        }
+    };
+
+    // Create and run trading engine
+    let engine = TradingEngine::new(config);
+
+    info!("Starting trading engine...");
+    engine.run(feed, strategy, executor)?;
+
+    info!("Trading engine stopped");
+    Ok(())
+}

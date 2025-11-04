@@ -1,0 +1,87 @@
+# Bog Trading Bot Configuration
+
+[huginn]
+# Market ID to connect to (Lighter DEX format: 1_000_000 + market_id)
+market_id = 1_000_001
+# Optional: DEX type (1 = Lighter, 2 = Binance, etc.)
+# dex_type = 1
+
+[execution]
+# Execution mode: "live" or "simulated"
+mode = "simulated"
+
+# Detect when Huginn replay ends (for backtesting)
+detect_replay_end = false
+
+# Timeout for replay end detection (seconds)
+replay_end_timeout_secs = 1
+
+# Lighter DEX configuration (for live mode)
+# [execution.lighter]
+# api_url = "https://api.lighter.xyz"
+# ws_url = "wss://ws.lighter.xyz"
+# api_key = ""  # Or set via BOG_EXECUTION__LIGHTER__API_KEY env var
+# private_key_path = "~/.lighter/private_key.pem"
+
+[strategy]
+# Strategy type: "simple_spread" or "inventory_based"
+type = "simple_spread"
+
+[strategy.simple_spread]
+# Spread in basis points (10 = 0.1%)
+spread_bps = 10.0
+
+# Order size (in base currency, e.g., BTC)
+order_size = "0.1"
+
+# Minimum market spread to trade (basis points)
+min_spread_bps = 1.0
+
+# [strategy.inventory_based]
+# # Target inventory (neutral position)
+# target_inventory = "0.0"
+#
+# # Risk aversion parameter (gamma)
+# # Higher values = more aggressive inventory management
+# risk_aversion = 0.1
+#
+# # Order size per quote
+# order_size = "0.1"
+#
+# # Volatility estimate (annualized, e.g., 0.02 = 2%)
+# volatility = 0.02
+#
+# # Time horizon in seconds (300 = 5 minutes)
+# time_horizon_secs = 300.0
+
+[risk]
+# Maximum long position (in base currency)
+max_position = "1.0"
+
+# Maximum short position (positive value)
+max_short = "1.0"
+
+# Maximum order size
+max_order_size = "0.5"
+
+# Minimum order size
+min_order_size = "0.0001"
+
+# Maximum number of outstanding orders
+max_outstanding_orders = 10
+
+# Maximum daily loss (circuit breaker)
+max_daily_loss = "1000.0"
+
+# Maximum drawdown percentage (0.20 = 20%)
+max_drawdown_pct = 0.20
+
+[metrics]
+# Prometheus metrics port
+prometheus_port = 9090
+
+# Log level: "trace", "debug", "info", "warn", "error"
+log_level = "info"
+
+# Enable JSON logging
+json_logs = false

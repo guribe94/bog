@@ -1,0 +1,265 @@
+use crate::config::Config;
+use crate::data::{MarketFeed, MarketSnapshot};
+use crate::execution::{Executor, ExecutionMode};
+use crate::orderbook::OrderBookManager;
+use crate::risk::RiskManager;
+use crate::strategy::Strategy;
+use anyhow::{Context, Result};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tracing::{debug, error, info, warn};
+
+/// Main trading engine
+pub struct TradingEngine {
+    config: Config,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl TradingEngine {
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            shutdown: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Get shutdown signal for graceful termination
+    pub fn shutdown_signal(&self) -> Arc<AtomicBool> {
+        self.shutdown.clone()
+    }
+
+    /// Run the trading engine
+    pub fn run(
+        &self,
+        mut feed: MarketFeed,
+        mut strategy: Box<dyn Strategy>,
+        mut executor: Box<dyn Executor>,
+    ) -> Result<()> {
+        info!("Starting trading engine...");
+        info!("Market ID: {}", self.config.huginn.market_id);
+        info!("Strategy: {}", strategy.name());
+        info!("Execution Mode: {}", executor.execution_mode());
+
+        // Initialize components
+        let mut orderbook = OrderBookManager::new(self.config.huginn.market_id);
+        let mut risk_manager = RiskManager::new(&self.config.risk);
+
+        // Setup Ctrl+C handler
+        let shutdown = self.shutdown.clone();
+        ctrlc::set_handler(move || {
+            info!("Received shutdown signal");
+            shutdown.store(true, Ordering::Relaxed);
+        })
+        .context("Failed to set Ctrl+C handler")?;
+
+        // Main trading loop
+        let mut update_count: u64 = 0;
+        let mut signal_count: u64 = 0;
+        let mut fill_count: u64 = 0;
+
+        let loop_start = Instant::now();
+
+        info!("Entering main trading loop...");
+
+        while !self.shutdown.load(Ordering::Relaxed) {
+            // Poll for market data
+            if let Some(snapshot) = feed.try_recv() {
+                update_count += 1;
+
+                // Update orderbook
+                orderbook.sync_from_snapshot(&snapshot);
+
+                // Log periodic stats
+                if update_count % 1000 == 0 {
+                    info!("Updates processed: {}", update_count);
+                    feed.log_stats();
+                    risk_manager.log_status();
+                }
+
+                // Check if we should halt trading
+                if risk_manager.should_halt_trading() {
+                    error!("Risk limits breached! Halting trading");
+                    strategy.stop();
+                    break;
+                }
+
+                // Generate trading signal
+                if let Some(signal) = strategy.on_update(&snapshot, &orderbook) {
+                    debug!("Strategy generated signal: {:?}", signal);
+                    signal_count += 1;
+
+                    // Validate signal against risk limits
+                    match risk_manager.validate_signal(&signal) {
+                        Ok(()) => {
+                            // Execute signal
+                            match self.execute_signal(&signal, &mut executor, &mut risk_manager) {
+                                Ok(()) => {
+                                    debug!("Signal executed successfully");
+                                }
+                                Err(e) => {
+                                    warn!("Failed to execute signal: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Signal rejected by risk manager: {}", e);
+                        }
+                    }
+                }
+
+                // Process fills
+                let fills = executor.get_fills();
+                for fill in fills {
+                    fill_count += 1;
+                    info!("Fill #{}: {} {} @ {}", fill_count, fill.side, fill.size, fill.price);
+
+                    // Update risk manager
+                    risk_manager.update_position(&fill);
+
+                    // Notify strategy
+                    strategy.on_fill(&fill);
+
+                    risk_manager.decrement_order_count();
+                }
+            }
+
+            // Check for replay end (if configured)
+            if self.config.execution.detect_replay_end {
+                let timeout = Duration::from_secs(self.config.execution.replay_end_timeout_secs);
+                if feed.is_idle(timeout) {
+                    info!("Detected replay end (no messages for {:?})", timeout);
+                    break;
+                }
+            }
+
+            // Busy-wait hint (low latency)
+            std::hint::spin_loop();
+        }
+
+        // Final stats
+        let elapsed = loop_start.elapsed();
+        info!("=== Trading Session Complete ===");
+        info!("Duration: {:.2}s", elapsed.as_secs_f64());
+        info!("Total updates: {}", update_count);
+        info!("Signals generated: {}", signal_count);
+        info!("Fills executed: {}", fill_count);
+
+        if update_count > 0 {
+            let updates_per_sec = update_count as f64 / elapsed.as_secs_f64();
+            info!("Updates/sec: {:.2}", updates_per_sec);
+        }
+
+        feed.log_stats();
+        risk_manager.log_status();
+
+        Ok(())
+    }
+
+    /// Execute a trading signal
+    fn execute_signal(
+        &self,
+        signal: &crate::strategy::Signal,
+        executor: &mut Box<dyn Executor>,
+        risk_manager: &mut RiskManager,
+    ) -> Result<()> {
+        use crate::strategy::Signal;
+
+        match signal {
+            Signal::QuoteBoth { .. } | Signal::QuoteBid { .. } | Signal::QuoteAsk { .. } => {
+                // Convert signal to orders
+                let orders = signal.to_orders();
+
+                for order in orders {
+                    let order_id = executor.place_order(order)?;
+                    risk_manager.increment_order_count();
+                    debug!("Placed order: {}", order_id);
+                }
+            }
+            Signal::TakePosition { .. } => {
+                // Market order
+                let orders = signal.to_orders();
+                for order in orders {
+                    let order_id = executor.place_order(order)?;
+                    debug!("Placed market order: {}", order_id);
+                }
+            }
+            Signal::CancelAll => {
+                // Cancel all active orders
+                let order_ids: Vec<_> = executor
+                    .get_active_orders()
+                    .iter()
+                    .map(|o| o.id.clone())
+                    .collect();
+
+                for order_id in order_ids {
+                    executor.cancel_order(&order_id)?;
+                    risk_manager.decrement_order_count();
+                    debug!("Cancelled order: {}", order_id);
+                }
+            }
+            Signal::NoAction => {
+                // Nothing to do
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Builder for TradingEngine
+pub struct TradingEngineBuilder {
+    config: Option<Config>,
+}
+
+impl TradingEngineBuilder {
+    pub fn new() -> Self {
+        Self { config: None }
+    }
+
+    pub fn with_config(mut self, config: Config) -> Self {
+        self.config = Some(config);
+        self
+    }
+
+    pub fn build(self) -> Result<TradingEngine> {
+        let config = self
+            .config
+            .ok_or_else(|| anyhow::anyhow!("Config is required"))?;
+
+        Ok(TradingEngine::new(config))
+    }
+}
+
+impl Default for TradingEngineBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_builder() {
+        let builder = TradingEngineBuilder::new();
+        assert!(builder.config.is_none());
+    }
+
+    #[test]
+    fn test_shutdown_signal() {
+        let config = Config::load("config/default.toml").unwrap_or_else(|_| {
+            // For tests, create a minimal config
+            panic!("Config required for test");
+        });
+
+        let engine = TradingEngine::new(config);
+        let shutdown = engine.shutdown_signal();
+
+        assert!(!shutdown.load(Ordering::Relaxed));
+
+        shutdown.store(true, Ordering::Relaxed);
+        assert!(shutdown.load(Ordering::Relaxed));
+    }
+}

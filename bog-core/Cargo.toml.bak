@@ -1,0 +1,73 @@
+[package]
+name = "bog"
+version = "0.1.0"
+edition = "2021"
+authors = ["Vegtam"]
+
+[lib]
+name = "bog"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bog"
+path = "src/main.rs"
+
+[dependencies]
+# Huginn integration - market data feed
+huginn = { path = "../huginn" }
+
+# Shared memory (re-exported from Huginn, but explicit for reference)
+memmap2 = "0.9"
+libc = "0.2"
+
+# OrderBook management
+orderbook = "0.1"
+
+# Numerics
+rust_decimal = "1.33"
+rust_decimal_macros = "1.33"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Config management
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+config = "0.14"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging & Metrics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.22"
+metrics-exporter-prometheus = "0.14"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Performance
+tikv-jemallocator = "0.5"
+crossbeam-utils = "0.8"
+
+# Time
+chrono = "0.4"
+
+# UUID generation
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Random number generation
+rand = "0.8"
+
+# Signal handling
+ctrlc = "3.4"
+
+[dev-dependencies]
+approx = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

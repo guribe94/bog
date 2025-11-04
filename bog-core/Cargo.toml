@@ -1,0 +1,57 @@
+[package]
+name = "bog-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[lib]
+name = "bog_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Workspace dependencies
+huginn.workspace = true
+memmap2.workspace = true
+libc.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+crossbeam.workspace = true
+crossbeam-utils.workspace = true
+atomic.workspace = true
+tikv-jemallocator.workspace = true
+core_affinity.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+ctrlc.workspace = true
+
+# Random for OrderId generation and simulated execution
+rand = "0.8"
+
+[dev-dependencies]
+approx.workspace = true
+proptest.workspace = true
+
+[features]
+default = []
+
+# Strategy selection (mutually exclusive, enforced at binary level)
+simple-spread = []
+inventory-based = []
+
+# Execution mode (mutually exclusive)
+simulated = []
+live = []
+
+# Market configuration
+market-1 = []
+market-2 = []
+
+# Risk profiles
+conservative = []
+aggressive = []
+
+# Performance features
+metrics = ["tracing/release_max_level_off"]  # Disable tracing in release

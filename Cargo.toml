@@ -1,0 +1,73 @@
+[workspace]
+members = [
+    "bog-core",
+    "bog-strategies",
+]
+
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Vegtam"]
+license = "MIT"
+
+[workspace.dependencies]
+# Huginn integration - market data feed
+huginn = { path = "../huginn" }
+
+# Shared memory
+memmap2 = "0.9"
+libc = "0.2"
+
+# Numerics - using u64 fixed-point primarily, but keep for compatibility
+rust_decimal = "1.33"
+rust_decimal_macros = "1.33"
+
+# Lock-free data structures
+crossbeam = "0.8"
+crossbeam-utils = "0.8"
+
+# Atomic operations
+atomic = "0.6"
+
+# Performance
+tikv-jemallocator = "0.5"
+core_affinity = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging & Metrics (optional, disabled in hot path)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Signal handling
+ctrlc = "3.4"
+
+# Random number generation
+rand = "0.8"
+
+# Serialization (for config generation only)
+serde = { version = "1", features = ["derive"] }
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# Testing
+proptest = "1.4"
+approx = "0.5"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = false  # Keep symbols for profiling
+
+[profile.bench]
+inherits = "release"
