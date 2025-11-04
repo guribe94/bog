@@ -2,6 +2,7 @@
 members = [
     "bog-core",
     "bog-strategies",
+    "bog-bins",
 ]
 
 resolver = "2"

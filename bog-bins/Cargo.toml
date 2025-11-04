@@ -1,0 +1,39 @@
+[package]
+name = "bog-bins"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "bog-simple-spread-simulated"
+path = "src/bin/simple_spread_simulated.rs"
+
+[[bin]]
+name = "bog-simple-spread-live"
+path = "src/bin/simple_spread_live.rs"
+
+[[bin]]
+name = "bog-inventory-simulated"
+path = "src/bin/inventory_simulated.rs"
+
+[[bin]]
+name = "bog-inventory-live"
+path = "src/bin/inventory_live.rs"
+
+[dependencies]
+bog-core = { path = "../bog-core" }
+bog-strategies = { path = "../bog-strategies" }
+
+# Workspace dependencies
+huginn.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+ctrlc.workspace = true
+
+[features]
+default = []
+
+# Each binary should enable its specific features at build time
+# This is done via --features flag when building
