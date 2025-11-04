@@ -20,3 +20,28 @@ thiserror.workspace = true
 [dev-dependencies]
 approx.workspace = true
 proptest.workspace = true
+
+[features]
+default = []
+
+# SimpleSpread spread configurations
+spread-5bps = []
+spread-10bps = []
+spread-20bps = []
+
+# Order size configurations
+size-small = []   # 0.01 BTC
+size-medium = []  # 0.1 BTC
+size-large = []   # 1.0 BTC
+
+# Minimum spread configurations
+min-spread-1bps = []
+min-spread-5bps = []
+min-spread-10bps = []
+
+# InventoryBased configurations
+target-inventory-0 = []
+target-inventory-positive = []
+risk-low = []
+risk-medium = []
+risk-high = []
