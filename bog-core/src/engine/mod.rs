@@ -2,14 +2,17 @@
 //!
 //! This module contains the trading engine implementations:
 //! - `generic`: Const generic zero-overhead engine (NEW - HFT optimized)
+//! - `simulated`: Zero-overhead simulated executor with object pools
 //! - Legacy dynamic dispatch engine (deprecated, commented out)
 
 // New const generic engine (HFT optimized)
 pub mod generic;
 pub mod traits;
+pub mod simulated;
 
 // Re-export new engine types
 pub use generic::{Engine, EngineStats, Executor, Strategy};
+pub use simulated::SimulatedExecutor;
 
 /*
 // === OLD ENGINE (DEPRECATED) ===

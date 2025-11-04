@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 ///
 /// Uses u128 instead of String for zero-allocation, copy semantics.
 /// Generated using thread-local counter + timestamp + random bits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(transparent)]
 pub struct OrderId(pub u128);
 
