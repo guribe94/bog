@@ -9,6 +9,7 @@
 //! Target: <200ns per execution
 
 use super::Executor;
+use super::risk;
 use crate::core::{OrderId, Position, Signal, SignalAction, Side as CoreSide};
 use crate::perf::pools::ObjectPool;
 use anyhow::Result;
@@ -233,6 +234,9 @@ impl SimulatedExecutor {
 impl Executor for SimulatedExecutor {
     #[inline(always)]
     fn execute(&mut self, signal: Signal, position: &Position) -> Result<()> {
+        // Validate signal against risk limits (<50ns target)
+        risk::validate_signal(&signal, position)?;
+
         match signal.action {
             SignalAction::QuoteBoth => {
                 // Place both bid and ask orders

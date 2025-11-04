@@ -50,9 +50,32 @@ live = []
 market-1 = []
 market-2 = []
 
-# Risk profiles
-conservative = []
-aggressive = []
+# Risk limits - Position sizes (in BTC)
+max-position-half = []      # 0.5 BTC
+max-position-one = []       # 1.0 BTC
+max-position-five = []      # 5.0 BTC
+
+max-short-half = []         # 0.5 BTC
+max-short-one = []          # 1.0 BTC
+max-short-five = []         # 5.0 BTC
+
+# Risk limits - Order sizes (in BTC)
+max-order-tenth = []        # 0.1 BTC
+max-order-half = []         # 0.5 BTC
+max-order-one = []          # 1.0 BTC
+
+min-order-milli = []        # 0.001 BTC
+min-order-centi = []        # 0.01 BTC
+min-order-tenth = []        # 0.1 BTC
+
+# Risk limits - Loss limits (in USD)
+max-daily-loss-100 = []
+max-daily-loss-1000 = []
+max-daily-loss-10000 = []
+
+# Risk profiles (convenience bundles)
+conservative = ["max-position-half", "max-order-tenth", "max-daily-loss-100"]
+aggressive = ["max-position-five", "max-order-one", "max-daily-loss-10000"]
 
 # Performance features
 metrics = ["tracing/release_max_level_off"]  # Disable tracing in release
