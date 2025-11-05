@@ -223,20 +223,14 @@ mod tests {
         assert!(encoded.contains("bog_risk_position_btc"));
     }
 
-    #[tokio::test]
-    async fn test_handle_request_health() {
+    #[test]
+    fn test_server_creation() {
         let registry = Arc::new(MetricsRegistry::new().unwrap());
-        let req = Request::builder()
-            .uri("/health")
-            .body(hyper::body::Incoming::default())
-            .unwrap();
-
-        // Note: We can't actually call handle_request without a proper Incoming body
-        // This is a simplified test
         let config = MetricsServerConfig::default();
         let server = MetricsServer::new(config, registry);
 
-        // Just verify server creation works
+        // Verify server configuration
         assert_eq!(server.config.metrics_path, "/metrics");
+        assert_eq!(server.config.listen_addr.port(), 9090);
     }
 }
