@@ -4,6 +4,9 @@ members = [
     "bog-strategies",
     "bog-bins",
 ]
+exclude = [
+    "bog-core/fuzz",
+]
 
 resolver = "2"
 

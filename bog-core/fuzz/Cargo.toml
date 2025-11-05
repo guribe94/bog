@@ -1,0 +1,38 @@
+[package]
+name = "bog-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+# Empty workspace table to prevent inheriting from parent
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.bog-core]
+path = ".."
+
+[[bin]]
+name = "fuzz_fixed_point_conversion"
+path = "fuzz_targets/fuzz_fixed_point_conversion.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_position_overflow"
+path = "fuzz_targets/fuzz_position_overflow.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_u64_conversion"
+path = "fuzz_targets/fuzz_u64_conversion.rs"
+test = false
+doc = false
+bench = false
