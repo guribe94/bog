@@ -1,0 +1,64 @@
+# Bog Trading Bot - Development Configuration
+#
+# Safe defaults for local development and testing
+
+[huginn]
+market_id = 1
+dex_type = 1
+
+[execution]
+mode = "simulated"
+detect_replay_end = true
+replay_end_timeout_secs = 2
+
+[strategy]
+type = "simple_spread"
+
+[strategy.simple_spread]
+spread_bps = 20.0          # Wide spread for safety
+order_size = "0.01"        # Small size
+min_spread_bps = 5.0
+
+[risk]
+max_position = "0.1"        # 0.1 BTC max
+max_short = "0.1"
+max_order_size = "0.05"
+min_order_size = "0.001"
+max_outstanding_orders = 5
+max_daily_loss = "100.0"    # $100 daily loss
+max_drawdown_pct = 0.10     # 10%
+
+[metrics]
+prometheus_port = 9090
+log_level = "debug"         # Verbose logging
+json_logs = false
+
+[monitoring]
+enable_prometheus = true
+metrics_addr = "127.0.0.1:9090"
+metrics_path = "/metrics"
+enable_journal = true
+journal_path = "./dev-data/execution.jsonl"
+recover_on_startup = false  # Don't recover in dev
+validate_recovery = true
+
+[alerts]
+enable_alerts = true
+console_output = true
+console_min_severity = "Info"  # Show everything
+file_output = true
+alert_log_path = "./dev-data/alerts.log"
+file_min_severity = "Info"
+webhook_output = false
+rate_limit_secs = 10        # Shorter for testing
+auto_resolve_secs = 60
+
+[alerts.rules]
+position_limit = true
+daily_loss_limit = true
+huginn_connection = true
+huginn_grace_period_secs = 2  # Short grace
+rejection_rate = true
+rejection_threshold = 0.2     # 20% (relaxed)
+latency = true
+latency_threshold_us = 10000.0  # 10ms (relaxed)

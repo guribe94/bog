@@ -10,6 +10,8 @@ pub struct Config {
     pub strategy: StrategyConfig,
     pub risk: RiskConfig,
     pub metrics: MetricsConfig,
+    pub monitoring: MonitoringConfig,
+    pub alerts: AlertConfig,
 }
 
 /// Huginn connection configuration
@@ -185,4 +187,234 @@ impl Default for MetricsConfig {
             json_logs: false,
         }
     }
+}
+
+/// Monitoring and observability configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitoringConfig {
+    /// Enable Prometheus metrics server
+    #[serde(default = "default_true")]
+    pub enable_prometheus: bool,
+
+    /// Prometheus metrics server address
+    #[serde(default = "default_metrics_addr")]
+    pub metrics_addr: String,
+
+    /// Metrics path (default: /metrics)
+    #[serde(default = "default_metrics_path")]
+    pub metrics_path: String,
+
+    /// Enable execution journal
+    #[serde(default = "default_true")]
+    pub enable_journal: bool,
+
+    /// Journal file path
+    #[serde(default = "default_journal_path")]
+    pub journal_path: PathBuf,
+
+    /// Recover from journal on startup
+    #[serde(default = "default_true")]
+    pub recover_on_startup: bool,
+
+    /// Validate recovered state
+    #[serde(default = "default_true")]
+    pub validate_recovery: bool,
+}
+
+impl Default for MonitoringConfig {
+    fn default() -> Self {
+        Self {
+            enable_prometheus: true,
+            metrics_addr: default_metrics_addr(),
+            metrics_path: default_metrics_path(),
+            enable_journal: true,
+            journal_path: default_journal_path(),
+            recover_on_startup: true,
+            validate_recovery: true,
+        }
+    }
+}
+
+/// Alert configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertConfig {
+    /// Enable alerting system
+    #[serde(default = "default_true")]
+    pub enable_alerts: bool,
+
+    /// Console output for alerts
+    #[serde(default = "default_true")]
+    pub console_output: bool,
+
+    /// Minimum severity for console (Info/Warning/Error/Critical)
+    #[serde(default = "default_console_severity")]
+    pub console_min_severity: String,
+
+    /// File output for alerts
+    #[serde(default = "default_true")]
+    pub file_output: bool,
+
+    /// Alert log file path
+    #[serde(default = "default_alert_log_path")]
+    pub alert_log_path: PathBuf,
+
+    /// Minimum severity for file output
+    #[serde(default = "default_file_severity")]
+    pub file_min_severity: String,
+
+    /// Webhook output for alerts
+    #[serde(default)]
+    pub webhook_output: bool,
+
+    /// Webhook URL (e.g., PagerDuty, Slack)
+    #[serde(default)]
+    pub webhook_url: Option<String>,
+
+    /// Minimum severity for webhook
+    #[serde(default = "default_webhook_severity")]
+    pub webhook_min_severity: String,
+
+    /// Rate limit in seconds (minimum time between same alerts)
+    #[serde(default = "default_rate_limit")]
+    pub rate_limit_secs: u64,
+
+    /// Auto-resolve alerts after inactivity (seconds)
+    #[serde(default = "default_auto_resolve")]
+    pub auto_resolve_secs: u64,
+
+    /// Alert rules configuration
+    pub rules: AlertRulesConfig,
+}
+
+impl Default for AlertConfig {
+    fn default() -> Self {
+        Self {
+            enable_alerts: true,
+            console_output: true,
+            console_min_severity: default_console_severity(),
+            file_output: true,
+            alert_log_path: default_alert_log_path(),
+            file_min_severity: default_file_severity(),
+            webhook_output: false,
+            webhook_url: None,
+            webhook_min_severity: default_webhook_severity(),
+            rate_limit_secs: default_rate_limit(),
+            auto_resolve_secs: default_auto_resolve(),
+            rules: AlertRulesConfig::default(),
+        }
+    }
+}
+
+/// Alert rules configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlertRulesConfig {
+    /// Enable position limit rule
+    #[serde(default = "default_true")]
+    pub position_limit: bool,
+
+    /// Position limit in base units (from risk.max_position by default)
+    #[serde(default)]
+    pub position_limit_override: Option<Decimal>,
+
+    /// Enable daily loss limit rule
+    #[serde(default = "default_true")]
+    pub daily_loss_limit: bool,
+
+    /// Daily loss limit override (from risk.max_daily_loss by default)
+    #[serde(default)]
+    pub daily_loss_limit_override: Option<Decimal>,
+
+    /// Enable Huginn connection rule
+    #[serde(default = "default_true")]
+    pub huginn_connection: bool,
+
+    /// Grace period for Huginn disconnect (seconds)
+    #[serde(default = "default_huginn_grace")]
+    pub huginn_grace_period_secs: u64,
+
+    /// Enable rejection rate rule
+    #[serde(default = "default_true")]
+    pub rejection_rate: bool,
+
+    /// Rejection rate threshold (0.0 to 1.0)
+    #[serde(default = "default_rejection_threshold")]
+    pub rejection_threshold: f64,
+
+    /// Enable latency rule
+    #[serde(default = "default_true")]
+    pub latency: bool,
+
+    /// Latency threshold in microseconds
+    #[serde(default = "default_latency_threshold")]
+    pub latency_threshold_us: f64,
+}
+
+impl Default for AlertRulesConfig {
+    fn default() -> Self {
+        Self {
+            position_limit: true,
+            position_limit_override: None,
+            daily_loss_limit: true,
+            daily_loss_limit_override: None,
+            huginn_connection: true,
+            huginn_grace_period_secs: default_huginn_grace(),
+            rejection_rate: true,
+            rejection_threshold: default_rejection_threshold(),
+            latency: true,
+            latency_threshold_us: default_latency_threshold(),
+        }
+    }
+}
+
+// Additional default value functions
+fn default_true() -> bool {
+    true
+}
+
+fn default_metrics_addr() -> String {
+    "127.0.0.1:9090".to_string()
+}
+
+fn default_metrics_path() -> String {
+    "/metrics".to_string()
+}
+
+fn default_journal_path() -> PathBuf {
+    PathBuf::from("./data/execution.jsonl")
+}
+
+fn default_alert_log_path() -> PathBuf {
+    PathBuf::from("./data/alerts.log")
+}
+
+fn default_console_severity() -> String {
+    "Warning".to_string()
+}
+
+fn default_file_severity() -> String {
+    "Info".to_string()
+}
+
+fn default_webhook_severity() -> String {
+    "Critical".to_string()
+}
+
+fn default_rate_limit() -> u64 {
+    60 // 1 minute
+}
+
+fn default_auto_resolve() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_huginn_grace() -> u64 {
+    5 // 5 seconds
+}
+
+fn default_rejection_threshold() -> f64 {
+    0.1 // 10%
+}
+
+fn default_latency_threshold() -> f64 {
+    1000.0 // 1ms = 1000μs
 }

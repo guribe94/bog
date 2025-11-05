@@ -1,0 +1,109 @@
+# Bog Trading Bot - Production Configuration
+#
+# This configuration demonstrates the full production setup with
+# monitoring, alerting, and risk management.
+
+[huginn]
+market_id = 1
+dex_type = 1  # 1 = Lighter DEX
+
+[execution]
+mode = "live"  # "live" or "simulated"
+detect_replay_end = false
+replay_end_timeout_secs = 1
+
+# Optional: Lighter DEX API configuration (for live mode)
+# [execution.lighter]
+# api_url = "https://api.lighter.xyz"
+# ws_url = "wss://ws.lighter.xyz"
+# api_key = "your-api-key"  # Or set BOG__EXECUTION__LIGHTER__API_KEY env var
+# private_key_path = "/secure/path/to/key.pem"
+
+[strategy]
+type = "simple_spread"
+
+[strategy.simple_spread]
+spread_bps = 5.0           # 5 basis points (0.05%)
+order_size = "0.1"         # 0.1 BTC per order
+min_spread_bps = 1.0       # Minimum 1 bps safety margin
+
+# Alternative: Inventory-based strategy
+# [strategy.inventory_based]
+# target_inventory = "0.0"
+# risk_aversion = 0.1
+# order_size = "0.1"
+# volatility = 0.02
+# time_horizon_secs = 60.0
+
+[risk]
+max_position = "1.0"        # Maximum 1.0 BTC long position
+max_short = "1.0"           # Maximum 1.0 BTC short position
+max_order_size = "0.5"      # Maximum 0.5 BTC per order
+min_order_size = "0.0001"   # Minimum 0.0001 BTC
+max_outstanding_orders = 20  # Maximum 20 open orders
+max_daily_loss = "1000.0"   # Circuit breaker: $1000 daily loss
+max_drawdown_pct = 0.20     # Circuit breaker: 20% drawdown
+
+[metrics]
+prometheus_port = 9090
+log_level = "warn"          # trace, debug, info, warn, error
+json_logs = true            # Structured JSON logging
+
+[monitoring]
+enable_prometheus = true
+metrics_addr = "0.0.0.0:9090"
+metrics_path = "/metrics"
+enable_journal = true
+journal_path = "/var/lib/bog/execution.jsonl"
+recover_on_startup = true
+validate_recovery = true
+
+[alerts]
+enable_alerts = true
+
+# Console output (for systemd logs)
+console_output = true
+console_min_severity = "Error"  # Info, Warning, Error, Critical
+
+# File output (JSONL format)
+file_output = true
+alert_log_path = "/var/log/bog/alerts.log"
+file_min_severity = "Warning"
+
+# Webhook output (PagerDuty, Slack, etc.)
+webhook_output = true
+webhook_url = "https://hooks.pagerduty.com/your-service-key"
+webhook_min_severity = "Critical"
+
+# Rate limiting
+rate_limit_secs = 60        # Min 60s between same alerts
+auto_resolve_secs = 300     # Auto-resolve after 5m inactivity
+
+[alerts.rules]
+# Position limit rule
+position_limit = true
+# position_limit_override = "1.5"  # Override risk.max_position
+
+# Daily loss limit rule
+daily_loss_limit = true
+# daily_loss_limit_override = "1500.0"  # Override risk.max_daily_loss
+
+# Huginn connection rule
+huginn_connection = true
+huginn_grace_period_secs = 5
+
+# Rejection rate rule
+rejection_rate = true
+rejection_threshold = 0.1  # Alert if >10% rejections
+
+# Latency rule
+latency = true
+latency_threshold_us = 1000.0  # Alert if tick-to-trade >1ms
+
+# Environment variable overrides (examples):
+#
+# BOG__EXECUTION__MODE=live
+# BOG__STRATEGY__SIMPLE_SPREAD__SPREAD_BPS=10.0
+# BOG__RISK__MAX_POSITION=2.0
+# BOG__ALERTS__WEBHOOK_URL=https://your-webhook.com
+# BOG__EXECUTION__LIGHTER__API_KEY=your-secret-key

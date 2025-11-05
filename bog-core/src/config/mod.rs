@@ -1,6 +1,8 @@
 pub mod types;
+pub mod profiles;
 
 pub use types::*;
+pub use profiles::{ConfigProfile, ProfileName};
 
 use anyhow::{Context, Result};
 use config::{Config as ConfigLoader, Environment, File};
@@ -21,6 +23,16 @@ impl Config {
             .set_default("risk.min_order_size", "0.0001")?
             .set_default("risk.max_outstanding_orders", 10)?
             .set_default("risk.max_drawdown_pct", 0.20)?
+            // Monitoring defaults
+            .set_default("monitoring.enable_prometheus", true)?
+            .set_default("monitoring.metrics_addr", "127.0.0.1:9090")?
+            .set_default("monitoring.enable_journal", true)?
+            .set_default("monitoring.journal_path", "./data/execution.jsonl")?
+            // Alert defaults
+            .set_default("alerts.enable_alerts", true)?
+            .set_default("alerts.console_output", true)?
+            .set_default("alerts.console_min_severity", "Warning")?
+            .set_default("alerts.rate_limit_secs", 60)?
             // Load from TOML file
             .add_source(File::from(config_path))
             // Override with environment variables (BOG_)
@@ -153,6 +165,8 @@ mod tests {
                 max_drawdown_pct: 0.20,
             },
             metrics: MetricsConfig::default(),
+            monitoring: MonitoringConfig::default(),
+            alerts: AlertConfig::default(),
         };
 
         // Valid config should pass
