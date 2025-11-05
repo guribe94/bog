@@ -21,21 +21,57 @@ Bog is a high-performance, modular market making trading bot designed to integra
 
 ## Architecture
 
+### Data Flow Overview
+
 ```
-Huginn SHM (live OR replay) → MarketSnapshot
-                                   ↓
-                        OrderBookManager.sync()
-                                   ↓
-                  Analytics (VWAP, imbalance, depth)
-                                   ↓
-                   Strategy.on_update() → Signal
-                                   ↓
-                        RiskManager.validate()
-                                   ↓
-                   Executor (Live OR Simulated)
-                                   ↓
-                        Metrics & Position Tracking
+┌─────────────────────────────────────────────────────────────┐
+│                    Market Data Ingestion                     │
+│                     (Shared Memory IPC)                      │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Lighter WebSocket API                                       │
+│         ↓                                                     │
+│  Huginn (with --hft flag)                                   │
+│    • Connects to Lighter WebSocket                           │
+│    • Parses JSON messages (~50μs)                           │
+│    • Publishes to /dev/shm/hg_m{id} (300-800ns)            │
+│         ↓                                                     │
+│  POSIX Shared Memory (/dev/shm)                             │
+│    • Lock-free SPSC ring buffer                              │
+│    • Zero-copy, zero-serialization                           │
+│         ↓                                                     │
+│  Bog Bot (huginn::MarketFeed)                               │
+│    • try_recv() reads from shared memory (50-150ns)         │
+│    • NO API calls to Lighter for market data                │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                  Strategy & Execution Flow                   │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  MarketSnapshot (from shared memory)                        │
+│         ↓                                                     │
+│  OrderBookManager.sync()                                    │
+│         ↓                                                     │
+│  Analytics (VWAP, imbalance, depth)                         │
+│         ↓                                                     │
+│  Strategy.calculate() → Signal (~5ns)                       │
+│         ↓                                                     │
+│  RiskManager.validate()                                     │
+│         ↓                                                     │
+│  Executor (Simulated OR Lighter API stub)                   │
+│         ↓                                                     │
+│  Metrics & Position Tracking                                │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+**Key Architecture Points:**
+- 📥 **Data Ingestion**: Shared memory IPC only, no direct Lighter API connection
+- 🚀 **Ultra-low latency**: 50-150ns reads from `/dev/shm`
+- 🔀 **Decoupled**: Market data (shared memory) separate from execution (API stub)
+- ✅ **Production-ready**: Resilient reconnection, health monitoring
 
 ## Getting Started
 

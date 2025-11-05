@@ -17,6 +17,42 @@
 //!
 //! This leaves **985ns** margin for network I/O and market data processing.
 //!
+//! ## Data Architecture
+//!
+//! ### Market Data Ingestion (Shared Memory IPC)
+//!
+//! Bog receives market data from Huginn via **POSIX shared memory** (`/dev/shm`):
+//!
+//! ```text
+//! Lighter WebSocket API
+//!         ↓
+//!   Huginn Process (--hft mode)
+//!    • Connects to Lighter WebSocket
+//!    • Parses JSON (~50μs)
+//!    • Publishes to /dev/shm/hg_m{id} (300-800ns)
+//!         ↓
+//!   POSIX Shared Memory (/dev/shm)
+//!    • Lock-free SPSC ring buffer
+//!    • Zero-copy, zero-serialization
+//!         ↓
+//!   Bog Bot (huginn::MarketFeed)
+//!    • try_recv() reads from memory (50-150ns)
+//!    • NO API calls to Lighter for market data ✅
+//! ```
+//!
+//! **Key Points:**
+//! - ✅ Market data: Shared memory IPC only (no Lighter API connection)
+//! - ✅ Zero serialization: `MarketSnapshot` is cache-aligned struct
+//! - ✅ Ultra-low latency: 50-150ns reads from `/dev/shm`
+//! - ⚠️ Order execution: Will use Lighter API (currently stubbed)
+//!
+//! ### Order Execution (Future: Lighter API)
+//!
+//! Order placement will use Lighter DEX API:
+//! - `LighterExecutor` currently stubbed in `execution/lighter.rs`
+//! - Will make REST/WebSocket calls to Lighter for orders
+//! - Completely separate from market data path
+//!
 //! ## System Architecture
 //!
 //! ```text

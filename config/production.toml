@@ -12,10 +12,12 @@ mode = "live"  # "live" or "simulated"
 detect_replay_end = false
 replay_end_timeout_secs = 1
 
-# Optional: Lighter DEX API configuration (for live mode)
+# Optional: Lighter DEX API configuration (for ORDER EXECUTION only)
+# NOTE: Market data comes from Huginn shared memory (/dev/shm), NOT Lighter API
+# This configuration is only for placing/canceling orders on Lighter
 # [execution.lighter]
 # api_url = "https://api.lighter.xyz"
-# ws_url = "wss://ws.lighter.xyz"
+# ws_url = "wss://ws.lighter.xyz"  # For order fill confirmations
 # api_key = "your-api-key"  # Or set BOG__EXECUTION__LIGHTER__API_KEY env var
 # private_key_path = "/secure/path/to/key.pem"
 

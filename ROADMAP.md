@@ -79,21 +79,24 @@ Integrate with Huginn market data feed and Lighter DEX for live trading.
 
 ### Tasks
 
-#### Huginn Integration
-- [ ] Connect to Huginn WebSocket feed
+#### Huginn Shared Memory Integration
+- [x] Connect to Huginn shared memory feed - **COMPLETE** ✅
   - File: `bog-core/src/data/mod.rs`
-  - Current: Stub implementation with `HuginnFeed::connect()`
-  - TODO: Implement real WebSocket connection
-  - Dependencies: `tokio-tungstenite`, `huginn-client`
+  - Implementation: Uses `huginn::MarketFeed::connect()` for POSIX shared memory
+  - Architecture: Lighter API → Huginn → `/dev/shm/hg_m{id}` → Bog Bot
+  - Latency: 50-150ns per `try_recv()` call (zero-copy reads)
+  - **Note**: Bog does NOT connect to Lighter API for market data
+  - Dependencies: `huginn` crate (already added)
 
-- [ ] Implement MarketSnapshot parsing from Huginn messages
+- [x] MarketSnapshot consumption from shared memory - **COMPLETE** ✅
   - File: `bog-core/src/data/mod.rs`
-  - Current: Has data structures, needs deserialization
-  - TODO: Add Huginn message format parsing
+  - Implementation: `huginn::MarketSnapshot` struct (128 bytes, cache-aligned)
+  - Format: u64 fixed-point (9 decimals), zero deserialization overhead
 
-- [ ] Add connection resilience (reconnect logic, heartbeats)
-  - File: `bog-core/src/data/mod.rs`
-  - TODO: Handle disconnections gracefully
+- [x] Connection resilience with automatic reconnection - **COMPLETE** ✅
+  - File: `bog-core/src/resilience/reconnect.rs`
+  - Implementation: `ResilientMarketFeed` with exponential backoff
+  - Features: Health monitoring, stale detection, auto-reconnect
 
 #### Lighter DEX Integration
 - [ ] Replace LighterExecutor stub with real implementation
@@ -140,9 +143,9 @@ Integrate with Huginn market data feed and Lighter DEX for live trading.
   - TODO: Calculate from full orderbook depth
 
 ### Dependencies
-- Huginn client library
-- Lighter DEX SDK (or REST/WS client)
-- OrderBook-rs library
+- [x] `huginn` crate for shared memory integration - **COMPLETE** ✅
+- [ ] Lighter DEX SDK for order execution (currently stubbed)
+- [ ] OrderBook-rs library for full L2 orderbook (optional enhancement)
 
 ### Success Criteria
 - [ ] Live market data flowing from Huginn
