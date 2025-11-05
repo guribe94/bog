@@ -501,6 +501,10 @@ pub mod fixed_point {
     }
 }
 
+// Property-based tests for fixed-point arithmetic
+#[cfg(test)]
+mod fixed_point_proptest;
+
 #[cfg(test)]
 mod tests {
     use super::*;
