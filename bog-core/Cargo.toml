@@ -25,6 +25,10 @@ thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+erased-serde.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
 ctrlc.workspace = true
 
 # Random for OrderId generation and simulated execution
@@ -35,6 +39,7 @@ approx.workspace = true
 proptest.workspace = true
 bog-strategies = { path = "../bog-strategies" }
 criterion.workspace = true
+tempfile = "3.8"
 
 [[bench]]
 name = "engine_bench"

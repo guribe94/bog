@@ -1,12 +1,14 @@
 pub mod types;
 pub mod simulated;
 pub mod lighter;
+pub mod production;
 
 pub use types::{
     ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce,
 };
 pub use simulated::SimulatedExecutor;
 pub use lighter::LighterExecutor;
+pub use production::{ProductionExecutor, ProductionExecutorConfig, ExecutionMetrics};
 
 use anyhow::Result;
 
