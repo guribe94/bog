@@ -8,6 +8,8 @@
 
 pub mod backoff;
 pub mod reconnect;
+pub mod circuit_breaker;
 
 pub use backoff::{ExponentialBackoff, BackoffConfig};
-pub use reconnect::ResilientMarketFeed;
+pub use reconnect::{ResilientMarketFeed, ResilientConfig, ConnectionState};
+pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitState};
