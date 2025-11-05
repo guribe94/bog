@@ -1,27 +1,55 @@
 use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus, Side};
 use anyhow::{anyhow, Result};
+use crossbeam::queue::ArrayQueue;
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use tracing::{debug, info};
+use std::sync::Arc;
+use tracing::{debug, info, warn};
+
+/// Maximum pending fills before overflow handling kicks in
+/// This prevents unbounded memory growth in long-running simulations
+const MAX_PENDING_FILLS: usize = 1024;
 
 /// Simulated executor for paper trading and backtesting
 /// Immediately fills orders at requested prices (pessimistic simulation)
 pub struct SimulatedExecutor {
     orders: HashMap<OrderId, Order>,
-    pending_fills: Vec<Fill>,
+    /// Bounded queue for pending fills (prevents OOM)
+    pending_fills: Arc<ArrayQueue<Fill>>,
     total_fills: u64,
+    /// Number of fills dropped due to queue overflow
+    dropped_fills: u64,
     mode: ExecutionMode,
 }
 
 impl SimulatedExecutor {
     pub fn new() -> Self {
-        info!("Initialized SimulatedExecutor");
+        info!(
+            "Initialized SimulatedExecutor (max pending fills: {})",
+            MAX_PENDING_FILLS
+        );
         Self {
             orders: HashMap::new(),
-            pending_fills: Vec::new(),
+            pending_fills: Arc::new(ArrayQueue::new(MAX_PENDING_FILLS)),
             total_fills: 0,
+            dropped_fills: 0,
             mode: ExecutionMode::Simulated,
         }
+    }
+
+    /// Get number of pending fills in queue
+    pub fn pending_fill_count(&self) -> usize {
+        self.pending_fills.len()
+    }
+
+    /// Get number of fills dropped due to queue overflow
+    pub fn dropped_fill_count(&self) -> u64 {
+        self.dropped_fills
+    }
+
+    /// Check if fill queue is approaching capacity
+    pub fn is_fill_queue_near_capacity(&self) -> bool {
+        self.pending_fills.len() > (MAX_PENDING_FILLS * 3) / 4  // 75% threshold
     }
 
     /// Simulate a fill for an order
@@ -88,7 +116,28 @@ impl Executor for SimulatedExecutor {
         // Simulate immediate fill (pessimistic for maker strategies)
         // In reality, limit orders may not fill immediately
         let fill = self.simulate_fill(&mut order);
-        self.pending_fills.push(fill);
+
+        // Try to push fill to bounded queue
+        if let Err(returned_fill) = self.pending_fills.push(fill) {
+            // Queue is full - this indicates consumer is falling behind
+            self.dropped_fills += 1;
+            warn!(
+                "Fill queue overflow: dropped fill for order {} (queue size: {}, total dropped: {})",
+                returned_fill.order_id,
+                MAX_PENDING_FILLS,
+                self.dropped_fills
+            );
+
+            // Strategy: Drop oldest fill to make room for newest
+            // Alternative: Could drop newest or reject order
+            if let Some(_oldest) = self.pending_fills.pop() {
+                // Try again with the new fill
+                if self.pending_fills.push(returned_fill).is_err() {
+                    // Still failed (shouldn't happen after pop, but be safe)
+                    warn!("Fill queue still full after pop - fill lost");
+                }
+            }
+        }
 
         let order_id = order.id.clone();
         self.orders.insert(order_id.clone(), order);
@@ -114,8 +163,24 @@ impl Executor for SimulatedExecutor {
     }
 
     fn get_fills(&mut self) -> Vec<Fill> {
-        // Return and clear pending fills
-        std::mem::take(&mut self.pending_fills)
+        // Drain all fills from the queue
+        let mut fills = Vec::with_capacity(self.pending_fills.len());
+
+        while let Some(fill) = self.pending_fills.pop() {
+            fills.push(fill);
+        }
+
+        // Warn if queue was near capacity
+        if !fills.is_empty() && fills.len() > (MAX_PENDING_FILLS * 3) / 4 {
+            warn!(
+                "High fill queue usage: {} fills drained (capacity: {}, dropped: {})",
+                fills.len(),
+                MAX_PENDING_FILLS,
+                self.dropped_fills
+            );
+        }
+
+        fills
     }
 
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus> {

@@ -205,6 +205,9 @@ impl HotData {
     }
 }
 
+/// Queue depth warning threshold
+const QUEUE_DEPTH_WARNING_THRESHOLD: usize = 100;
+
 /// Generic Trading Engine - Zero Dynamic Dispatch
 ///
 /// Type parameters:
@@ -228,6 +231,10 @@ pub struct Engine<S: Strategy, E: Executor> {
 
     /// Shutdown signal
     shutdown: Arc<AtomicBool>,
+
+    /// Queue monitoring stats (cold path, not in hot data)
+    max_queue_depth: std::cell::Cell<usize>,
+    queue_warnings: std::cell::Cell<u64>,
 }
 
 impl<S: Strategy, E: Executor> Engine<S, E> {
@@ -241,6 +248,28 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             position: Position::new(),
             hot: HotData::new(),
             shutdown: Arc::new(AtomicBool::new(false)),
+            max_queue_depth: std::cell::Cell::new(0),
+            queue_warnings: std::cell::Cell::new(0),
+        }
+    }
+
+    /// Track queue depth and warn if threshold exceeded
+    #[inline(always)]
+    fn track_queue_depth(&self, depth: usize) {
+        // Update max
+        if depth > self.max_queue_depth.get() {
+            self.max_queue_depth.set(depth);
+        }
+
+        // Warn if threshold exceeded
+        if depth > QUEUE_DEPTH_WARNING_THRESHOLD {
+            self.queue_warnings.set(self.queue_warnings.get() + 1);
+            tracing::warn!(
+                "Market data queue depth high: {} (threshold: {}, max seen: {})",
+                depth,
+                QUEUE_DEPTH_WARNING_THRESHOLD,
+                self.max_queue_depth.get()
+            );
         }
     }
 
@@ -318,6 +347,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             signals_generated: self.hot.signal_count.load(Ordering::Relaxed),
             final_position: self.position.get_quantity(),
             realized_pnl: self.position.get_realized_pnl(),
+            max_queue_depth: self.max_queue_depth.get(),
+            queue_warnings: self.queue_warnings.get(),
         };
 
         tracing::info!("Engine stopped. Stats: {:?}", stats);
@@ -345,6 +376,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             signals_generated: self.hot.signal_count.load(Ordering::Relaxed),
             final_position: self.position.get_quantity(),
             realized_pnl: self.position.get_realized_pnl(),
+            max_queue_depth: self.max_queue_depth.get(),
+            queue_warnings: self.queue_warnings.get(),
         }
     }
 }
@@ -356,6 +389,10 @@ pub struct EngineStats {
     pub signals_generated: u64,
     pub final_position: i64,
     pub realized_pnl: i64,
+    /// Maximum queue depth observed during run
+    pub max_queue_depth: usize,
+    /// Number of times queue exceeded warning threshold
+    pub queue_warnings: u64,
 }
 
 #[cfg(test)]
