@@ -8,6 +8,7 @@
 
 use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
+use crate::core::errors::OverflowError;
 
 /// Unique identifier for an order
 ///
@@ -232,6 +233,138 @@ impl Position {
     pub fn get_trade_count(&self) -> u32 {
         self.trade_count.load(Ordering::Relaxed)
     }
+
+    // ===== OVERFLOW-SAFE METHODS =====
+    //
+    // These methods provide overflow protection for critical arithmetic operations.
+    // They return Result types that must be handled, preventing silent corruption.
+
+    /// Update quantity with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(new_quantity)` if the operation succeeded
+    /// - `Err(OverflowError)` if the addition would overflow
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Position;
+    /// let pos = Position::new();
+    ///
+    /// // Safe update
+    /// let new_qty = pos.update_quantity_checked(1_000_000_000)?;
+    /// assert_eq!(new_qty, 1_000_000_000);
+    ///
+    /// // Overflow detection
+    /// let result = pos.update_quantity_checked(i64::MAX);
+    /// assert!(result.is_err());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[inline(always)]
+    pub fn update_quantity_checked(&self, delta: i64) -> Result<i64, OverflowError> {
+        let old = self.quantity.load(Ordering::Acquire);
+        let new = old.checked_add(delta)
+            .ok_or(OverflowError::QuantityOverflow { old, delta })?;
+
+        self.quantity.store(new, Ordering::Release);
+        Ok(new)
+    }
+
+    /// Update realized PnL with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the operation succeeded
+    /// - `Err(OverflowError)` if the addition would overflow
+    #[inline(always)]
+    pub fn update_realized_pnl_checked(&self, delta: i64) -> Result<(), OverflowError> {
+        let old = self.realized_pnl.load(Ordering::Acquire);
+        let new = old.checked_add(delta)
+            .ok_or(OverflowError::RealizedPnlOverflow { old, delta })?;
+
+        self.realized_pnl.store(new, Ordering::Release);
+        Ok(())
+    }
+
+    /// Update daily PnL with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the operation succeeded
+    /// - `Err(OverflowError)` if the addition would overflow
+    #[inline(always)]
+    pub fn update_daily_pnl_checked(&self, delta: i64) -> Result<(), OverflowError> {
+        let old = self.daily_pnl.load(Ordering::Acquire);
+        let new = old.checked_add(delta)
+            .ok_or(OverflowError::DailyPnlOverflow { old, delta })?;
+
+        self.daily_pnl.store(new, Ordering::Release);
+        Ok(())
+    }
+
+    /// Increment trade count with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(new_count)` if the operation succeeded
+    /// - `Err(OverflowError)` if incrementing would overflow u32
+    ///
+    /// Note: This is unlikely (4 billion trades), but still protected.
+    #[inline(always)]
+    pub fn increment_trades_checked(&self) -> Result<u32, OverflowError> {
+        let old = self.trade_count.load(Ordering::Acquire);
+        let new = old.checked_add(1)
+            .ok_or(OverflowError::TradeCountOverflow { old })?;
+
+        self.trade_count.store(new, Ordering::Release);
+        Ok(new)
+    }
+
+    // ===== SATURATING METHODS =====
+    //
+    // These methods use saturating arithmetic (clamp at i64::MAX/MIN).
+    // Use only for non-critical paths where clamping is acceptable.
+
+    /// Update quantity with saturating arithmetic (clamps at i64::MAX/MIN)
+    ///
+    /// # Warning
+    ///
+    /// This method silently clamps on overflow. Only use in non-critical paths
+    /// where overflow is acceptable. For critical paths, use `update_quantity_checked()`.
+    #[inline(always)]
+    pub fn update_quantity_saturating(&self, delta: i64) -> i64 {
+        let old = self.quantity.load(Ordering::Acquire);
+        let new = old.saturating_add(delta);
+        self.quantity.store(new, Ordering::Release);
+        new
+    }
+
+    /// Update realized PnL with saturating arithmetic
+    ///
+    /// # Warning
+    ///
+    /// This method silently clamps on overflow. Prefer `update_realized_pnl_checked()`.
+    #[inline(always)]
+    pub fn update_realized_pnl_saturating(&self, delta: i64) -> i64 {
+        let old = self.realized_pnl.load(Ordering::Acquire);
+        let new = old.saturating_add(delta);
+        self.realized_pnl.store(new, Ordering::Release);
+        new
+    }
+
+    /// Update daily PnL with saturating arithmetic
+    ///
+    /// # Warning
+    ///
+    /// This method silently clamps on overflow. Prefer `update_daily_pnl_checked()`.
+    #[inline(always)]
+    pub fn update_daily_pnl_saturating(&self, delta: i64) -> i64 {
+        let old = self.daily_pnl.load(Ordering::Acquire);
+        let new = old.saturating_add(delta);
+        self.daily_pnl.store(new, Ordering::Release);
+        new
+    }
 }
 
 impl Default for Position {
@@ -255,13 +388,76 @@ impl fmt::Debug for Position {
 ///
 /// Huginn uses 9 decimal places for prices/sizes
 pub mod fixed_point {
+    use crate::core::errors::ConversionError;
+
     /// Scale factor for 9 decimal places
     pub const SCALE: i64 = 1_000_000_000;
 
-    /// Convert f64 to fixed-point i64
+    /// Maximum safe value for f64 conversion (to prevent overflow)
+    /// i64::MAX / SCALE = ~9.2 quadrillion
+    pub const MAX_SAFE_F64: f64 = (i64::MAX / SCALE) as f64;
+
+    /// Minimum safe value for f64 conversion
+    pub const MIN_SAFE_F64: f64 = (i64::MIN / SCALE) as f64;
+
+    /// Convert f64 to fixed-point i64 (UNCHECKED - legacy)
+    ///
+    /// # Warning
+    ///
+    /// This function does not check for overflow. Use `from_f64_checked()` instead.
+    ///
+    /// # Safety
+    ///
+    /// Caller must ensure `value` is within the safe range:
+    /// - `MIN_SAFE_F64 <= value <= MAX_SAFE_F64`
+    /// - `value` is not NaN or infinite
     #[inline(always)]
     pub fn from_f64(value: f64) -> i64 {
         (value * SCALE as f64) as i64
+    }
+
+    /// Convert f64 to fixed-point i64 with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(fixed_point_value)` if conversion succeeded
+    /// - `Err(ConversionError)` if value is out of range, NaN, or infinite
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::fixed_point;
+    /// // Safe conversion
+    /// let price = fixed_point::from_f64_checked(50000.0)?;
+    /// assert_eq!(price, 50000_000_000_000);
+    ///
+    /// // Overflow detection
+    /// let result = fixed_point::from_f64_checked(1e20);
+    /// assert!(result.is_err());
+    ///
+    /// // NaN detection
+    /// let result = fixed_point::from_f64_checked(f64::NAN);
+    /// assert!(result.is_err());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[inline(always)]
+    pub fn from_f64_checked(value: f64) -> Result<i64, ConversionError> {
+        // Check for NaN
+        if value.is_nan() {
+            return Err(ConversionError::NotANumber);
+        }
+
+        // Check for infinity
+        if value.is_infinite() {
+            return Err(ConversionError::Infinite { positive: value > 0.0 });
+        }
+
+        // Check range
+        if value > MAX_SAFE_F64 || value < MIN_SAFE_F64 {
+            return Err(ConversionError::OutOfRange { value });
+        }
+
+        Ok((value * SCALE as f64) as i64)
     }
 
     /// Convert fixed-point i64 to f64
@@ -270,13 +466,35 @@ pub mod fixed_point {
         value as f64 / SCALE as f64
     }
 
-    /// Convert u64 fixed-point to i64 fixed-point
+    /// Convert u64 fixed-point to i64 fixed-point with overflow checking
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(i64_value)` if conversion succeeded
+    /// - `Err(ConversionError)` if u64 value exceeds i64::MAX
+    #[inline(always)]
+    pub fn from_u64_checked(value: u64) -> Result<i64, ConversionError> {
+        if value > i64::MAX as u64 {
+            // Convert to f64 for error message
+            let f64_val = value as f64 / SCALE as f64;
+            return Err(ConversionError::OutOfRange { value: f64_val });
+        }
+        Ok(value as i64)
+    }
+
+    /// Convert u64 fixed-point to i64 fixed-point (UNCHECKED - legacy)
+    ///
+    /// # Warning
+    ///
+    /// This can silently truncate if value > i64::MAX. Use `from_u64_checked()` instead.
     #[inline(always)]
     pub fn from_u64(value: u64) -> i64 {
         value as i64
     }
 
     /// Convert i64 fixed-point to u64 fixed-point
+    ///
+    /// Negative values are clamped to 0.
     #[inline(always)]
     pub fn to_u64(value: i64) -> u64 {
         value.max(0) as u64

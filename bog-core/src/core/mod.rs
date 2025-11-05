@@ -12,10 +12,12 @@
 //! - Atomic operations (lock-free)
 //! - Minimal memory footprint
 
+pub mod errors;
 pub mod signal;
 pub mod types;
 
 // Re-export commonly used types
+pub use errors::{ConversionError, OverflowError, PositionError};
 pub use signal::{Signal, SignalAction};
 pub use types::{
     fixed_point, OrderId, OrderStatus, OrderType, Position, Side,
