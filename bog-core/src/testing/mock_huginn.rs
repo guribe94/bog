@@ -74,8 +74,8 @@ impl MockHuginnFeed {
             best_ask_price: ask_price,
             best_bid_size: bid_size,
             best_ask_size: ask_size,
-            bid_prices: vec![],
-            ask_prices: vec![],
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
         }
     }
 

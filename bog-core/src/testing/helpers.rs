@@ -30,8 +30,8 @@ pub fn create_test_snapshot(
         best_ask_price: ask_price,
         best_bid_size: bid_size,
         best_ask_size: ask_size,
-        bid_prices: vec![],
-        ask_prices: vec![],
+        bid_prices: [0; 3],
+        ask_prices: [0; 3],
     }
 }
 
@@ -152,7 +152,7 @@ pub struct MetricsSnapshot {
 
 impl MetricsSnapshot {
     /// Collect current metrics from registry
-    pub fn collect(registry: &MetricsRegistry) -> Self {
+    pub fn collect(_registry: &MetricsRegistry) -> Self {
         // Note: Prometheus metrics don't have direct getters for current values
         // In production, we'd query the registry, but for tests we can use this
         // as a placeholder structure

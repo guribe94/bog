@@ -271,6 +271,9 @@ pub mod monitoring;
 // Performance utilities (NEW)
 pub mod perf;
 
+// Resilience patterns (NEW)
+pub mod resilience;
+
 // Testing utilities (NEW)
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
