@@ -256,8 +256,7 @@
 pub mod core;
 
 // Public modules (legacy, being refactored)
-// TODO: Remove runtime config in favor of compile-time Cargo features
-// pub mod config;
+pub mod config;
 pub mod data;
 pub mod orderbook;
 pub mod strategy;
@@ -271,6 +270,10 @@ pub mod monitoring;
 
 // Performance utilities (NEW)
 pub mod perf;
+
+// Testing utilities (NEW)
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 
 // Re-export core types (new architecture)
 pub use core::{
