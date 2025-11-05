@@ -134,7 +134,11 @@
 
 pub mod simple_spread;
 pub mod inventory_based;
+pub mod volatility;
 
 // Re-export strategies for convenience
 pub use simple_spread::SimpleSpread;
 pub use inventory_based::InventoryBased;
+
+// Re-export volatility estimators
+pub use volatility::{RollingVolatility, EwmaVolatility, ParkinsonVolatility};
