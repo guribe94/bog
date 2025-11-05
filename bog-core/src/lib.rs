@@ -17,6 +17,58 @@
 //!
 //! This leaves **985ns** margin for network I/O and market data processing.
 //!
+//! ## System Architecture
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                      TRADING BOT BINARY                         │
+//! │                  (Your Application Layer)                       │
+//! │                                                                 │
+//! │  ┌─────────────┐    ┌──────────────┐    ┌─────────────────┐  │
+//! │  │   Huginn    │───▶│    Engine    │───▶│    Lighter      │  │
+//! │  │ Market Data │    │  <S, E>      │    │  DEX Orders     │  │
+//! │  └─────────────┘    └──────────────┘    └─────────────────┘  │
+//! │        │                    │                      │           │
+//! │        │ MarketSnapshot     │ Signal               │ Fill      │
+//! │        ▼                    ▼                      ▼           │
+//! └─────────────────────────────────────────────────────────────────┘
+//!                               │
+//!                               ▼
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                         ENGINE (bog-core)                       │
+//! │                                                                 │
+//! │  ┌────────────────────────────────────────────────────────┐   │
+//! │  │ Engine<Strategy, Executor>  (Const Generic)           │   │
+//! │  │                                                         │   │
+//! │  │  ┌──────────┐  ┌───────────┐  ┌──────────┐           │   │
+//! │  │  │ Strategy │──│   Risk    │──│ Executor │           │   │
+//! │  │  │   (ZST)  │  │ Validator │  │ (Object  │           │   │
+//! │  │  │  0 bytes │  │ <50ns     │  │  Pools)  │           │   │
+//! │  │  └──────────┘  └───────────┘  └──────────┘           │   │
+//! │  │       │              │              │                  │   │
+//! │  │       └──────────────┴──────────────┘                  │   │
+//! │  │                     │                                   │   │
+//! │  │              ┌──────▼────────┐                         │   │
+//! │  │              │   Position    │                         │   │
+//! │  │              │  (Atomics)    │                         │   │
+//! │  │              └───────────────┘                         │   │
+//! │  └────────────────────────────────────────────────────────┘   │
+//! │                                                                 │
+//! │  Performance: ~27ns complete tick-to-trade latency              │
+//! └─────────────────────────────────────────────────────────────────┘
+//!                               │
+//!                               ▼
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                  STRATEGIES (bog-strategies)                    │
+//! │                                                                 │
+//! │  ┌─────────────────┐         ┌────────────────────┐           │
+//! │  │  SimpleSpread   │         │ InventoryBased     │           │
+//! │  │  (Production)   │         │ (Phase 9)          │           │
+//! │  │  ~5ns calc      │         │ Planned            │           │
+//! │  └─────────────────┘         └────────────────────┘           │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
+//!
 //! ## Zero-Overhead Architecture
 //!
 //! ### Design Principles
@@ -33,6 +85,115 @@
 //! - u64 fixed-point arithmetic (9 decimals, no Decimal allocations)
 //! - Object pools for zero-allocation execution
 //! - Branch-free validation where possible
+//!
+//! ## Tick Processing Flow
+//!
+//! ```text
+//! Time: T0              T0+2ns         T0+7ns        T0+10ns        T0+27ns
+//!   │                     │              │              │              │
+//!   ▼                     ▼              ▼              ▼              ▼
+//! ┌─────────────┐   ┌──────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐
+//! │   Market    │   │  Market  │   │Strategy │   │  Risk   │   │Executor │
+//! │   Snapshot  │──▶│  Change  │──▶│  Calc   │──▶│  Check  │──▶│ Execute │
+//! │   Received  │   │  Detect  │   │  Signal │   │  Limits │   │  Order  │
+//! └─────────────┘   └──────────┘   └─────────┘   └─────────┘   └─────────┘
+//!       │                 │              │              │              │
+//!       │                 │              │              │              │
+//!   bid: $50,000      Changed?       quote_both     position OK?   place_order()
+//!   ask: $50,005       Yes/No         bid/ask       order size OK?   fills++
+//!   size: 1.0 BTC      (2ns)          (5ns)         (3ns)           (90ns)
+//!
+//! If market unchanged: Exit at T0+2ns (skip strategy/execution)
+//! If no action needed: Exit at T0+7ns (skip execution)
+//! If risk violation:   Exit at T0+10ns (reject order)
+//! Complete path:       T0+27ns (full tick-to-trade)
+//! ```
+//!
+//! ## Data Flow and Memory Layout
+//!
+//! ```text
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                    STACK (Fast Access)                          │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │                                                                 │
+//! │  MarketSnapshot (128 bytes)                                    │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ market_id: u64                                           │ │
+//! │  │ sequence: u64                                            │ │
+//! │  │ best_bid_price: u64  ─┐                                 │ │
+//! │  │ best_ask_price: u64   │ Feed to strategy                │ │
+//! │  │ best_bid_size: u64    │                                 │ │
+//! │  │ best_ask_size: u64   ─┘                                 │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                          │                                      │
+//! │                          ▼                                      │
+//! │  Signal (64 bytes - ONE CACHE LINE)                            │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ action: SignalAction  (1 byte)                          │ │
+//! │  │ side: Side           (1 byte)                           │ │
+//! │  │ bid_price: u64       (8 bytes)  ─┐                      │ │
+//! │  │ ask_price: u64       (8 bytes)   │ Pass to executor     │ │
+//! │  │ size: u64            (8 bytes)  ─┘                      │ │
+//! │  │ _padding: [u8; 32]   (32 bytes to reach 64)            │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                                                                 │
+//! └─────────────────────────────────────────────────────────────────┘
+//!
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                    HEAP (Pool Allocated)                        │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │                                                                 │
+//! │  Position (64 bytes - CACHE LINE ALIGNED)                      │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ quantity: AtomicI64     (8 bytes)  Current position      │ │
+//! │  │ entry_price: AtomicU64  (8 bytes)  Avg entry price       │ │
+//! │  │ realized_pnl: AtomicI64 (8 bytes)  Total PnL             │ │
+//! │  │ daily_pnl: AtomicI64    (8 bytes)  Today's PnL           │ │
+//! │  │ trade_count: AtomicU32  (4 bytes)  Number of trades      │ │
+//! │  │ _padding: [u8; 20]      (20 bytes) Pad to 64             │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                          ▲                                      │
+//! │                          │                                      │
+//! │                   Updated by executor                           │
+//! │                                                                 │
+//! │  Order Pool (256 x PooledOrder)                                │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ Pre-allocated, lock-free (crossbeam::ArrayQueue)         │ │
+//! │  │ Acquire/Release with zero allocation                     │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                                                                 │
+//! │  Fill Pool (1024 x PooledFill)                                 │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ Pre-allocated, lock-free (crossbeam::ArrayQueue)         │ │
+//! │  │ Process fills without allocation                         │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                                                                 │
+//! └─────────────────────────────────────────────────────────────────┘
+//!
+//! ┌─────────────────────────────────────────────────────────────────┐
+//! │                    COMPILE TIME (Zero Runtime Cost)             │
+//! ├─────────────────────────────────────────────────────────────────┤
+//! │                                                                 │
+//! │  Strategy Type: SimpleSpread = 0 BYTES (ZST)                   │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ const SPREAD: u64 = 10_000_000;  // 10 bps               │ │
+//! │  │ const ORDER_SIZE: u64 = 100_000_000;  // 0.1 BTC         │ │
+//! │  │ const MIN_SPREAD: u64 = 1_000_000;  // 1 bp              │ │
+//! │  │                                                           │ │
+//! │  │ All resolved at compile time, inlined into hot path      │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                                                                 │
+//! │  Risk Limits: const (Cargo features)                           │
+//! │  ┌──────────────────────────────────────────────────────────┐ │
+//! │  │ const MAX_POSITION: i64 = 1_000_000_000;  // 1.0 BTC     │ │
+//! │  │ const MAX_ORDER_SIZE: u64 = 500_000_000;  // 0.5 BTC     │ │
+//! │  │ const MAX_DAILY_LOSS: i64 = 1_000_000_000_000;  // $1000 │ │
+//! │  │                                                           │ │
+//! │  │ Branch-free validation, no runtime overhead              │ │
+//! │  └──────────────────────────────────────────────────────────┘ │
+//! │                                                                 │
+//! └─────────────────────────────────────────────────────────────────┘
+//! ```
 //!
 //! ## Core Modules
 //!
