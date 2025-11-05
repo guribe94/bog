@@ -34,6 +34,11 @@ rand = "0.8"
 approx.workspace = true
 proptest.workspace = true
 bog-strategies = { path = "../bog-strategies" }
+criterion.workspace = true
+
+[[bench]]
+name = "engine_bench"
+harness = false
 
 [features]
 default = []
