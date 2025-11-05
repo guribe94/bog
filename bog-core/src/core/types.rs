@@ -26,7 +26,7 @@ impl OrderId {
 
     /// Generate a new random OrderId
     ///
-    /// Format: [timestamp:64][random:32][counter:32]
+    /// Format: `[timestamp:64][random:32][counter:32]`
     /// This ensures uniqueness across threads and time
     #[inline]
     pub fn generate() -> Self {
