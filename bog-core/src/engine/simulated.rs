@@ -125,15 +125,21 @@ pub enum OrderStatusBits {
 /// For HFT strategies, this represents worst-case execution.
 pub struct SimulatedExecutor {
     /// Object pool for orders (256 capacity)
+    /// Reserved for Phase 7: realistic simulation with order tracking
+    #[allow(dead_code)]
     order_pool: Arc<ObjectPool<PooledOrder>>,
 
     /// Object pool for fills (1024 capacity)
+    /// Reserved for Phase 7: realistic simulation with fill tracking
+    #[allow(dead_code)]
     fill_pool: Arc<ObjectPool<PooledFill>>,
 
     /// Pending fills queue (lock-free)
     pending_fills: Arc<ArrayQueue<PooledFill>>,
 
     /// Active orders queue (lock-free)
+    /// Reserved for Phase 7: realistic simulation with active order tracking
+    #[allow(dead_code)]
     active_orders: Arc<ArrayQueue<PooledOrder>>,
 
     /// Total orders placed (metrics)

@@ -373,4 +373,198 @@ mod tests {
         let display = format!("{}", id);
         assert_eq!(display, "0000000000000000123456789abcdef0");
     }
+
+    // ===== ATOMIC CONTENTION TESTS =====
+
+    #[test]
+    fn test_position_concurrent_updates() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let position = Arc::new(Position::new());
+        let mut handles = vec![];
+
+        // Spawn 10 threads that each increment quantity 100 times
+        for _ in 0..10 {
+            let pos = Arc::clone(&position);
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    pos.update_quantity(1_000_000); // +0.001 BTC
+                }
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Total should be 10 * 100 * 1_000_000 = 1_000_000_000 (1.0 BTC)
+        assert_eq!(position.get_quantity(), 1_000_000_000);
+    }
+
+    #[test]
+    fn test_position_concurrent_pnl_updates() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let position = Arc::new(Position::new());
+        let mut handles = vec![];
+
+        // Spawn threads updating realized and daily PnL
+        for _ in 0..5 {
+            let pos = Arc::clone(&position);
+            let handle = thread::spawn(move || {
+                for _ in 0..100 {
+                    pos.update_realized_pnl(1_000_000); // +$0.001
+                    pos.update_daily_pnl(500_000);      // +$0.0005
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify totals
+        assert_eq!(position.get_realized_pnl(), 500_000_000); // 5 * 100 * 1M
+        assert_eq!(position.get_daily_pnl(), 250_000_000);    // 5 * 100 * 500K
+    }
+
+    #[test]
+    fn test_position_concurrent_mixed_operations() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let position = Arc::new(Position::new());
+        let mut handles = vec![];
+
+        // Thread 1: Increase quantity
+        let pos1 = Arc::clone(&position);
+        handles.push(thread::spawn(move || {
+            for _ in 0..1000 {
+                pos1.update_quantity(100_000);
+            }
+        }));
+
+        // Thread 2: Decrease quantity
+        let pos2 = Arc::clone(&position);
+        handles.push(thread::spawn(move || {
+            for _ in 0..500 {
+                pos2.update_quantity(-100_000);
+            }
+        }));
+
+        // Thread 3: Update PnL
+        let pos3 = Arc::clone(&position);
+        handles.push(thread::spawn(move || {
+            for _ in 0..1000 {
+                pos3.update_realized_pnl(10_000);
+            }
+        }));
+
+        // Thread 4: Increment trades
+        let pos4 = Arc::clone(&position);
+        handles.push(thread::spawn(move || {
+            for _ in 0..1000 {
+                pos4.increment_trades();
+            }
+        }));
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify final state
+        assert_eq!(position.get_quantity(), 50_000_000); // (1000 - 500) * 100K
+        assert_eq!(position.get_realized_pnl(), 10_000_000); // 1000 * 10K
+        assert_eq!(position.get_trade_count(), 1000);
+    }
+
+    #[test]
+    fn test_position_reset_daily_pnl_concurrent() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let position = Arc::new(Position::new());
+
+        // Set initial daily PnL
+        position.update_daily_pnl(1_000_000_000);
+
+        let pos1 = Arc::clone(&position);
+        let pos2 = Arc::clone(&position);
+
+        // Thread 1: Keep adding to daily PnL
+        let h1 = thread::spawn(move || {
+            for _ in 0..100 {
+                pos1.update_daily_pnl(1_000_000);
+                thread::sleep(std::time::Duration::from_micros(10));
+            }
+        });
+
+        // Thread 2: Reset daily PnL midway
+        let h2 = thread::spawn(move || {
+            thread::sleep(std::time::Duration::from_micros(500));
+            pos2.reset_daily_pnl();
+        });
+
+        h1.join().unwrap();
+        h2.join().unwrap();
+
+        // Daily PnL should be whatever was added after reset
+        // We can't predict exact value due to timing, but it should be < initial
+        let final_pnl = position.get_daily_pnl();
+        assert!(final_pnl < 1_000_000_000);
+    }
+
+    #[test]
+    fn test_position_stress_test() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let position = Arc::new(Position::new());
+        let num_threads = 8;
+        let ops_per_thread = 1000;
+        let mut handles = vec![];
+
+        for thread_id in 0..num_threads {
+            let pos = Arc::clone(&position);
+            let handle = thread::spawn(move || {
+                for i in 0..ops_per_thread {
+                    // Mix of operations
+                    match (thread_id + i) % 4 {
+                        0 => {
+                            pos.update_quantity(1_000);
+                        }
+                        1 => {
+                            pos.update_quantity(-1_000);
+                        }
+                        2 => {
+                            pos.update_realized_pnl(100);
+                        }
+                        _ => {
+                            pos.increment_trades();
+                        }
+                    }
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify atomics didn't get corrupted
+        // Quantity: 2 threads add, 2 subtract, each 2000 ops -> net 0
+        assert_eq!(position.get_quantity(), 0);
+
+        // Trades: 2 threads, 1000 ops each = 2000 trades
+        assert_eq!(position.get_trade_count(), 2000);
+
+        // PnL: 2 threads, 1000 ops each, 100 per op = 200_000
+        assert_eq!(position.get_realized_pnl(), 200_000);
+    }
 }

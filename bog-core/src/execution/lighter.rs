@@ -11,6 +11,8 @@ pub struct LighterExecutor {
     pending_fills: Vec<Fill>,
     mode: ExecutionMode,
     api_url: String,
+    /// WebSocket URL - reserved for Phase 7 live integration with Lighter SDK
+    #[allow(dead_code)]
     ws_url: String,
 }
 

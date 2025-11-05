@@ -12,6 +12,8 @@ use tracing::{debug, warn};
 pub struct OrderBookManager {
     orderbook: OrderBook,
     our_orders: OurOrders,
+    /// Market ID for this orderbook - reserved for future multi-market support
+    #[allow(dead_code)]
     market_id: u64,
     update_count: u64,
 }

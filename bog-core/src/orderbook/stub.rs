@@ -7,6 +7,8 @@ use std::collections::HashMap;
 /// This provides a simple interface that will be replaced with real OrderBook-rs integration
 #[derive(Debug, Clone)]
 pub struct StubOrderBook {
+    /// Market ID - reserved for future multi-market support and OrderBook-rs integration
+    #[allow(dead_code)]
     market_id: u64,
     bid_price: Decimal,
     ask_price: Decimal,

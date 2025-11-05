@@ -397,4 +397,179 @@ mod tests {
         // Verify enum is single byte
         assert_eq!(std::mem::size_of::<RiskViolation>(), 1);
     }
+
+    // ===== EDGE CASE TESTS =====
+
+    #[test]
+    fn test_daily_loss_limit() {
+        let position = Position::new();
+
+        // Simulate daily loss exceeding limit
+        position.update_realized_pnl(-MAX_DAILY_LOSS - 1);
+
+        // Any order should be rejected when daily loss limit is hit
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            100_000_000,
+        );
+
+        let result = validate_signal(&signal, &position);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Daily loss limit"));
+    }
+
+    #[test]
+    fn test_daily_loss_at_boundary() {
+        let position = Position::new();
+
+        // Exactly at daily loss limit (should be valid)
+        position.update_realized_pnl(-MAX_DAILY_LOSS);
+
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            100_000_000,
+        );
+
+        assert!(validate_signal(&signal, &position).is_ok());
+
+        // One more unit over the limit (should fail)
+        position.update_realized_pnl(-1);
+        assert!(validate_signal(&signal, &position).is_err());
+    }
+
+    #[test]
+    fn test_position_near_long_limit() {
+        let position = Position::new();
+
+        // Position near long limit
+        position.update_quantity(MAX_POSITION - MAX_ORDER_SIZE as i64);
+
+        // Order at max size should still be valid
+        let signal = Signal::quote_bid(50_000_000_000_000, MAX_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position).is_ok());
+
+        // But one more unit would violate
+        let signal = Signal::quote_bid(50_000_000_000_000, MAX_ORDER_SIZE + 1);
+        assert!(validate_signal(&signal, &position).is_err());
+    }
+
+    #[test]
+    fn test_position_near_short_limit() {
+        let position = Position::new();
+
+        // Position near short limit
+        position.update_quantity(-MAX_SHORT + MAX_ORDER_SIZE as i64);
+
+        // Order at max size should still be valid
+        let signal = Signal::quote_ask(50_000_000_000_000, MAX_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position).is_ok());
+
+        // But one more unit would violate
+        let signal = Signal::quote_ask(50_000_000_000_000, MAX_ORDER_SIZE + 1);
+        assert!(validate_signal(&signal, &position).is_err());
+    }
+
+    #[test]
+    fn test_quote_both_with_existing_long_position() {
+        let position = Position::new();
+
+        // Existing long position near limit
+        let current_qty = MAX_POSITION - (MAX_ORDER_SIZE / 2) as i64;
+        position.update_quantity(current_qty);
+
+        // QuoteBoth with size that would exceed long limit
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            MAX_ORDER_SIZE,
+        );
+
+        // Should fail because bid side would exceed limit
+        assert!(validate_signal(&signal, &position).is_err());
+    }
+
+    #[test]
+    fn test_quote_both_with_existing_short_position() {
+        let position = Position::new();
+
+        // Existing short position near limit
+        let current_qty = -MAX_SHORT + (MAX_ORDER_SIZE / 2) as i64;
+        position.update_quantity(current_qty);
+
+        // QuoteBoth with size that would exceed short limit
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            MAX_ORDER_SIZE,
+        );
+
+        // Should fail because ask side would exceed limit
+        assert!(validate_signal(&signal, &position).is_err());
+    }
+
+    #[test]
+    fn test_exact_order_size_boundaries() {
+        let position = Position::new();
+
+        // Exactly at MIN_ORDER_SIZE (should be valid)
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            MIN_ORDER_SIZE,
+        );
+        assert!(validate_signal(&signal, &position).is_ok());
+
+        // Exactly at MAX_ORDER_SIZE (should be valid)
+        let signal = Signal::quote_both(
+            50_000_000_000_000,
+            50_005_000_000_000,
+            MAX_ORDER_SIZE,
+        );
+        assert!(validate_signal(&signal, &position).is_ok());
+    }
+
+    #[test]
+    fn test_exact_position_boundaries() {
+        // Test exact MAX_POSITION
+        let position = Position::new();
+        position.update_quantity(MAX_POSITION);
+
+        // Any buy should fail
+        let signal = Signal::quote_bid(50_000_000_000_000, MIN_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position).is_err());
+
+        // Sell should be OK
+        let signal = Signal::quote_ask(50_000_000_000_000, MIN_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position).is_ok());
+
+        // Test exact -MAX_SHORT
+        let position2 = Position::new();
+        position2.update_quantity(-MAX_SHORT);
+
+        // Any sell should fail
+        let signal = Signal::quote_ask(50_000_000_000_000, MIN_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position2).is_err());
+
+        // Buy should be OK
+        let signal = Signal::quote_bid(50_000_000_000_000, MIN_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position2).is_ok());
+    }
+
+    #[test]
+    fn test_take_position_risk_checks() {
+        let position = Position::new();
+
+        // Take position buy near limit
+        position.update_quantity(MAX_POSITION - MAX_ORDER_SIZE as i64 / 2);
+        let signal = Signal::take_position(Side::Buy, MAX_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position).is_err());
+
+        // Take position sell near short limit
+        let position2 = Position::new();
+        position2.update_quantity(-MAX_SHORT + MAX_ORDER_SIZE as i64 / 2);
+        let signal = Signal::take_position(Side::Sell, MAX_ORDER_SIZE);
+        assert!(validate_signal(&signal, &position2).is_err());
+    }
 }
