@@ -335,6 +335,14 @@ pub struct SystemMetrics {
     pub memory_usage_bytes: IntGauge,
     /// Uptime in seconds
     pub uptime_seconds: IntGauge,
+    /// Overflow errors by type (quantity, pnl_realized, pnl_daily, conversion)
+    pub overflow_errors_total: IntCounterVec,
+    /// Saturating arithmetic operations (reached i64::MIN or i64::MAX)
+    pub saturated_operations_total: IntCounterVec,
+    /// Fill queue depth (bounded queue for backpressure)
+    pub fill_queue_depth: IntGauge,
+    /// Dropped fills due to queue overflow
+    pub dropped_fills_total: IntCounter,
 }
 
 impl SystemMetrics {
@@ -387,6 +395,38 @@ impl SystemMetrics {
         let uptime_seconds = IntGauge::new("bog_system_uptime_seconds", "System uptime in seconds")?;
         registry.register(Box::new(uptime_seconds.clone()))?;
 
+        let overflow_errors_total = IntCounterVec::new(
+            Opts::new(
+                "system_overflow_errors_total",
+                "Overflow errors detected (position, PnL, conversion)",
+            )
+            .namespace("bog"),
+            &["type"],
+        )?;
+        registry.register(Box::new(overflow_errors_total.clone()))?;
+
+        let saturated_operations_total = IntCounterVec::new(
+            Opts::new(
+                "system_saturated_operations_total",
+                "Operations that saturated at i64::MIN or i64::MAX",
+            )
+            .namespace("bog"),
+            &["operation"],
+        )?;
+        registry.register(Box::new(saturated_operations_total.clone()))?;
+
+        let fill_queue_depth = IntGauge::new(
+            "bog_system_fill_queue_depth",
+            "Current fill queue depth (bounded queue)",
+        )?;
+        registry.register(Box::new(fill_queue_depth.clone()))?;
+
+        let dropped_fills_total = IntCounter::new(
+            "bog_system_dropped_fills_total",
+            "Fills dropped due to queue overflow",
+        )?;
+        registry.register(Box::new(dropped_fills_total.clone()))?;
+
         Ok(Self {
             huginn_connected,
             huginn_messages_total,
@@ -397,6 +437,10 @@ impl SystemMetrics {
             cpu_usage_percent,
             memory_usage_bytes,
             uptime_seconds,
+            overflow_errors_total,
+            saturated_operations_total,
+            fill_queue_depth,
+            dropped_fills_total,
         })
     }
 }
@@ -461,5 +505,35 @@ mod tests {
 
         let metrics = registry.registry().gather();
         assert!(metrics.len() > 0);
+    }
+
+    #[test]
+    fn test_overflow_metrics() {
+        let registry = MetricsRegistry::new().unwrap();
+
+        // Test overflow error counters
+        registry.system().overflow_errors_total.with_label_values(&["quantity"]).inc();
+        registry.system().overflow_errors_total.with_label_values(&["pnl_realized"]).inc();
+        registry.system().overflow_errors_total.with_label_values(&["conversion"]).inc();
+
+        // Test saturating operations counter
+        registry.system().saturated_operations_total.with_label_values(&["position_update"]).inc();
+
+        // Test fill queue metrics
+        registry.system().fill_queue_depth.set(512);
+        registry.system().dropped_fills_total.inc();
+
+        let metrics = registry.registry().gather();
+        assert!(metrics.len() > 0);
+
+        // Verify overflow metrics exist
+        let overflow_metric = metrics.iter()
+            .find(|m| m.get_name() == "bog_system_overflow_errors_total");
+        assert!(overflow_metric.is_some());
+
+        // Verify queue metrics exist
+        let queue_metric = metrics.iter()
+            .find(|m| m.get_name() == "bog_system_fill_queue_depth");
+        assert!(queue_metric.is_some());
     }
 }

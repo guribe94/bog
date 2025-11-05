@@ -1,0 +1,443 @@
+# Prometheus Alert Rules for bog HFT Trading System
+#
+# To use these rules:
+# 1. Copy this file to your Prometheus configuration directory
+# 2. Add to prometheus.yml:
+#    rule_files:
+#      - 'prometheus-alerts.yml'
+# 3. Reload Prometheus configuration:
+#    curl -X POST http://localhost:9090/-/reload
+
+groups:
+  # ============================================================================
+  # CRITICAL ALERTS - Require immediate action
+  # ============================================================================
+  - name: bog_critical
+    interval: 10s  # Check every 10 seconds for critical issues
+    rules:
+      # Position Overflow Detection
+      - alert: PositionOverflow
+        expr: rate(bog_system_overflow_errors_total{type="quantity"}[5m]) > 0
+        for: 0s  # Alert immediately
+        labels:
+          severity: critical
+          component: position
+        annotations:
+          summary: "Position overflow detected"
+          description: "Position arithmetic overflow prevented {{ $value | humanize }} times in the last 5 minutes. Trading may be halted. Type: {{ $labels.type }}"
+          action: |
+            1. Trading is likely halted automatically
+            2. Check current position: curl http://localhost:9090/metrics | grep position_btc
+            3. Verify exchange position matches internal position
+            4. Review logs for root cause
+            5. Manual reconciliation may be required before restart
+
+      # PnL Overflow Detection
+      - alert: PnLOverflow
+        expr: |
+          rate(bog_system_overflow_errors_total{type=~"pnl_realized|pnl_daily"}[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: pnl
+        annotations:
+          summary: "PnL calculation overflow detected"
+          description: "PnL overflow prevented {{ $value | humanize }} times in the last 5 minutes. Type: {{ $labels.type }}"
+          action: |
+            1. Check realized PnL: curl http://localhost:9090/metrics | grep realized_pnl
+            2. Check daily PnL: curl http://localhost:9090/metrics | grep daily_pnl
+            3. Verify calculations are correct
+            4. May indicate data corruption or calculation bug
+
+      # Conversion Overflow Detection
+      - alert: ConversionOverflow
+        expr: rate(bog_system_overflow_errors_total{type="conversion"}[5m]) > 0
+        for: 30s
+        labels:
+          severity: critical
+          component: conversion
+        annotations:
+          summary: "Fixed-point conversion overflow detected"
+          description: "Conversion overflow prevented {{ $value | humanize }} times in the last 5 minutes"
+          action: |
+            1. Check market data for invalid prices (NaN, infinity)
+            2. Verify market data feed (Huginn) is healthy
+            3. Review conversion error logs for specific values
+            4. May indicate flash crash or data feed issue
+
+      # Dropped Fills (Data Loss)
+      - alert: DroppedFills
+        expr: rate(bog_system_dropped_fills_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          component: executor
+        annotations:
+          summary: "Fills are being dropped due to queue overflow"
+          description: "{{ $value | humanize }} fills dropped in the last 5 minutes. Position tracking may be incorrect."
+          action: |
+            1. Check fill queue depth: curl http://localhost:9090/metrics | grep fill_queue_depth
+            2. Verify position matches exchange
+            3. Consider halting trading to reconcile
+            4. Investigate cause: processing lag, tick rate too high, or simulation issue
+
+      # Huginn Disconnected
+      - alert: HuginnDisconnected
+        expr: bog_system_huginn_connected == 0
+        for: 5s
+        labels:
+          severity: critical
+          component: market_data
+        annotations:
+          summary: "Huginn market data connection lost"
+          description: "No market data available. Trading cannot continue."
+          action: |
+            1. Check Huginn process: pgrep huginn
+            2. Check shared memory: ls -lh /dev/shm/hg_m*
+            3. Restart Huginn if necessary
+            4. bog will auto-halt without market data
+
+      # Exchange Disconnected
+      - alert: ExchangeDisconnected
+        expr: bog_system_exchange_connected == 0
+        for: 10s
+        labels:
+          severity: critical
+          component: exchange
+        annotations:
+          summary: "Exchange connection lost"
+          description: "Cannot submit orders or receive fills"
+          action: |
+            1. Check network connectivity
+            2. Check exchange API status
+            3. Review connection logs
+            4. Reconnection should be automatic
+
+  # ============================================================================
+  # HIGH SEVERITY ALERTS - Require prompt action
+  # ============================================================================
+  - name: bog_high_severity
+    interval: 30s
+    rules:
+      # High Queue Depth (Warning of impending drops)
+      - alert: HighFillQueueDepth
+        expr: bog_system_fill_queue_depth > 100
+        for: 1m
+        labels:
+          severity: high
+          component: executor
+        annotations:
+          summary: "Fill queue depth is high"
+          description: "Fill queue at {{ $value }} out of 1024 capacity. Risk of dropped fills."
+          action: |
+            1. Monitor queue depth trend
+            2. Check if processing is keeping up
+            3. Slow down signal generation if needed
+            4. Investigate cause: tick rate, fill rate, or CPU saturation
+
+      # Excessive Saturating Operations
+      - alert: ExcessiveSaturatingOperations
+        expr: rate(bog_system_saturated_operations_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: high
+          component: position
+        annotations:
+          summary: "High rate of saturating arithmetic operations"
+          description: "{{ $value | humanize }} saturating ops/sec in last 5 minutes. Values clamping at i64::MIN/MAX."
+          action: |
+            1. Check if position is approaching limits
+            2. Review operation types: {{ $labels.operation }}
+            3. May indicate data anomaly or calculation issue
+            4. Saturating operations prevent overflow but lose precision
+
+      # Stale Market Data
+      - alert: StaleMarketData
+        expr: |
+          time() - bog_system_huginn_last_update_timestamp > 5
+        for: 10s
+        labels:
+          severity: high
+          component: market_data
+        annotations:
+          summary: "Market data is stale"
+          description: "No market data updates for {{ $value }}s"
+          action: |
+            1. Check Huginn process health
+            2. Check for sequence gaps: bog_system_huginn_sequence_gaps_total
+            3. Review Huginn logs
+            4. Trading may pause automatically
+
+      # High Latency
+      - alert: HighTickToTradeLatency
+        expr: |
+          histogram_quantile(0.99,
+            rate(bog_performance_tick_to_trade_latency_ns_bucket[5m])
+          ) > 100
+        for: 2m
+        labels:
+          severity: high
+          component: performance
+        annotations:
+          summary: "Tick-to-trade latency is high"
+          description: "p99 latency {{ $value | humanize }}ns (target: <100ns)"
+          action: |
+            1. Check CPU usage: bog_system_cpu_usage_percent
+            2. Verify CPU pinning is active
+            3. Check for CPU throttling or thermal issues
+            4. Review system for competing processes
+
+      # High Position Utilization
+      - alert: HighPositionUtilization
+        expr: bog_risk_position_utilization > 0.8
+        for: 5m
+        labels:
+          severity: high
+          component: risk
+        annotations:
+          summary: "Position utilization high"
+          description: "Position at {{ $value | humanizePercentage }} of limit"
+          action: |
+            1. Monitor position trend
+            2. Consider reducing position size
+            3. Review strategy behavior
+            4. Ensure risk limits are appropriate
+
+      # Daily Loss Limit Approached
+      - alert: DailyLossLimitApproached
+        expr: |
+          bog_risk_daily_pnl_usd / bog_risk_daily_loss_limit_usd < -0.8
+        for: 1m
+        labels:
+          severity: high
+          component: risk
+        annotations:
+          summary: "Approaching daily loss limit"
+          description: "Daily PnL at {{ $value | humanizePercentage }} of loss limit"
+          action: |
+            1. Review recent trades
+            2. Consider halting trading
+            3. Investigate strategy performance
+            4. May auto-halt at limit
+
+  # ============================================================================
+  # MEDIUM SEVERITY ALERTS - Monitor and investigate
+  # ============================================================================
+  - name: bog_medium_severity
+    interval: 1m
+    rules:
+      # Sequence Gaps (Potential Data Loss)
+      - alert: MarketDataSequenceGaps
+        expr: rate(bog_system_huginn_sequence_gaps_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: medium
+          component: market_data
+        annotations:
+          summary: "Market data sequence gaps detected"
+          description: "{{ $value | humanize }} gaps/sec in last 5 minutes"
+          action: |
+            1. Check Huginn performance
+            2. Verify network stability
+            3. May indicate CPU saturation or Huginn overload
+            4. Gaps mean missed market updates
+
+      # Low Fill Rate
+      - alert: LowFillRate
+        expr: bog_trading_fill_rate < 0.5
+        for: 10m
+        labels:
+          severity: medium
+          component: trading
+        annotations:
+          summary: "Fill rate is low"
+          description: "Only {{ $value | humanizePercentage }} of orders filled"
+          action: |
+            1. Review order prices vs market
+            2. Check spread settings
+            3. Verify exchange connectivity
+            4. May indicate overly aggressive pricing
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: bog_system_memory_usage_bytes > 500_000_000  # 500MB
+        for: 5m
+        labels:
+          severity: medium
+          component: system
+        annotations:
+          summary: "Memory usage is high"
+          description: "Using {{ $value | humanizeBytes }} memory (expected: <100MB)"
+          action: |
+            1. Check for memory leaks
+            2. Review collections are bounded
+            3. Consider restart if growing
+            4. Typical usage: 10-50MB per market
+
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: bog_system_cpu_usage_percent > 110
+        for: 5m
+        labels:
+          severity: medium
+          component: system
+        annotations:
+          summary: "CPU usage above expected"
+          description: "CPU at {{ $value }}% (expected: 100% on pinned core)"
+          action: |
+            1. Verify CPU pinning: taskset -p <pid>
+            2. Check for competing processes
+            3. Review for inefficient code paths
+            4. 100% on one core is normal (pinned)
+
+      # Moderate Position Size
+      - alert: ModeratePositionSize
+        expr: abs(bog_risk_position_btc) > 1.0
+        for: 10m
+        labels:
+          severity: medium
+          component: risk
+        annotations:
+          summary: "Position size is moderate"
+          description: "Position at {{ $value }} BTC"
+          action: |
+            1. Monitor position growth
+            2. Verify within risk tolerance
+            3. Consider reducing if uncomfortable
+            4. Typical range: 0.01-0.1 BTC for market making
+
+  # ============================================================================
+  # LOW SEVERITY ALERTS - Informational
+  # ============================================================================
+  - name: bog_low_severity
+    interval: 5m
+    rules:
+      # Process Restart
+      - alert: ProcessRestarted
+        expr: bog_system_uptime_seconds < 300
+        for: 1m
+        labels:
+          severity: low
+          component: system
+        annotations:
+          summary: "Process was recently restarted"
+          description: "Uptime: {{ $value | humanizeDuration }}"
+          action: |
+            1. Verify restart was intentional
+            2. Check logs for reason
+            3. Ensure position reconciled after restart
+
+      # Low Trading Volume
+      - alert: LowTradingVolume
+        expr: rate(bog_trading_volume_usd_total[1h]) < 1000
+        for: 30m
+        labels:
+          severity: low
+          component: trading
+        annotations:
+          summary: "Trading volume is low"
+          description: "${{ $value | humanize }}/hour (expected: >$1000/hour)"
+          action: |
+            1. Check if market is open
+            2. Verify strategy is generating signals
+            3. Review spread settings
+            4. May be normal during low volatility
+
+      # No Signals Generated
+      - alert: NoSignalsGenerated
+        expr: rate(bog_trading_orders_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: low
+          component: strategy
+        annotations:
+          summary: "No signals generated recently"
+          description: "No orders in last 10 minutes"
+          action: |
+            1. Check market conditions
+            2. Verify spread filter not too strict
+            3. Check strategy logic
+            4. May be normal in low volatility
+
+# ============================================================================
+# Alert Routing Configuration
+# ============================================================================
+#
+# Recommended Alertmanager configuration:
+#
+# route:
+#   group_by: ['alertname', 'component']
+#   group_wait: 10s
+#   group_interval: 10s
+#   repeat_interval: 4h
+#   receiver: 'default'
+#   routes:
+#     - match:
+#         severity: critical
+#       receiver: 'critical-alerts'
+#       repeat_interval: 15m  # Repeat critical alerts every 15 min
+#
+#     - match:
+#         severity: high
+#       receiver: 'high-alerts'
+#       repeat_interval: 1h
+#
+#     - match:
+#         severity: medium
+#       receiver: 'medium-alerts'
+#       repeat_interval: 4h
+#
+#     - match:
+#         severity: low
+#       receiver: 'low-alerts'
+#       repeat_interval: 12h
+#
+# receivers:
+#   - name: 'critical-alerts'
+#     pagerduty_configs:
+#       - service_key: '<your-pagerduty-key>'
+#     slack_configs:
+#       - api_url: '<your-slack-webhook>'
+#         channel: '#trading-critical'
+#
+#   - name: 'high-alerts'
+#     slack_configs:
+#       - api_url: '<your-slack-webhook>'
+#         channel: '#trading-alerts'
+#
+#   - name: 'medium-alerts'
+#     slack_configs:
+#       - api_url: '<your-slack-webhook>'
+#         channel: '#trading-monitoring'
+#
+#   - name: 'low-alerts'
+#     slack_configs:
+#       - api_url: '<your-slack-webhook>'
+#         channel: '#trading-info'
+
+# ============================================================================
+# Grafana Dashboard Queries
+# ============================================================================
+#
+# Overflow Errors by Type:
+#   sum by (type) (rate(bog_system_overflow_errors_total[5m]))
+#
+# Fill Queue Depth:
+#   bog_system_fill_queue_depth
+#
+# Tick-to-Trade Latency (p50, p90, p99):
+#   histogram_quantile(0.50, rate(bog_performance_tick_to_trade_latency_ns_bucket[5m]))
+#   histogram_quantile(0.90, rate(bog_performance_tick_to_trade_latency_ns_bucket[5m]))
+#   histogram_quantile(0.99, rate(bog_performance_tick_to_trade_latency_ns_bucket[5m]))
+#
+# Position Over Time:
+#   bog_risk_position_btc
+#
+# Daily PnL:
+#   bog_risk_daily_pnl_usd
+#
+# Orders Per Second:
+#   rate(bog_trading_orders_total[1m])
+#
+# Fill Rate:
+#   bog_trading_fill_rate
