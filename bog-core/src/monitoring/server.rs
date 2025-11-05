@@ -29,7 +29,9 @@ pub struct MetricsServerConfig {
 impl Default for MetricsServerConfig {
     fn default() -> Self {
         Self {
-            listen_addr: "127.0.0.1:9090".parse().unwrap(),
+            listen_addr: "127.0.0.1:9090"
+                .parse()
+                .unwrap_or_else(|_| std::net::SocketAddr::from(([127, 0, 0, 1], 9090))),
             metrics_path: "/metrics".to_string(),
         }
     }
@@ -120,28 +122,32 @@ async fn handle_request(
 
     // Health check endpoint
     if path == "/health" || path == "/healthz" {
-        return Ok(Response::builder()
+        let response = Response::builder()
             .status(StatusCode::OK)
             .body(Full::new(Bytes::from("OK")))
-            .unwrap());
+            .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("OK"))));
+        return Ok(response);
     }
 
     // Metrics endpoint
     if path == metrics_path {
         match encode_metrics(&registry) {
             Ok(metrics_text) => {
-                return Ok(Response::builder()
+                let response = Response::builder()
                     .status(StatusCode::OK)
                     .header("Content-Type", "text/plain; version=0.0.4")
                     .body(Full::new(Bytes::from(metrics_text)))
-                    .unwrap());
+                    .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Internal error"))));
+                return Ok(response);
             }
             Err(e) => {
                 error!("Failed to encode metrics: {}", e);
-                return Ok(Response::builder()
+                let error_msg = format!("Error: {}", e);
+                let response = Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Full::new(Bytes::from(format!("Error: {}", e))))
-                    .unwrap());
+                    .body(Full::new(Bytes::from(error_msg)))
+                    .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Internal error"))));
+                return Ok(response);
             }
         }
     }
@@ -152,18 +158,20 @@ async fn handle_request(
             "Bog Trading System Metrics\n\nEndpoints:\n  {} - Prometheus metrics\n  /health - Health check\n",
             metrics_path
         );
-        return Ok(Response::builder()
+        let response = Response::builder()
             .status(StatusCode::OK)
             .body(Full::new(Bytes::from(help_text)))
-            .unwrap());
+            .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Help"))));
+        return Ok(response);
     }
 
     // 404 for unknown paths
     warn!("Unknown metrics endpoint requested: {}", path);
-    Ok(Response::builder()
+    let response = Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(Full::new(Bytes::from("Not Found")))
-        .unwrap())
+        .unwrap_or_else(|_| Response::new(Full::new(Bytes::from("Not Found"))));
+    Ok(response)
 }
 
 /// Encode metrics to Prometheus text format

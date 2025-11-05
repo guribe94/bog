@@ -1,6 +1,12 @@
 //! Bog Strategies - Zero-Overhead HFT Trading Strategies
 //!
 //! Ultra-low-latency trading strategy implementations designed for sub-microsecond HFT.
+
+// Enforce panic-free code in production
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![warn(clippy::panic)]
+#![warn(clippy::panic_in_result_fn)]
 //!
 //! ## Performance Achieved
 //!

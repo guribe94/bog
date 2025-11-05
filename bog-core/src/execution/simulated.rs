@@ -160,7 +160,11 @@ impl RealisticSimulator {
 
     /// Calculate slippage for an order
     pub fn apply_slippage(&self, price: Decimal, side: Side) -> Decimal {
-        let slippage_factor = Decimal::from(1) + Decimal::try_from(self.slippage_bps / 10000.0).unwrap();
+        // Convert basis points to decimal (safe: slippage_bps is small)
+        let slippage_decimal = Decimal::try_from(self.slippage_bps / 10000.0)
+            .unwrap_or(Decimal::ZERO);
+        let slippage_factor = Decimal::from(1) + slippage_decimal;
+
         match side {
             Side::Buy => price * slippage_factor,  // Pay more
             Side::Sell => price / slippage_factor, // Receive less

@@ -40,7 +40,7 @@ impl OrderId {
 
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_nanos(0))
             .as_nanos() as u64;
 
         let random_part = RNG.with(|rng| rng.borrow_mut().gen::<u32>());

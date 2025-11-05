@@ -66,7 +66,8 @@ impl OrderState {
         }
 
         // Check filled_size matches fills
-        if (self.order.filled_size - total_filled).abs() > Decimal::from_str("0.00000001").unwrap() {
+        let epsilon = Decimal::new(1, 8); // 0.00000001
+        if (self.order.filled_size - total_filled).abs() > epsilon {
             return false;
         }
 
@@ -98,11 +99,13 @@ struct JournalEntry {
 
 impl JournalEntry {
     fn new(event: JournalEvent) -> Self {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis() as u64;
+
         Self {
-            timestamp: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64,
+            timestamp,
             event,
         }
     }
@@ -150,7 +153,10 @@ impl ExecutionMetrics {
     pub fn record_fill(&self, notional: Decimal) {
         self.fills_received.fetch_add(1, Ordering::Relaxed);
         // Convert to cents and store (avoiding float atomics)
-        let notional_cents = (notional * Decimal::from(100)).to_u64().unwrap_or(0);
+        // Use saturating conversion - overflow means huge volume, cap at u64::MAX cents
+        let notional_cents = (notional * Decimal::from(100))
+            .to_u64()
+            .unwrap_or(u64::MAX);
         self.total_volume.fetch_add(notional_cents, Ordering::Relaxed);
     }
 
@@ -488,7 +494,11 @@ impl ProductionExecutor {
         if let Some(prom) = &self.prometheus_metrics {
             let side = if matches!(order.side, super::Side::Buy) { "buy" } else { "sell" };
             prom.trading().fills_total.with_label_values(&["market", side]).inc();
-            prom.trading().volume_total.inc_by(fill.notional().to_f64().unwrap_or(0.0));
+            // Use saturating conversion for volume - overflow means extremely large trade
+            let volume = fill.notional()
+                .to_f64()
+                .unwrap_or(f64::MAX);
+            prom.trading().volume_total.inc_by(volume);
         }
 
         // Journal fill

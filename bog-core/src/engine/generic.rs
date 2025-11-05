@@ -126,7 +126,7 @@ pub trait Strategy {
     /// Calculate trading signal from market snapshot
     ///
     /// This is the hot path - must be <100ns
-    #[inline(always)]
+    /// Implementers should mark this #[inline(always)]
     fn calculate(&mut self, snapshot: &MarketSnapshot) -> Option<Signal>;
 
     /// Strategy name for logging
@@ -143,7 +143,7 @@ pub trait Executor {
     /// Execute a trading signal
     ///
     /// This is the hot path - must be <200ns
-    #[inline(always)]
+    /// Implementers should mark this #[inline(always)]
     fn execute(&mut self, signal: Signal, position: &Position) -> Result<()>;
 
     /// Cancel all outstanding orders
@@ -291,11 +291,12 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
         // Setup Ctrl+C handler
         let shutdown = self.shutdown.clone();
-        ctrlc::set_handler(move || {
+        if let Err(e) = ctrlc::set_handler(move || {
             tracing::warn!("Received shutdown signal");
             shutdown.store(true, Ordering::Release);
-        })
-        .expect("Error setting Ctrl-C handler");
+        }) {
+            tracing::warn!("Failed to set Ctrl-C handler: {}. Shutdown via code only.", e);
+        }
 
         // Main loop
         while !self.shutdown.load(Ordering::Acquire) {

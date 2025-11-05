@@ -71,8 +71,14 @@ impl MetricsRegistry {
 }
 
 impl Default for MetricsRegistry {
+    #[allow(clippy::panic)] // Critical infrastructure - must succeed or abort
     fn default() -> Self {
-        Self::new().expect("Failed to create metrics registry")
+        // Metrics creation is critical infrastructure
+        // If it fails, the system cannot operate correctly
+        Self::new().unwrap_or_else(|e| {
+            tracing::error!("FATAL: Failed to create metrics registry: {}", e);
+            panic!("Critical: Cannot create metrics registry")
+        })
     }
 }
 

@@ -2,6 +2,12 @@
 //!
 //! A high-frequency trading (HFT) market making system designed for **sub-microsecond latency**
 //! on Lighter DEX. Integrates with Huginn's ultra-low-latency market data feed.
+
+// Enforce panic-free code in production
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![warn(clippy::panic)]
+#![warn(clippy::panic_in_result_fn)]
 //!
 //! ## Performance Achieved
 //!

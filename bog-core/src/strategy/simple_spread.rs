@@ -34,7 +34,9 @@ impl SimpleSpreadStrategy {
 
     /// Calculate quote prices based on mid price and spread
     fn calculate_quotes(&self, mid_price: Decimal) -> (Decimal, Decimal) {
-        let spread_factor = Decimal::try_from(self.spread_bps / 10000.0 / 2.0).unwrap();
+        // Convert basis points to decimal factor (safe: spread_bps is small)
+        let spread_factor = Decimal::try_from(self.spread_bps / 10000.0 / 2.0)
+            .unwrap_or(Decimal::ZERO);
 
         let bid_price = mid_price * (Decimal::ONE - spread_factor);
         let ask_price = mid_price * (Decimal::ONE + spread_factor);

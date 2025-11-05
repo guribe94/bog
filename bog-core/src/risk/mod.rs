@@ -40,7 +40,7 @@ impl RiskManager {
     fn get_day_start_timestamp() -> u64 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs();
 
         // Round down to start of day (86400 seconds in a day)
