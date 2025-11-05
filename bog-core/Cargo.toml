@@ -29,6 +29,11 @@ serde_json.workspace = true
 erased-serde.workspace = true
 dashmap.workspace = true
 parking_lot.workspace = true
+prometheus.workspace = true
+tokio.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
 ctrlc.workspace = true
 
 # Random for OrderId generation and simulated execution

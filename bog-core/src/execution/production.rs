@@ -11,6 +11,7 @@
 //! Real exchange integration should be added later while maintaining this interface.
 
 use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus};
+use crate::monitoring::MetricsRegistry;
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use rust_decimal::prelude::*;
@@ -247,8 +248,10 @@ pub struct ProductionExecutor {
     orders: Arc<DashMap<OrderId, OrderState>>,
     /// Pending fills waiting to be consumed
     pending_fills: Arc<parking_lot::Mutex<Vec<Fill>>>,
-    /// Execution metrics
+    /// Execution metrics (internal counters)
     metrics: Arc<ExecutionMetrics>,
+    /// Prometheus metrics registry (optional)
+    prometheus_metrics: Option<Arc<MetricsRegistry>>,
     /// Configuration
     config: ProductionExecutorConfig,
     /// Execution mode
@@ -274,6 +277,7 @@ impl ProductionExecutor {
             orders: Arc::new(DashMap::new()),
             pending_fills: Arc::new(parking_lot::Mutex::new(Vec::new())),
             metrics: Arc::new(ExecutionMetrics::new()),
+            prometheus_metrics: None,
             config,
             mode: ExecutionMode::Simulated,
         };
@@ -304,6 +308,28 @@ impl ProductionExecutor {
     /// Get execution metrics
     pub fn metrics(&self) -> &ExecutionMetrics {
         &self.metrics
+    }
+
+    /// Set Prometheus metrics registry for monitoring
+    pub fn set_prometheus_metrics(&mut self, metrics: Arc<MetricsRegistry>) {
+        info!("Prometheus metrics integration enabled");
+        self.prometheus_metrics = Some(metrics);
+    }
+
+    /// Record metrics to Prometheus if enabled
+    fn record_prometheus_metrics(&self) {
+        if let Some(prom) = &self.prometheus_metrics {
+            // Update trading metrics
+            let submitted = self.metrics.orders_submitted.load(Ordering::Relaxed);
+            let fills = self.metrics.fills_received.load(Ordering::Relaxed);
+
+            // Set fill rate
+            if submitted > 0 {
+                prom.trading().fill_rate.set(fills as f64 / submitted as f64);
+            }
+
+            // Note: volume_total is a Counter, incremented in simulate_fill()
+        }
     }
 
     /// Write to execution journal
@@ -458,6 +484,13 @@ impl ProductionExecutor {
         // Record metrics
         self.metrics.record_fill(fill.notional());
 
+        // Record to Prometheus
+        if let Some(prom) = &self.prometheus_metrics {
+            let side = if matches!(order.side, super::Side::Buy) { "buy" } else { "sell" };
+            prom.trading().fills_total.with_label_values(&["market", side]).inc();
+            prom.trading().volume_total.inc_by(fill.notional().to_f64().unwrap_or(0.0));
+        }
+
         // Journal fill
         self.journal_event(JournalEvent::Fill(fill.clone()));
 
@@ -509,6 +542,12 @@ impl Executor for ProductionExecutor {
         // Record submission
         self.metrics.record_order_submitted();
 
+        // Record to Prometheus
+        if let Some(prom) = &self.prometheus_metrics {
+            let side = if matches!(order.side, super::Side::Buy) { "buy" } else { "sell" };
+            prom.trading().orders_total.with_label_values(&["market", side, "limit"]).inc();
+        }
+
         // Update order status
         order.status = OrderStatus::Pending;
         order.updated_at = SystemTime::now();
@@ -557,6 +596,12 @@ impl Executor for ProductionExecutor {
                 order_state.order.updated_at = SystemTime::now();
 
                 self.metrics.record_order_cancelled();
+
+                // Record to Prometheus
+                if let Some(prom) = &self.prometheus_metrics {
+                    prom.trading().cancellations_total.with_label_values(&["market"]).inc();
+                }
+
                 self.journal_event(JournalEvent::OrderCancel(order_id.clone()));
 
                 debug!("Order {} cancelled", order_id);
@@ -847,4 +892,37 @@ mod tests {
         assert_eq!(executor.get_order_status(&order_id).unwrap(), OrderStatus::Cancelled);
         assert_eq!(executor.metrics.orders_cancelled.load(Ordering::Relaxed), 1);
     }
+
+    #[test]
+    fn test_prometheus_integration() {
+        use crate::monitoring::MetricsRegistry;
+
+        let config = ProductionExecutorConfig {
+            enable_journal: false,
+            instant_fills: true,
+            ..Default::default()
+        };
+        let mut executor = ProductionExecutor::new(config);
+
+        // Set up Prometheus metrics
+        let prom_metrics = Arc::new(MetricsRegistry::new().unwrap());
+        executor.set_prometheus_metrics(prom_metrics.clone());
+
+        // Place orders
+        let order1 = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
+        executor.place_order(order1).unwrap();
+
+        let order2 = Order::limit(Side::Sell, dec!(50100), dec!(0.1));
+        executor.place_order(order2).unwrap();
+
+        // Verify Prometheus metrics were recorded
+        let metrics_text = prometheus::TextEncoder::new()
+            .encode_to_string(&prom_metrics.registry().gather())
+            .unwrap();
+
+        assert!(metrics_text.contains("bog_trading_orders_total"));
+        assert!(metrics_text.contains("bog_trading_fills_total"));
+        assert!(metrics_text.contains("bog_trading_volume"));
+    }
 }
+

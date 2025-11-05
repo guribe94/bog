@@ -266,6 +266,9 @@ pub mod risk;
 pub mod engine;  // NEW: Const generic engine
 pub mod utils;
 
+// Monitoring & Observability (NEW)
+pub mod monitoring;
+
 // Performance utilities (NEW)
 pub mod perf;
 
