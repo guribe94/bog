@@ -141,6 +141,7 @@
 pub mod simple_spread;
 pub mod inventory_based;
 pub mod volatility;
+pub mod fees;
 
 // Re-export strategies for convenience
 pub use simple_spread::SimpleSpread;
@@ -148,3 +149,9 @@ pub use inventory_based::InventoryBased;
 
 // Re-export volatility estimators
 pub use volatility::{RollingVolatility, EwmaVolatility, ParkinsonVolatility};
+
+// Re-export fee configuration
+pub use fees::{
+    MAKER_FEE_BPS, TAKER_FEE_BPS, ROUND_TRIP_COST_BPS, MIN_PROFITABLE_SPREAD_BPS,
+    calculate_fee, calculate_required_spread, calculate_quotes,
+};

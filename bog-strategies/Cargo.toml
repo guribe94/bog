@@ -45,3 +45,16 @@ target-inventory-positive = []
 risk-low = []
 risk-medium = []
 risk-high = []
+
+# Fee configurations (default: Lighter DEX - 0bps maker, 2bps taker)
+maker-fee-0bps = []    # Lighter default (0.2 bps rounds to 0)
+maker-fee-1bps = []
+maker-fee-2bps = []
+maker-fee-5bps = []
+maker-fee-10bps = []
+
+taker-fee-2bps = []    # Lighter default
+taker-fee-5bps = []
+taker-fee-10bps = []
+taker-fee-20bps = []
+taker-fee-30bps = []
