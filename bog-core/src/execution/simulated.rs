@@ -177,6 +177,11 @@ impl SimulatedExecutor {
         Self::with_config(RealisticFillConfig::instant())
     }
 
+    /// Create new executor with default configuration (alias for `new()`)
+    pub fn new_default() -> Self {
+        Self::new()
+    }
+
     /// Create new executor with custom configuration
     pub fn with_config(config: RealisticFillConfig) -> Self {
         info!(
