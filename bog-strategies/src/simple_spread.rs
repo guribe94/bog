@@ -120,11 +120,22 @@
 use bog_core::core::Signal;
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
+use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
 
-/// Spread in basis points (10 = 0.1%)
-/// Override with #[cfg(feature = "...")] in your binary
+/// Target spread in basis points
+///
+/// **PROFITABILITY GUARANTEE:**
+/// All spread configurations are >= MIN_PROFITABLE_SPREAD_BPS to ensure
+/// profitability after fees.
+///
+/// For Lighter DEX (0bps maker + 2bps taker = 2bps round-trip):
+/// - 5bps spread → 3bps profit per round-trip ✅
+/// - 10bps spread → 8bps profit per round-trip ✅
+/// - 20bps spread → 18bps profit per round-trip ✅
+///
+/// Default: 10 basis points (0.1% spread, 0.08% profit)
 #[cfg(not(any(
     feature = "spread-5bps",
     feature = "spread-10bps",
@@ -140,6 +151,22 @@ pub const SPREAD_BPS: u32 = 10;
 
 #[cfg(feature = "spread-20bps")]
 pub const SPREAD_BPS: u32 = 20;
+
+// Compile-time assertion: spread must be profitable after fees
+const _: () = assert!(
+    SPREAD_BPS >= MIN_PROFITABLE_SPREAD_BPS,
+    "SPREAD_BPS must be >= MIN_PROFITABLE_SPREAD_BPS for profitability after fees"
+);
+
+/// Expected profit margin per round-trip trade (basis points)
+///
+/// This is the profit AFTER paying all exchange fees.
+///
+/// For Lighter DEX defaults:
+/// - SPREAD_BPS = 10
+/// - ROUND_TRIP_COST_BPS = 2 (0 maker + 2 taker)
+/// - PROFIT_MARGIN_BPS = 8 bps = 0.08%
+pub const PROFIT_MARGIN_BPS: u32 = SPREAD_BPS - ROUND_TRIP_COST_BPS;
 
 /// Order size in fixed-point (9 decimals)
 /// Default: 0.1 BTC = 100_000_000
@@ -685,3 +712,70 @@ mod tests {
         }
     }
 }
+
+    #[test]
+    fn test_fee_aware_profitability() {
+        // Verify compile-time configuration ensures profitability
+        use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
+        
+        // Assert spread is profitable
+        assert!(
+            SPREAD_BPS >= MIN_PROFITABLE_SPREAD_BPS,
+            "Spread {} bps must be >= {} bps (min profitable)",
+            SPREAD_BPS,
+            MIN_PROFITABLE_SPREAD_BPS
+        );
+        
+        // Verify profit margin is positive
+        assert!(
+            PROFIT_MARGIN_BPS > 0,
+            "Profit margin {} bps must be positive",
+            PROFIT_MARGIN_BPS
+        );
+        
+        // For Lighter DEX defaults (0 maker + 2 taker):
+        #[cfg(not(any(
+            feature = "maker-fee-1bps",
+            feature = "maker-fee-2bps",
+            feature = "maker-fee-5bps",
+            feature = "maker-fee-10bps",
+            feature = "taker-fee-5bps",
+            feature = "taker-fee-10bps",
+            feature = "taker-fee-20bps",
+            feature = "taker-fee-30bps"
+        )))]
+        {
+            assert_eq!(MIN_PROFITABLE_SPREAD_BPS, 2, "Lighter min profitable spread");
+            assert_eq!(ROUND_TRIP_COST_BPS, 2, "Lighter round-trip cost");
+            
+            // Default 10bps spread should yield 8bps profit
+            #[cfg(not(any(feature = "spread-5bps", feature = "spread-20bps")))]
+            {
+                assert_eq!(SPREAD_BPS, 10, "Default spread");
+                assert_eq!(PROFIT_MARGIN_BPS, 8, "Expected profit margin");
+            }
+        }
+    }
+
+    #[test]
+    fn test_spread_profitability_examples() {
+        use crate::fees::ROUND_TRIP_COST_BPS;
+
+        // Test various spread configurations
+        let test_cases: Vec<(u32, &str)> = vec![
+            (5, "5bps spread"),
+            (10, "10bps spread"),
+            (20, "20bps spread"),
+        ];
+
+        for (spread, description) in test_cases {
+            let profit = spread.saturating_sub(ROUND_TRIP_COST_BPS);
+            assert!(
+                profit > 0,
+                "{} yields {} bps profit after {} bps fees",
+                description,
+                profit,
+                ROUND_TRIP_COST_BPS
+            );
+        }
+    }
