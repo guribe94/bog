@@ -1,6 +1,8 @@
 pub mod types;
+pub mod circuit_breaker;
 
 pub use types::{Position, RiskLimits, RiskViolation};
+pub use circuit_breaker::{CircuitBreaker, BreakerState, HaltReason};
 
 // Removed: moving to compile-time config
 // use crate::config::RiskConfig;

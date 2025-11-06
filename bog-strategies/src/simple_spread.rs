@@ -177,6 +177,25 @@ pub const MIN_SPREAD_BPS: u32 = 5;
 #[cfg(feature = "min-spread-10bps")]
 pub const MIN_SPREAD_BPS: u32 = 10;
 
+// === PRODUCTION SAFETY LIMITS ===
+
+/// Maximum spread considered valid (basis points)
+/// Spreads wider than this indicate flash crash or bad data
+/// Circuit breaker will halt at 100bps, we filter at 50bps
+pub const MAX_SPREAD_BPS: u32 = 50;
+
+/// Minimum price considered valid (in fixed-point)
+/// Below this is likely bad data (< $1)
+pub const MIN_VALID_PRICE: u64 = 1_000_000_000; // $1
+
+/// Maximum price considered valid (in fixed-point)
+/// Above this is likely bad data (> $1M per BTC)
+pub const MAX_VALID_PRICE: u64 = 1_000_000_000_000_000; // $1,000,000
+
+/// Minimum liquidity required on both sides (in fixed-point)
+/// Below this we don't quote (< 0.001 BTC)
+pub const MIN_SIZE_THRESHOLD: u64 = 1_000_000; // 0.001 BTC
+
 // Note: We calculate spread dynamically rather than pre-computing
 // to allow for const generic parameters to work with any spread value
 
@@ -201,11 +220,11 @@ impl SimpleSpread {
         (bid_price, ask_price)
     }
 
-    /// Check if market spread is wide enough to trade
+    /// Check if market spread is within valid bounds
     ///
-    /// Returns true if market_spread_bps >= MIN_SPREAD_BPS
+    /// Returns true if MIN_SPREAD_BPS <= spread <= MAX_SPREAD_BPS
     #[inline(always)]
-    fn is_spread_sufficient(bid: u64, ask: u64) -> bool {
+    fn is_spread_valid(bid: u64, ask: u64) -> bool {
         if bid == 0 || ask <= bid {
             return false;
         }
@@ -214,7 +233,24 @@ impl SimpleSpread {
         let spread = ask - bid;
         let spread_bps = (spread * 10_000) / bid;
 
-        spread_bps >= MIN_SPREAD_BPS as u64
+        // Must be >= MIN and <= MAX
+        spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= MAX_SPREAD_BPS as u64
+    }
+
+    /// Validate price is within sane bounds
+    ///
+    /// Prevents trading on obviously bad data
+    #[inline(always)]
+    fn is_price_valid(price: u64) -> bool {
+        price >= MIN_VALID_PRICE && price <= MAX_VALID_PRICE
+    }
+
+    /// Validate liquidity is sufficient
+    ///
+    /// Don't quote if book is too thin
+    #[inline(always)]
+    fn is_liquidity_sufficient(bid_size: u64, ask_size: u64) -> bool {
+        bid_size >= MIN_SIZE_THRESHOLD && ask_size >= MIN_SIZE_THRESHOLD
     }
 }
 
@@ -225,21 +261,41 @@ impl Strategy for SimpleSpread {
         let bid = snapshot.best_bid_price;
         let ask = snapshot.best_ask_price;
 
-        // Validate prices
+        // === PRODUCTION VALIDATION LAYER ===
+
+        // 1. Basic sanity check
         if bid == 0 || ask == 0 || ask <= bid {
             return None;
         }
 
-        // Check if spread is sufficient
-        if !Self::is_spread_sufficient(bid, ask) {
+        // 2. Price bounds validation (prevent trading on bad data)
+        if !Self::is_price_valid(bid) || !Self::is_price_valid(ask) {
             return None;
         }
+
+        // 3. Spread validation (MIN <= spread <= MAX)
+        // This catches both too-tight spreads and flash crashes
+        if !Self::is_spread_valid(bid, ask) {
+            return None;
+        }
+
+        // 4. Liquidity validation (sufficient size on both sides)
+        if !Self::is_liquidity_sufficient(snapshot.best_bid_size, snapshot.best_ask_size) {
+            return None;
+        }
+
+        // === ALL CHECKS PASSED - GENERATE SIGNAL ===
 
         // Calculate mid price (use (bid + ask) / 2 to avoid overflow)
         let mid_price = bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2;
 
         // Calculate our quote prices
         let (our_bid, our_ask) = Self::calculate_quotes(mid_price);
+
+        // Final sanity check on our quotes
+        if our_bid == 0 || our_ask == 0 || our_ask <= our_bid {
+            return None;
+        }
 
         // Return signal
         Some(Signal::quote_both(our_bid, our_ask, ORDER_SIZE))
@@ -289,29 +345,79 @@ mod tests {
     }
 
     #[test]
-    fn test_spread_check() {
-        // Wide spread (should pass)
+    fn test_spread_validation() {
+        // Normal spread (should pass)
         let bid = 50_000_000_000_000u64;
-        let ask = 50_100_000_000_000u64; // 20bps spread
+        let ask = 50_010_000_000_000u64; // 2bps spread
 
-        assert!(SimpleSpread::is_spread_sufficient(bid, ask));
+        assert!(SimpleSpread::is_spread_valid(bid, ask));
 
-        // Tight spread (should fail if MIN_SPREAD_BPS > 1)
+        // Tight spread - test based on actual MIN_SPREAD_BPS
         let bid_tight = 50_000_000_000_000u64;
-        let ask_tight = 50_005_000_000_000u64; // 1bp spread
+        let ask_tight = 50_001_000_000_000u64; // 0.2bp spread
+
+        // Calculate actual spread
+        let spread_bps = ((ask_tight - bid_tight) * 10_000) / bid_tight;
 
         // Result depends on MIN_SPREAD_BPS const
-        let _ = SimpleSpread::is_spread_sufficient(bid_tight, ask_tight);
+        let result = SimpleSpread::is_spread_valid(bid_tight, ask_tight);
+        let expected = spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= MAX_SPREAD_BPS as u64;
+        assert_eq!(result, expected,
+            "Spread {}bps should be valid={} (MIN={}, MAX={})",
+            spread_bps, expected, MIN_SPREAD_BPS, MAX_SPREAD_BPS);
+
+        // Flash crash spread (should fail - exceeds MAX_SPREAD_BPS)
+        let bid_wide = 50_000_000_000_000u64;
+        let ask_wide = 52_500_000_000_000u64; // 500bps spread
+
+        assert!(!SimpleSpread::is_spread_valid(bid_wide, ask_wide));
     }
 
     #[test]
     fn test_invalid_prices() {
         // Zero prices
-        assert!(!SimpleSpread::is_spread_sufficient(0, 100));
-        assert!(!SimpleSpread::is_spread_sufficient(100, 0));
+        assert!(!SimpleSpread::is_spread_valid(0, 100));
+        assert!(!SimpleSpread::is_spread_valid(100, 0));
 
         // Crossed book
-        assert!(!SimpleSpread::is_spread_sufficient(100, 50));
+        assert!(!SimpleSpread::is_spread_valid(100, 50));
+    }
+
+    #[test]
+    fn test_price_bounds() {
+        // Valid price range
+        assert!(SimpleSpread::is_price_valid(50_000_000_000_000)); // $50k
+
+        // Too low (< $1)
+        assert!(!SimpleSpread::is_price_valid(500_000_000)); // $0.50
+
+        // Too high (> $1M)
+        assert!(!SimpleSpread::is_price_valid(1_500_000_000_000_000)); // $1.5M
+
+        // Edge cases
+        assert!(SimpleSpread::is_price_valid(MIN_VALID_PRICE)); // Exactly $1
+        assert!(SimpleSpread::is_price_valid(MAX_VALID_PRICE)); // Exactly $1M
+        assert!(!SimpleSpread::is_price_valid(MIN_VALID_PRICE - 1));
+        assert!(!SimpleSpread::is_price_valid(MAX_VALID_PRICE + 1));
+    }
+
+    #[test]
+    fn test_liquidity_checks() {
+        // Sufficient liquidity
+        assert!(SimpleSpread::is_liquidity_sufficient(100_000_000, 100_000_000)); // 0.1 BTC each
+
+        // Insufficient bid size
+        assert!(!SimpleSpread::is_liquidity_sufficient(500_000, 100_000_000)); // 0.0005 BTC bid
+
+        // Insufficient ask size
+        assert!(!SimpleSpread::is_liquidity_sufficient(100_000_000, 500_000)); // 0.0005 BTC ask
+
+        // Both insufficient
+        assert!(!SimpleSpread::is_liquidity_sufficient(500_000, 500_000));
+
+        // Edge case: exactly at threshold
+        assert!(SimpleSpread::is_liquidity_sufficient(MIN_SIZE_THRESHOLD, MIN_SIZE_THRESHOLD));
+        assert!(!SimpleSpread::is_liquidity_sufficient(MIN_SIZE_THRESHOLD - 1, MIN_SIZE_THRESHOLD));
     }
 
     #[test]
@@ -426,5 +532,140 @@ mod tests {
 
         // Verify no allocations by checking we're still ZST
         assert_eq!(std::mem::size_of_val(&strategy), 0);
+    }
+
+    #[test]
+    fn test_flash_crash_protection() {
+        let mut strategy = SimpleSpread;
+
+        // Flash crash: spread goes from normal to 500bps
+        let flash_crash_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,  // $50,000
+            best_bid_size: 1_000_000_000,
+            best_ask_price: 52_500_000_000_000,  // $52,500 (5% spread!)
+            best_ask_size: 1_000_000_000,
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
+            dex_type: 1,
+            _padding: [0; 7],
+        };
+
+        // Strategy should refuse to trade
+        let signal = strategy.calculate(&flash_crash_snapshot);
+        assert!(signal.is_none(), "Strategy should NOT generate signal during flash crash");
+    }
+
+    #[test]
+    fn test_bad_data_rejection() {
+        let mut strategy = SimpleSpread;
+
+        // Test 1: Price too low (< $1)
+        let low_price_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 500_000_000,  // $0.50
+            best_bid_size: 1_000_000_000,
+            best_ask_price: 510_000_000,  // $0.51
+            best_ask_size: 1_000_000_000,
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
+            dex_type: 1,
+            _padding: [0; 7],
+        };
+
+        assert!(strategy.calculate(&low_price_snapshot).is_none());
+
+        // Test 2: Price too high (> $1M)
+        let high_price_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 1_500_000_000_000_000,  // $1.5M
+            best_bid_size: 1_000_000_000,
+            best_ask_price: 1_510_000_000_000_000,  // $1.51M
+            best_ask_size: 1_000_000_000,
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
+            dex_type: 1,
+            _padding: [0; 7],
+        };
+
+        assert!(strategy.calculate(&high_price_snapshot).is_none());
+    }
+
+    #[test]
+    fn test_low_liquidity_rejection() {
+        let mut strategy = SimpleSpread;
+
+        // Thin book: only 0.0005 BTC on each side
+        let thin_book_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 500_000,  // 0.0005 BTC (< MIN_SIZE_THRESHOLD)
+            best_ask_price: 50_010_000_000_000,
+            best_ask_size: 500_000,  // 0.0005 BTC
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
+            dex_type: 1,
+            _padding: [0; 7],
+        };
+
+        // Strategy should not quote in thin markets
+        let signal = strategy.calculate(&thin_book_snapshot);
+        assert!(signal.is_none(), "Strategy should NOT quote in thin markets");
+    }
+
+    #[test]
+    fn test_production_ready() {
+        let mut strategy = SimpleSpread;
+
+        // Normal, production-quality market snapshot
+        let good_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,  // $50,000
+            best_bid_size: 1_000_000_000,        // 1 BTC
+            best_ask_price: 50_010_000_000_000,  // $50,010 (2bps spread)
+            best_ask_size: 1_000_000_000,        // 1 BTC
+            bid_prices: [0; 3],
+            ask_prices: [0; 3],
+            dex_type: 1,
+            _padding: [0; 7],
+        };
+
+        let signal = strategy.calculate(&good_snapshot);
+        assert!(signal.is_some(), "Strategy should generate signal for good market data");
+
+        if let Some(sig) = signal {
+            // Verify signal is valid
+            assert!(sig.bid_price > 0);
+            assert!(sig.ask_price > 0);
+            assert!(sig.ask_price > sig.bid_price);
+            assert_eq!(sig.size, ORDER_SIZE);
+
+            // Verify our quotes are inside the market (passive quotes)
+            // We should be bidding BELOW market bid and asking ABOVE market ask
+            // to provide liquidity without taking from the book
+            let mid = (good_snapshot.best_bid_price + good_snapshot.best_ask_price) / 2;
+            assert!(sig.bid_price < mid, "Our bid should be below mid");
+            assert!(sig.ask_price > mid, "Our ask should be above mid");
+        }
     }
 }
