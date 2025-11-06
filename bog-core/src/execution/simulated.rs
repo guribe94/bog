@@ -2,6 +2,7 @@ use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus, Side};
 use anyhow::{anyhow, Result};
 use crossbeam::queue::ArrayQueue;
 use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -10,8 +11,152 @@ use tracing::{debug, info, warn};
 /// This prevents unbounded memory growth in long-running simulations
 const MAX_PENDING_FILLS: usize = 1024;
 
+/// Configuration for realistic fill simulation
+#[derive(Debug, Clone, Copy)]
+pub struct RealisticFillConfig {
+    /// Enable queue position modeling (FIFO)
+    pub enable_queue_modeling: bool,
+    /// Enable partial fills (not always 100%)
+    pub enable_partial_fills: bool,
+    /// Fill probability for front of queue (0.0 to 1.0)
+    pub front_of_queue_fill_rate: f64,
+    /// Fill probability for back of queue (0.0 to 1.0)
+    pub back_of_queue_fill_rate: f64,
+}
+
+impl Default for RealisticFillConfig {
+    fn default() -> Self {
+        Self {
+            enable_queue_modeling: true,
+            enable_partial_fills: true,
+            front_of_queue_fill_rate: 0.8,
+            back_of_queue_fill_rate: 0.4,
+        }
+    }
+}
+
+impl RealisticFillConfig {
+    /// Instant fills (current behavior) - for development/debug
+    pub fn instant() -> Self {
+        Self {
+            enable_queue_modeling: false,
+            enable_partial_fills: false,
+            front_of_queue_fill_rate: 1.0,
+            back_of_queue_fill_rate: 1.0,
+        }
+    }
+
+    /// Realistic fills - for backtesting
+    pub fn realistic() -> Self {
+        Self::default()
+    }
+
+    /// Conservative fills - for stress testing
+    pub fn conservative() -> Self {
+        Self {
+            enable_queue_modeling: true,
+            enable_partial_fills: true,
+            front_of_queue_fill_rate: 0.6,
+            back_of_queue_fill_rate: 0.2,
+        }
+    }
+}
+
+/// Tracks an order's position in the FIFO queue at a price level
+#[derive(Debug, Clone)]
+struct QueuePosition {
+    /// Order ID
+    order_id: OrderId,
+    /// Price level (u64 fixed-point)
+    price_level: u64,
+    /// Our order size
+    our_size: Decimal,
+    /// Volume ahead of us in queue (starts at 100% of level)
+    /// This is a simplification: we assume we join at the back
+    size_ahead_ratio: f64,
+    /// Timestamp when we joined the queue
+    timestamp: std::time::SystemTime,
+}
+
+/// Tracks queue positions for all active orders
+struct QueueTracker {
+    positions: HashMap<OrderId, QueuePosition>,
+    config: RealisticFillConfig,
+}
+
+impl QueueTracker {
+    fn new(config: RealisticFillConfig) -> Self {
+        Self {
+            positions: HashMap::new(),
+            config,
+        }
+    }
+
+    /// Add order to queue tracking
+    /// We assume order joins at back of queue (worst case)
+    fn add_order(&mut self, order: &Order) {
+        if !self.config.enable_queue_modeling {
+            return;
+        }
+
+        // Convert Decimal price to u64 fixed-point (9 decimals)
+        let price_u64 = (order.price * Decimal::from(1_000_000_000))
+            .to_u64()
+            .unwrap_or(0);
+
+        let position = QueuePosition {
+            order_id: order.id.clone(),
+            price_level: price_u64,
+            our_size: order.size,
+            // Assume we join at back of queue (100% ahead of us)
+            // In reality, we'd calculate this from MarketSnapshot
+            size_ahead_ratio: 1.0,
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        self.positions.insert(order.id.clone(), position);
+        debug!(
+            "Added order {} to queue at price {} (back of queue)",
+            order.id, price_u64
+        );
+    }
+
+    /// Calculate fill probability based on queue position
+    fn calculate_fill_probability(&self, order_id: &OrderId) -> f64 {
+        if !self.config.enable_partial_fills {
+            return 1.0; // Always fill completely
+        }
+
+        let position = match self.positions.get(order_id) {
+            Some(pos) => pos,
+            None => return 1.0, // No position tracked, fill completely
+        };
+
+        // Interpolate between front and back of queue fill rates
+        let front_rate = self.config.front_of_queue_fill_rate;
+        let back_rate = self.config.back_of_queue_fill_rate;
+
+        // size_ahead_ratio: 0.0 = front of queue, 1.0 = back of queue
+        let fill_probability = front_rate + (back_rate - front_rate) * position.size_ahead_ratio;
+
+        debug!(
+            "Order {} queue position: {:.1}%, fill probability: {:.1}%",
+            order_id,
+            position.size_ahead_ratio * 100.0,
+            fill_probability * 100.0
+        );
+
+        fill_probability
+    }
+
+    /// Remove order from queue tracking
+    fn remove_order(&mut self, order_id: &OrderId) {
+        self.positions.remove(order_id);
+    }
+}
+
 /// Simulated executor for paper trading and backtesting
-/// Immediately fills orders at requested prices (pessimistic simulation)
+/// Supports both instant fills and realistic queue-based fills
 pub struct SimulatedExecutor {
     orders: HashMap<OrderId, Order>,
     /// Bounded queue for pending fills (prevents OOM)
@@ -20,13 +165,25 @@ pub struct SimulatedExecutor {
     /// Number of fills dropped due to queue overflow
     dropped_fills: u64,
     mode: ExecutionMode,
+    /// Queue tracking for realistic fills
+    queue_tracker: QueueTracker,
+    /// Configuration for fill realism
+    config: RealisticFillConfig,
 }
 
 impl SimulatedExecutor {
+    /// Create new executor with instant fills (legacy behavior)
     pub fn new() -> Self {
+        Self::with_config(RealisticFillConfig::instant())
+    }
+
+    /// Create new executor with custom configuration
+    pub fn with_config(config: RealisticFillConfig) -> Self {
         info!(
-            "Initialized SimulatedExecutor (max pending fills: {})",
-            MAX_PENDING_FILLS
+            "Initialized SimulatedExecutor (max pending fills: {}, queue_modeling: {}, partial_fills: {})",
+            MAX_PENDING_FILLS,
+            config.enable_queue_modeling,
+            config.enable_partial_fills
         );
         Self {
             orders: HashMap::new(),
@@ -34,7 +191,19 @@ impl SimulatedExecutor {
             total_fills: 0,
             dropped_fills: 0,
             mode: ExecutionMode::Simulated,
+            queue_tracker: QueueTracker::new(config),
+            config,
         }
+    }
+
+    /// Create executor with realistic fills (for backtesting)
+    pub fn new_realistic() -> Self {
+        Self::with_config(RealisticFillConfig::realistic())
+    }
+
+    /// Create executor with conservative fills (for stress testing)
+    pub fn new_conservative() -> Self {
+        Self::with_config(RealisticFillConfig::conservative())
     }
 
     /// Get number of pending fills in queue
@@ -53,8 +222,21 @@ impl SimulatedExecutor {
     }
 
     /// Simulate a fill for an order
+    /// With realistic configuration, uses queue position to determine fill size
     fn simulate_fill(&mut self, order: &mut Order) -> Fill {
-        let fill_size = order.remaining_size();
+        let remaining = order.remaining_size();
+
+        // Calculate fill size based on queue position and configuration
+        let fill_probability = self.queue_tracker.calculate_fill_probability(&order.id);
+        let fill_size = if self.config.enable_partial_fills {
+            // Partial fill based on queue position
+            let partial_size = remaining * Decimal::try_from(fill_probability).unwrap_or(Decimal::ONE);
+            partial_size.max(Decimal::ZERO)
+        } else {
+            // Complete fill (instant mode)
+            remaining
+        };
+
         let fill_price = order.price;
 
         // Update order
@@ -75,11 +257,13 @@ impl SimulatedExecutor {
         self.total_fills += 1;
 
         debug!(
-            "Simulated fill: {} {} @ {} (size: {}, notional: {})",
+            "Simulated fill: {} {} @ {} (size: {}/{}, {:.1}% fill, notional: {})",
             fill.side,
             fill.order_id,
             fill.price,
             fill.size,
+            order.size,
+            fill_probability * 100.0,
             fill.notional()
         );
 
@@ -113,7 +297,10 @@ impl Executor for SimulatedExecutor {
         order.status = OrderStatus::Open;
         order.updated_at = std::time::SystemTime::now();
 
-        // Simulate immediate fill (pessimistic for maker strategies)
+        // Add to queue tracker (before fill simulation)
+        self.queue_tracker.add_order(&order);
+
+        // Simulate fill (immediate or partial based on configuration)
         // In reality, limit orders may not fill immediately
         let fill = self.simulate_fill(&mut order);
 
@@ -152,6 +339,10 @@ impl Executor for SimulatedExecutor {
             if order.is_active() {
                 order.status = OrderStatus::Cancelled;
                 order.updated_at = std::time::SystemTime::now();
+
+                // Remove from queue tracker
+                self.queue_tracker.remove_order(order_id);
+
                 debug!("Order {} cancelled", order_id);
                 Ok(())
             } else {
@@ -347,5 +538,108 @@ mod tests {
         let sell_price = dec!(50000);
         let slipped_price = sim.apply_slippage(sell_price, Side::Sell);
         assert!(slipped_price < sell_price); // Sell receives less
+    }
+
+    #[test]
+    fn test_instant_fills_config() {
+        let mut executor = SimulatedExecutor::new(); // Default: instant fills
+
+        let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+        executor.place_order(order).unwrap();
+
+        let fills = executor.get_fills();
+        assert_eq!(fills.len(), 1);
+
+        // Instant mode: should fill 100%
+        let fill = &fills[0];
+        assert_eq!(fill.size, dec!(1.0));
+    }
+
+    #[test]
+    fn test_realistic_fills_back_of_queue() {
+        // Realistic mode: orders join at back of queue (40% fill rate)
+        let mut executor = SimulatedExecutor::new_realistic();
+
+        let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+        executor.place_order(order).unwrap();
+
+        let fills = executor.get_fills();
+        assert_eq!(fills.len(), 1);
+
+        // Realistic mode with back-of-queue: should fill ~40% (0.4 BTC)
+        let fill = &fills[0];
+        let expected_fill = dec!(1.0) * Decimal::try_from(0.4).unwrap();
+        assert_eq!(fill.size, expected_fill);
+    }
+
+    #[test]
+    fn test_conservative_fills() {
+        // Conservative mode: even stricter (20% fill rate at back)
+        let mut executor = SimulatedExecutor::new_conservative();
+
+        let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+        executor.place_order(order).unwrap();
+
+        let fills = executor.get_fills();
+        assert_eq!(fills.len(), 1);
+
+        // Conservative mode: should fill ~20% (0.2 BTC)
+        let fill = &fills[0];
+        let expected_fill = dec!(1.0) * Decimal::try_from(0.2).unwrap();
+        assert_eq!(fill.size, expected_fill);
+    }
+
+    #[test]
+    fn test_realistic_vs_instant_comparison() {
+        // Create two executors with different configs
+        let mut instant_executor = SimulatedExecutor::new();
+        let mut realistic_executor = SimulatedExecutor::new_realistic();
+
+        // Place same order on both
+        let order1 = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+        let order2 = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+
+        instant_executor.place_order(order1).unwrap();
+        realistic_executor.place_order(order2).unwrap();
+
+        let instant_fills = instant_executor.get_fills();
+        let realistic_fills = realistic_executor.get_fills();
+
+        // Instant should fill more than realistic
+        assert!(instant_fills[0].size > realistic_fills[0].size);
+        assert_eq!(instant_fills[0].size, dec!(1.0)); // 100%
+        assert_eq!(realistic_fills[0].size, dec!(0.4)); // 40%
+    }
+
+    #[test]
+    fn test_queue_position_tracking() {
+        let config = RealisticFillConfig::realistic();
+        let mut tracker = QueueTracker::new(config);
+
+        let order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
+        tracker.add_order(&order);
+
+        // Check fill probability (should be back-of-queue: 40%)
+        let fill_prob = tracker.calculate_fill_probability(&order.id);
+        assert!((fill_prob - 0.4).abs() < 0.01); // ~40% with tolerance
+    }
+
+    #[test]
+    fn test_realistic_fill_config_presets() {
+        let instant = RealisticFillConfig::instant();
+        assert!(!instant.enable_queue_modeling);
+        assert!(!instant.enable_partial_fills);
+
+        let realistic = RealisticFillConfig::realistic();
+        assert!(realistic.enable_queue_modeling);
+        assert!(realistic.enable_partial_fills);
+        assert_eq!(realistic.front_of_queue_fill_rate, 0.8);
+        assert_eq!(realistic.back_of_queue_fill_rate, 0.4);
+
+        let conservative = RealisticFillConfig::conservative();
+        assert!(conservative.enable_queue_modeling);
+        assert!(conservative.enable_partial_fills);
+        assert_eq!(conservative.front_of_queue_fill_rate, 0.6);
+        assert_eq!(conservative.back_of_queue_fill_rate, 0.2);
     }
 }

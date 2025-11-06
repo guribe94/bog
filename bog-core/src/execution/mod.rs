@@ -6,7 +6,7 @@ pub mod production;
 pub use types::{
     ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce,
 };
-pub use simulated::SimulatedExecutor;
+pub use simulated::{SimulatedExecutor, RealisticFillConfig};
 pub use lighter::LighterExecutor;
 pub use production::{ProductionExecutor, ProductionExecutorConfig, ExecutionMetrics};
 
