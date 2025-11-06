@@ -1,8 +1,15 @@
 pub mod stub;
+pub mod depth;
 
 // Re-export stub types for now (Phase 1)
 // In Phase 7, we'll integrate real OrderBook-rs here
 pub use stub::{OrderInfo, OrderSide, OurOrders, StubOrderBook as OrderBook};
+
+// Re-export depth calculation functions
+pub use depth::{
+    calculate_vwap, calculate_imbalance, calculate_liquidity,
+    mid_price, spread_bps,
+};
 
 use crate::data::MarketSnapshot;
 use rust_decimal::Decimal;
@@ -146,7 +153,7 @@ mod tests {
             best_ask_price: f64_to_u64(ask),
             best_ask_size: f64_to_u64(1.0),
             dex_type: 1,
-            _padding: [0; 7],
+            ..Default::default()
         }
     }
 

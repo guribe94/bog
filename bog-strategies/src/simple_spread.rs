@@ -434,10 +434,12 @@ mod tests {
             best_bid_size: 1_000_000_000,
             best_ask_price: 50_010_000_000_000, // 2bps spread
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         let signal = strategy.calculate(&snapshot);
@@ -465,10 +467,12 @@ mod tests {
             best_bid_size: 0,
             best_ask_price: 0,
             best_ask_size: 0,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         let signal = strategy.calculate(&snapshot);
@@ -521,10 +525,12 @@ mod tests {
             best_bid_size: 1_000_000_000,
             best_ask_price: 50_010_000_000_000,
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         // This should be <100ns (measure with criterion in benchmarks)
@@ -549,10 +555,12 @@ mod tests {
             best_bid_size: 1_000_000_000,
             best_ask_price: 52_500_000_000_000,  // $52,500 (5% spread!)
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         // Strategy should refuse to trade
@@ -575,10 +583,12 @@ mod tests {
             best_bid_size: 1_000_000_000,
             best_ask_price: 510_000_000,  // $0.51
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         assert!(strategy.calculate(&low_price_snapshot).is_none());
@@ -594,10 +604,12 @@ mod tests {
             best_bid_size: 1_000_000_000,
             best_ask_price: 1_510_000_000_000_000,  // $1.51M
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         assert!(strategy.calculate(&high_price_snapshot).is_none());
@@ -618,10 +630,12 @@ mod tests {
             best_bid_size: 500_000,  // 0.0005 BTC (< MIN_SIZE_THRESHOLD)
             best_ask_price: 50_010_000_000_000,
             best_ask_size: 500_000,  // 0.0005 BTC
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         // Strategy should not quote in thin markets
@@ -644,10 +658,12 @@ mod tests {
             best_bid_size: 1_000_000_000,        // 1 BTC
             best_ask_price: 50_010_000_000_000,  // $50,010 (2bps spread)
             best_ask_size: 1_000_000_000,        // 1 BTC
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         };
 
         let signal = strategy.calculate(&good_snapshot);

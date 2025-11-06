@@ -69,13 +69,15 @@ impl MockHuginnFeed {
         MarketSnapshot {
             market_id: self.market_id,
             sequence: self.last_sequence,
-            timestamp_us: self.start_time.elapsed().as_micros() as u64,
+            exchange_timestamp_ns: self.start_time.elapsed().as_nanos() as u64,
             best_bid_price: bid_price,
             best_ask_price: ask_price,
             best_bid_size: bid_size,
             best_ask_size: ask_size,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
         }
     }
 

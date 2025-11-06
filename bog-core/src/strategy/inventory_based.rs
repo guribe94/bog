@@ -259,7 +259,7 @@ mod tests {
             best_ask_price: f64_to_u64(ask),
             best_ask_size: f64_to_u64(1.0),
             dex_type: 1,
-            _padding: [0; 7],
+            ..Default::default()
         }
     }
 

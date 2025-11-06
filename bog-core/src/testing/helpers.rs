@@ -25,13 +25,15 @@ pub fn create_test_snapshot(
     MarketSnapshot {
         market_id,
         sequence,
-        timestamp_us: 0,
+        exchange_timestamp_ns: 0,
         best_bid_price: bid_price,
         best_ask_price: ask_price,
         best_bid_size: bid_size,
         best_ask_size: ask_size,
-        bid_prices: [0; 3],
-        ask_prices: [0; 3],
+        bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+        ask_prices: [0; 10],
+            ask_sizes: [0; 10],
     }
 }
 

@@ -185,7 +185,7 @@ mod tests {
             best_ask_price: conversions::f64_to_u64(50005.0), // 5 dollar spread
             best_ask_size: 1000000000,
             dex_type: 1,
-            _padding: [0; 7],
+            ..Default::default()
         };
 
         let spread = snapshot.spread_bps();

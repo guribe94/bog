@@ -89,10 +89,12 @@ fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<Option<MarketSnaps
             best_bid_size: 1_000_000_000, // 1.0 BTC
             best_ask_price: bid_price + spread,
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 3],
-            ask_prices: [0; 3],
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
             dex_type: 1,
-            _padding: [0; 7],
+            _padding: [0; 111],
         }))
     }
 }

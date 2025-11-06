@@ -21,10 +21,12 @@ fn create_market_snapshot(price_offset: u64) -> MarketSnapshot {
         best_bid_size: 1_000_000_000,
         best_ask_price: 50_010_000_000_000 + price_offset,
         best_ask_size: 1_000_000_000,
-        bid_prices: [0; 3],
-        ask_prices: [0; 3],
+        bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+        ask_prices: [0; 10],
+            ask_sizes: [0; 10],
         dex_type: 1,
-        _padding: [0; 7],
+        _padding: [0; 111],
     }
 }
 
