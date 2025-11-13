@@ -1,5 +1,7 @@
 //! Circuit Breaker for Flash Crash and Market Anomaly Detection
 //!
+//! Now uses typestate pattern for compile-time verified state transitions!
+//!
 //! Detects extreme market conditions and halts trading to prevent losses:
 //! - Flash crashes (extreme spread widening)
 //! - Price spikes (sudden large price movements)
@@ -81,6 +83,7 @@
 //! ```
 
 use crate::data::MarketSnapshot;
+use crate::core::circuit_breaker_fsm::{BinaryNormal, BinaryBreakerState};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
 
@@ -104,8 +107,13 @@ pub const MAX_DATA_AGE_NS: i64 = 5_000_000_000;
 /// Prevents single spurious tick from halting trading
 pub const CONSECUTIVE_VIOLATIONS_THRESHOLD: u32 = 3;
 
-/// Circuit breaker state
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Circuit breaker state (for backwards compatibility)
+///
+/// This re-exports the core HaltReason and wraps it for the old API.
+pub use crate::core::circuit_breaker_fsm::HaltReason;
+
+/// Circuit breaker state (wrapper around typestate FSM)
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BreakerState {
     /// Normal operation - safe to trade
     Normal,
@@ -113,74 +121,31 @@ pub enum BreakerState {
     Halted(HaltReason),
 }
 
-/// Reason for circuit breaker trip
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HaltReason {
-    /// Spread exceeded MAX_SPREAD_BPS
-    ExcessiveSpread { spread_bps: u64, max_bps: u64 },
-    /// Price changed >10% in one tick
-    ExcessivePriceMove { change_pct: u64, max_pct: u64 },
-    /// Insufficient liquidity on both sides
-    InsufficientLiquidity { min_size: u64, actual_bid: u64, actual_ask: u64 },
-    /// Market data is stale (>5s old)
-    StaleData { age_ms: i64, max_age_ms: i64 },
-    /// Manual halt (operator command)
-    Manual,
-}
-
-impl std::fmt::Display for HaltReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            HaltReason::ExcessiveSpread { spread_bps, max_bps } => {
-                write!(f, "Excessive spread: {}bps (max: {}bps)", spread_bps, max_bps)
-            }
-            HaltReason::ExcessivePriceMove { change_pct, max_pct } => {
-                write!(f, "Excessive price move: {}% (max: {}%)", change_pct, max_pct)
-            }
-            HaltReason::InsufficientLiquidity { min_size, actual_bid, actual_ask } => {
-                write!(
-                    f,
-                    "Insufficient liquidity: bid={}, ask={} (min: {})",
-                    actual_bid, actual_ask, min_size
-                )
-            }
-            HaltReason::StaleData { age_ms, max_age_ms } => {
-                write!(f, "Stale data: {}ms old (max: {}ms)", age_ms, max_age_ms)
-            }
-            HaltReason::Manual => write!(f, "Manual halt"),
-        }
-    }
-}
+// HaltReason Display impl is in core::circuit_breaker_fsm module
 
 /// Circuit breaker for flash crash detection
 ///
-/// Tracks market state and trips on anomalies.
+/// Now uses BinaryNormal/BinaryHalted state machine for type-safe transitions!
 /// Once tripped, requires manual reset.
 pub struct CircuitBreaker {
-    /// Current state (normal or halted)
-    state: BreakerState,
+    /// Type-safe state machine (BinaryNormal or BinaryHalted)
+    state: BinaryBreakerState,
     /// Last mid price (for price movement detection)
     last_mid_price: Option<u64>,
     /// Last check timestamp
     last_check_ns: u64,
-    /// Consecutive violations counter
+    /// Consecutive violations counter (before tripping)
     consecutive_violations: u32,
-    /// Total times tripped
-    total_trips: u64,
-    /// Last reason for trip
-    last_trip_reason: Option<HaltReason>,
 }
 
 impl CircuitBreaker {
     /// Create new circuit breaker in Normal state
     pub fn new() -> Self {
         Self {
-            state: BreakerState::Normal,
+            state: BinaryBreakerState::Normal(BinaryNormal::new()),
             last_mid_price: None,
             last_check_ns: 0,
             consecutive_violations: 0,
-            total_trips: 0,
-            last_trip_reason: None,
         }
     }
 
@@ -196,8 +161,8 @@ impl CircuitBreaker {
     /// BreakerState::Halted(reason) otherwise.
     pub fn check(&mut self, snapshot: &MarketSnapshot) -> BreakerState {
         // If already halted, stay halted until manual reset
-        if let BreakerState::Halted(reason) = self.state {
-            return BreakerState::Halted(reason);
+        if let BinaryBreakerState::Halted(ref halted) = self.state {
+            return BreakerState::Halted(halted.reason().clone());
         }
 
         let bid = snapshot.best_bid_price;
@@ -323,15 +288,24 @@ impl CircuitBreaker {
         }
     }
 
-    /// Trip the circuit breaker
+    /// Trip the circuit breaker (using state machine transition)
     fn trip(&mut self, reason: HaltReason) -> BreakerState {
         self.consecutive_violations += 1;
 
         if self.consecutive_violations >= CONSECUTIVE_VIOLATIONS_THRESHOLD {
             error!("CIRCUIT BREAKER TRIPPED: {}", reason);
-            self.state = BreakerState::Halted(reason);
-            self.last_trip_reason = Some(reason);
-            self.total_trips += 1;
+
+            // Use type-safe state machine transition
+            match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+                BinaryBreakerState::Normal(normal) => {
+                    self.state = BinaryBreakerState::Halted(normal.trip(reason.clone()));
+                }
+                BinaryBreakerState::Halted(halted) => {
+                    // Already halted, restore state
+                    self.state = BinaryBreakerState::Halted(halted);
+                }
+            }
+
             BreakerState::Halted(reason)
         } else {
             // Not enough consecutive violations yet, just warn
@@ -346,39 +320,64 @@ impl CircuitBreaker {
     /// Manually reset circuit breaker
     ///
     /// Should only be called after investigating and resolving the issue.
+    /// Uses type-safe state machine transition!
     pub fn reset(&mut self) {
-        if let BreakerState::Halted(reason) = self.state {
-            warn!("Circuit breaker reset (was: {})", reason);
-            self.state = BreakerState::Normal;
-            self.consecutive_violations = 0;
+        match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+            BinaryBreakerState::Halted(halted) => {
+                warn!("Circuit breaker reset (was: {})", halted.reason());
+                self.state = BinaryBreakerState::Normal(halted.reset());
+                self.consecutive_violations = 0;
+            }
+            BinaryBreakerState::Normal(normal) => {
+                // Already normal, restore state
+                self.state = BinaryBreakerState::Normal(normal);
+            }
         }
     }
 
     /// Manually halt trading
-    pub fn manual_halt(&mut self) {
-        error!("Circuit breaker manually halted");
-        self.state = BreakerState::Halted(HaltReason::Manual);
-        self.total_trips += 1;
+    /// Uses type-safe state machine transition!
+    pub fn manual_halt(&mut self, message: String) {
+        error!("Circuit breaker manually halted: {}", message);
+
+        match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+            BinaryBreakerState::Normal(normal) => {
+                self.state = BinaryBreakerState::Halted(normal.trip(HaltReason::Manual(message)));
+            }
+            BinaryBreakerState::Halted(halted) => {
+                // Already halted, keep halted state
+                self.state = BinaryBreakerState::Halted(halted);
+            }
+        }
     }
 
     /// Get current state
     pub fn state(&self) -> BreakerState {
-        self.state
+        match &self.state {
+            BinaryBreakerState::Normal(_) => BreakerState::Normal,
+            BinaryBreakerState::Halted(h) => BreakerState::Halted(h.reason().clone()),
+        }
     }
 
     /// Get total times tripped
     pub fn total_trips(&self) -> u64 {
-        self.total_trips
+        match &self.state {
+            BinaryBreakerState::Normal(n) => n.data().total_trips,
+            BinaryBreakerState::Halted(h) => h.data().total_trips,
+        }
     }
 
     /// Get last trip reason
     pub fn last_trip_reason(&self) -> Option<HaltReason> {
-        self.last_trip_reason
+        match &self.state {
+            BinaryBreakerState::Normal(n) => n.data().last_trip_reason.clone(),
+            BinaryBreakerState::Halted(h) => h.data().last_trip_reason.clone(),
+        }
     }
 
     /// Check if currently halted
     pub fn is_halted(&self) -> bool {
-        matches!(self.state, BreakerState::Halted(_))
+        !self.state.is_operational()
     }
 }
 
@@ -511,19 +510,19 @@ mod tests {
     fn test_manual_halt() {
         let mut breaker = CircuitBreaker::new();
 
-        breaker.manual_halt();
+        breaker.manual_halt("Operator command".to_string());
         assert!(breaker.is_halted());
 
         let snapshot = create_normal_snapshot();
         let state = breaker.check(&snapshot);
-        assert!(matches!(state, BreakerState::Halted(HaltReason::Manual)));
+        assert!(matches!(state, BreakerState::Halted(HaltReason::Manual(_))));
     }
 
     #[test]
     fn test_reset() {
         let mut breaker = CircuitBreaker::new();
 
-        breaker.manual_halt();
+        breaker.manual_halt("Test halt".to_string());
         assert!(breaker.is_halted());
 
         breaker.reset();

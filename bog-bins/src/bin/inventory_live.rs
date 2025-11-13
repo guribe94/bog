@@ -12,6 +12,7 @@
 
 use anyhow::Result;
 use bog_bins::common::{init_logging, CommonArgs};
+use bog_core::resilience::install_panic_handler;
 use clap::Parser;
 
 fn main() -> Result<()> {
@@ -20,6 +21,9 @@ fn main() -> Result<()> {
 
     // Initialize logging
     init_logging(&args.log_level)?;
+
+    // Install panic handler for graceful shutdown
+    install_panic_handler();
 
     tracing::info!("=== Bog: Inventory-Based + Live Executor (Lighter) ===");
     tracing::warn!("LIVE TRADING MODE - REAL FUNDS AT RISK");

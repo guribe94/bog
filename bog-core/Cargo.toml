@@ -39,6 +39,9 @@ ctrlc.workspace = true
 # Random for OrderId generation and simulated execution
 rand = "0.8"
 
+# Signal handling for kill switch
+signal-hook = "0.3"
+
 [dev-dependencies]
 approx.workspace = true
 proptest.workspace = true
@@ -48,6 +51,22 @@ tempfile = "3.8"
 
 [[bench]]
 name = "engine_bench"
+harness = false
+
+[[bench]]
+name = "depth_bench"
+harness = false
+
+[[bench]]
+name = "conversion_bench"
+harness = false
+
+[[bench]]
+name = "atomic_bench"
+harness = false
+
+[[bench]]
+name = "tls_overhead_bench"
 harness = false
 
 [features]

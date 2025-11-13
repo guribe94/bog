@@ -68,17 +68,32 @@ impl MetricsRegistry {
     pub fn system(&self) -> &SystemMetrics {
         &self.system
     }
-}
 
-impl Default for MetricsRegistry {
-    #[allow(clippy::panic)] // Critical infrastructure - must succeed or abort
-    fn default() -> Self {
-        // Metrics creation is critical infrastructure
-        // If it fails, the system cannot operate correctly
-        Self::new().unwrap_or_else(|e| {
-            tracing::error!("FATAL: Failed to create metrics registry: {}", e);
-            panic!("Critical: Cannot create metrics registry")
-        })
+    /// Create a new metrics registry, or None if initialization fails
+    ///
+    /// This allows the bot to continue operating without metrics if Prometheus
+    /// initialization fails (e.g., port conflict, permissions issues).
+    ///
+    /// # Example
+    /// ```
+    /// use bog_core::monitoring::MetricsRegistry;
+    ///
+    /// let metrics = MetricsRegistry::new_optional();
+    /// if metrics.is_none() {
+    ///     eprintln!("Warning: Metrics disabled");
+    /// }
+    /// ```
+    pub fn new_optional() -> Option<Self> {
+        match Self::new() {
+            Ok(registry) => Some(registry),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to create metrics registry: {}. Continuing without metrics.",
+                    e
+                );
+                None
+            }
+        }
     }
 }
 

@@ -70,7 +70,7 @@ impl Strategy for SimpleSpreadStrategy {
         }
 
         // Check market spread
-        let market_spread_bps = orderbook.spread_bps();
+        let market_spread_bps = orderbook.spread_bps() as f64; // spread_bps() now returns u32
         if market_spread_bps < self.min_spread_bps {
             debug!(
                 "Market spread too tight ({:.2}bps < {:.2}bps), skipping",

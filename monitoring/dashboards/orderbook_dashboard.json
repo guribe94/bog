@@ -1,0 +1,250 @@
+{
+  "dashboard": {
+    "title": "Bog Market Making - Orderbook & Trading",
+    "tags": ["bog", "trading", "orderbook"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Spread Over Time",
+        "type": "graph",
+        "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "bog_orderbook_spread_bps",
+            "legendFormat": "Spread (bps)"
+          }
+        ],
+        "yaxes": [
+          { "label": "Basis Points", "format": "short" },
+          { "format": "short" }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": { "type": "gt", "params": [100] },
+              "query": { "params": ["A", "5m", "now"] }
+            }
+          ],
+          "message": "Orderbook spread exceeded 100bps - possible flash crash!"
+        }
+      },
+      {
+        "id": 2,
+        "title": "Position & PnL",
+        "type": "graph",
+        "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+        "targets": [
+          {
+            "expr": "bog_risk_position_btc",
+            "legendFormat": "Position (BTC)",
+            "yAxisIndex": 0
+          },
+          {
+            "expr": "bog_risk_realized_pnl_usd",
+            "legendFormat": "Realized PnL (USD)",
+            "yAxisIndex": 1
+          },
+          {
+            "expr": "bog_risk_daily_pnl_usd",
+            "legendFormat": "Daily PnL (USD)",
+            "yAxisIndex": 1
+          }
+        ],
+        "yaxes": [
+          { "label": "Position (BTC)", "format": "short" },
+          { "label": "PnL (USD)", "format": "currencyUSD" }
+        ]
+      },
+      {
+        "id": 3,
+        "title": "Order Status Distribution",
+        "type": "piechart",
+        "gridPos": { "x": 0, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "sum by (status) (bog_trading_orders_by_status)",
+            "legendFormat": "{{status}}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Tick-to-Trade Latency",
+        "type": "histogram",
+        "gridPos": { "x": 6, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, bog_performance_tick_to_trade_latency_ns)",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, bog_performance_tick_to_trade_latency_ns)",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, bog_performance_tick_to_trade_latency_ns)",
+            "legendFormat": "p99"
+          }
+        ],
+        "yaxes": [
+          { "label": "Latency (ns)", "format": "ns" }
+        ],
+        "alert": {
+          "conditions": [
+            {
+              "evaluator": { "type": "gt", "params": [1000] },
+              "query": { "params": ["A", "1m", "now"] }
+            }
+          ],
+          "message": "Tick-to-trade latency exceeded 1μs target!"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Fill Rate vs Rejection Rate",
+        "type": "gauge",
+        "gridPos": { "x": 12, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "rate(bog_trading_fills_total[5m]) / rate(bog_trading_orders_total[5m])",
+            "legendFormat": "Fill Rate"
+          }
+        ],
+        "options": {
+          "reduceOptions": { "values": false, "calcs": ["lastNotNull"] },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "red" },
+              { "value": 0.5, "color": "yellow" },
+              { "value": 0.8, "color": "green" }
+            ]
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Orderbook Imbalance",
+        "type": "graph",
+        "gridPos": { "x": 18, "y": 8, "w": 6, "h": 6 },
+        "targets": [
+          {
+            "expr": "bog_orderbook_imbalance",
+            "legendFormat": "Imbalance"
+          }
+        ],
+        "yaxes": [
+          { "label": "Imbalance (-100 to +100)", "format": "short", "min": -100, "max": 100 }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Active Orders",
+        "type": "table",
+        "gridPos": { "x": 0, "y": 14, "w": 12, "h": 6 },
+        "targets": [
+          {
+            "expr": "bog_trading_orders_by_status{status=\"Open\"}",
+            "format": "table"
+          }
+        ]
+      },
+      {
+        "id": 8,
+        "title": "Recent Fills",
+        "type": "table",
+        "gridPos": { "x": 12, "y": 14, "w": 12, "h": 6 },
+        "targets": [
+          {
+            "expr": "increase(bog_trading_fills_total[1m])",
+            "format": "table"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "gridPos": { "x": 0, "y": 20, "w": 8, "h": 4 },
+        "targets": [
+          {
+            "expr": "bog_risk_circuit_breaker_state",
+            "legendFormat": "State"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "background",
+          "textMode": "value_and_name",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Normal", "color": "green" } } },
+            { "type": "value", "options": { "1": { "text": "HALTED", "color": "red" } } }
+          ]
+        }
+      },
+      {
+        "id": 10,
+        "title": "Rate Limiter Status",
+        "type": "stat",
+        "gridPos": { "x": 8, "y": 20, "w": 8, "h": 4 },
+        "targets": [
+          {
+            "expr": "rate(bog_risk_rate_limit_rejected_total[1m]) / rate(bog_risk_rate_limit_requests_total[1m])",
+            "legendFormat": "Rejection Rate"
+          }
+        ],
+        "options": {
+          "reduceOptions": { "values": false, "calcs": ["lastNotNull"] },
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "area",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": 0, "color": "green" },
+              { "value": 0.1, "color": "yellow" },
+              { "value": 0.5, "color": "red" }
+            ]
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Huginn Connection Status",
+        "type": "stat",
+        "gridPos": { "x": 16, "y": 20, "w": 8, "h": 4 },
+        "targets": [
+          {
+            "expr": "bog_system_huginn_connected",
+            "legendFormat": "Connected"
+          }
+        ],
+        "options": {
+          "graphMode": "none",
+          "colorMode": "background",
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DISCONNECTED", "color": "red" } } },
+            { "type": "value", "options": { "1": { "text": "Connected", "color": "green" } } }
+          ]
+        }
+      }
+    ],
+    "annotations": {
+      "list": [
+        {
+          "name": "Alerts",
+          "datasource": "Prometheus",
+          "enable": true,
+          "iconColor": "red",
+          "tags": ["alert"]
+        }
+      ]
+    },
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    }
+  }
+}

@@ -2,6 +2,9 @@ use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+// Re-export OrderStatus from core (single source of truth)
+pub use crate::core::OrderStatus;
+
 /// Unique identifier for an order
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OrderId(String);
@@ -79,24 +82,8 @@ pub enum TimeInForce {
     FOK,
 }
 
-/// Order status
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum OrderStatus {
-    /// Order submitted but not yet confirmed
-    Pending,
-    /// Order accepted and active in the orderbook
-    Open,
-    /// Order partially filled
-    PartiallyFilled,
-    /// Order fully filled
-    Filled,
-    /// Order cancelled
-    Cancelled,
-    /// Order rejected by exchange
-    Rejected,
-    /// Order expired
-    Expired,
-}
+// Note: OrderStatus is re-exported from crate::core::OrderStatus (line 6)
+// This ensures a single source of truth for order state representation.
 
 /// An order to be submitted to the exchange
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,15 +177,40 @@ pub struct Fill {
 }
 
 impl Fill {
+    /// Create a fill without fee information (backwards compatibility)
     pub fn new(order_id: OrderId, side: Side, price: Decimal, size: Decimal) -> Self {
+        Self::new_with_fee(order_id, side, price, size, None)
+    }
+
+    /// Create a fill with fee information (for realistic paper trading)
+    ///
+    /// # Arguments
+    /// - `fee`: Fee amount in same currency as price (USD for BTC/USD)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let fee = Decimal::from(10); // $10 fee
+    /// let fill = Fill::new_with_fee(id, Side::Buy, price, size, Some(fee));
+    /// ```
+    pub fn new_with_fee(
+        order_id: OrderId,
+        side: Side,
+        price: Decimal,
+        size: Decimal,
+        fee: Option<Decimal>,
+    ) -> Self {
         Self {
             order_id,
             side,
             price,
             size,
             timestamp: std::time::SystemTime::now(),
-            fee: None,
-            fee_currency: None,
+            fee,
+            fee_currency: if fee.is_some() {
+                Some("USD".to_string())
+            } else {
+                None
+            },
         }
     }
 
@@ -216,10 +228,17 @@ impl Fill {
     }
 
     /// Get cash flow (negative for buys, positive for sells)
+    ///
+    /// Includes fees:
+    /// - Buy: -(price * size + fee) - You pay price plus fee
+    /// - Sell: +(price * size - fee) - You receive price minus fee
     pub fn cash_flow(&self) -> Decimal {
+        let notional = self.notional();
+        let fee_amount = self.fee.unwrap_or(Decimal::ZERO);
+
         match self.side {
-            Side::Buy => -self.notional(),
-            Side::Sell => self.notional(),
+            Side::Buy => -(notional + fee_amount),
+            Side::Sell => notional - fee_amount,
         }
     }
 }

@@ -167,8 +167,13 @@ fn validate_position_limits(signal: &Signal, position: &Position) -> Result<()> 
     match signal.action {
         SignalAction::QuoteBoth => {
             // Both sides - check worst case for each side
-            let buy_projection = current_position.saturating_add(signal.size as i64);
-            let sell_projection = current_position.saturating_sub(signal.size as i64);
+            // Use checked arithmetic to prevent overflow bypass
+            let buy_projection = current_position
+                .checked_add(signal.size as i64)
+                .ok_or_else(|| anyhow!("Position projection overflow on buy side"))?;
+            let sell_projection = current_position
+                .checked_sub(signal.size as i64)
+                .ok_or_else(|| anyhow!("Position projection overflow on sell side"))?;
 
             // Check long limit
             if buy_projection > MAX_POSITION {
@@ -182,14 +187,20 @@ fn validate_position_limits(signal: &Signal, position: &Position) -> Result<()> 
         }
         SignalAction::QuoteBid | SignalAction::TakePosition if signal.side == Side::Buy => {
             // Buying - check long limit
-            let projection = current_position.saturating_add(signal.size as i64);
+            // Use checked arithmetic to prevent overflow bypass
+            let projection = current_position
+                .checked_add(signal.size as i64)
+                .ok_or_else(|| anyhow!("Position projection overflow on buy"))?;
             if projection > MAX_POSITION {
                 return Err(anyhow!(RiskViolation::PositionLimitLong.as_str()));
             }
         }
         SignalAction::QuoteAsk | SignalAction::TakePosition if signal.side == Side::Sell => {
             // Selling - check short limit
-            let projection = current_position.saturating_sub(signal.size as i64);
+            // Use checked arithmetic to prevent overflow bypass
+            let projection = current_position
+                .checked_sub(signal.size as i64)
+                .ok_or_else(|| anyhow!("Position projection overflow on sell"))?;
             if projection < -MAX_SHORT {
                 return Err(anyhow!(RiskViolation::PositionLimitShort.as_str()));
             }

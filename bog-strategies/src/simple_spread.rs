@@ -236,10 +236,19 @@ impl SimpleSpread {
     /// Calculate quote prices from mid price
     ///
     /// Returns (bid_price, ask_price) in u64 fixed-point
+    ///
+    /// # Overflow Safety
+    ///
+    /// Uses u128 intermediate arithmetic to prevent overflow when calculating:
+    /// mid_price * SPREAD_BPS
+    ///
+    /// Without this, prices > ~184 quadrillion would overflow and produce
+    /// tiny spreads, leading to losses on fees.
     #[inline(always)]
     fn calculate_quotes(mid_price: u64) -> (u64, u64) {
         // Calculate half spread: mid_price * (spread_bps / 20000)
-        let half_spread = (mid_price * SPREAD_BPS as u64) / 20_000;
+        // Use u128 to prevent overflow: mid_price * SPREAD_BPS could exceed u64::MAX
+        let half_spread = ((mid_price as u128 * SPREAD_BPS as u128) / 20_000) as u64;
 
         let bid_price = mid_price.saturating_sub(half_spread);
         let ask_price = mid_price.saturating_add(half_spread);

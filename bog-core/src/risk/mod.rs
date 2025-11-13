@@ -1,8 +1,12 @@
 pub mod types;
 pub mod circuit_breaker;
+pub mod rate_limiter;
+pub mod pre_trade;
 
 pub use types::{Position, RiskLimits, RiskViolation};
 pub use circuit_breaker::{CircuitBreaker, BreakerState, HaltReason};
+pub use rate_limiter::{RateLimiter, RateLimiterConfig};
+pub use pre_trade::{PreTradeValidator, PreTradeResult, PreTradeRejection, ExchangeRules};
 
 // Removed: moving to compile-time config
 // use crate::config::RiskConfig;
@@ -194,12 +198,23 @@ impl RiskManager {
                 if old_quantity < Decimal::ZERO {
                     // Covering a short - realize PnL
                     let cover_size = fill.size.min(-old_quantity);
-                    let avg_short_price = if old_quantity != Decimal::ZERO {
-                        -self.position.cost_basis / old_quantity
+
+                    // Invariant: if we have a non-zero position, cost_basis must be non-zero
+                    // Division by zero would indicate a critical accounting bug
+                    if old_quantity == Decimal::ZERO || self.position.cost_basis == Decimal::ZERO {
+                        error!(
+                            "CRITICAL BUG: Invalid position state when covering short. \
+                             old_quantity={}, cost_basis={}, fill={:?}. \
+                             Cannot calculate PnL - skipping.",
+                            old_quantity,
+                            self.position.cost_basis,
+                            fill
+                        );
+                        Decimal::ZERO // Skip PnL calc rather than panic
                     } else {
-                        fill.price
-                    };
-                    (avg_short_price - fill.price) * cover_size
+                        let avg_short_price = -self.position.cost_basis / old_quantity;
+                        (avg_short_price - fill.price) * cover_size
+                    }
                 } else {
                     Decimal::ZERO // Adding to long position
                 }
@@ -209,20 +224,34 @@ impl RiskManager {
                 if old_quantity > Decimal::ZERO {
                     // Selling a long - realize PnL
                     let sell_size = fill.size.min(old_quantity);
-                    let avg_long_price = if old_quantity != Decimal::ZERO {
-                        self.position.cost_basis / old_quantity
+
+                    // Invariant: if we have a non-zero position, cost_basis must be non-zero
+                    // Division by zero would indicate a critical accounting bug
+                    if old_quantity == Decimal::ZERO || self.position.cost_basis == Decimal::ZERO {
+                        error!(
+                            "CRITICAL BUG: Invalid position state when selling long. \
+                             old_quantity={}, cost_basis={}, fill={:?}. \
+                             Cannot calculate PnL - skipping.",
+                            old_quantity,
+                            self.position.cost_basis,
+                            fill
+                        );
+                        Decimal::ZERO // Skip PnL calc rather than panic
                     } else {
-                        fill.price
-                    };
-                    (fill.price - avg_long_price) * sell_size
+                        let avg_long_price = self.position.cost_basis / old_quantity;
+                        (fill.price - avg_long_price) * sell_size
+                    }
                 } else {
                     Decimal::ZERO // Adding to short position
                 }
             }
         };
 
-        self.position.realized_pnl += pnl;
-        self.position.daily_pnl += pnl;
+        // Deduct fee from realized PnL (for accurate profitability)
+        let fee_amount = fill.fee.unwrap_or(Decimal::ZERO);
+
+        self.position.realized_pnl += pnl - fee_amount;
+        self.position.daily_pnl += pnl - fee_amount;
 
         // Update cost basis
         self.position.cost_basis += fill.cash_flow();

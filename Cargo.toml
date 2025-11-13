@@ -3,6 +3,7 @@ members = [
     "bog-core",
     "bog-strategies",
     "bog-bins",
+    "bog-debug",
 ]
 exclude = [
     "bog-core/fuzz",

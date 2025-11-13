@@ -1,4 +1,5 @@
 use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus};
+use super::order_bridge::OrderStateWrapper;
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use tracing::{info, warn};
@@ -6,8 +7,11 @@ use tracing::{info, warn};
 /// Lighter DEX executor stub
 /// This is a placeholder that logs API calls without making real requests
 /// TODO Phase 8: Replace with real Lighter DEX SDK integration
+///
+/// Now uses OrderStateWrapper internally for compile-time state validation!
 pub struct LighterExecutor {
-    orders: HashMap<OrderId, Order>,
+    /// Orders stored as state machine wrappers for type-safe transitions
+    orders: HashMap<OrderId, OrderStateWrapper>,
     pending_fills: Vec<Fill>,
     mode: ExecutionMode,
     api_url: String,
@@ -43,7 +47,7 @@ impl LighterExecutor {
 }
 
 impl Executor for LighterExecutor {
-    fn place_order(&mut self, mut order: Order) -> Result<OrderId> {
+    fn place_order(&mut self, order: Order) -> Result<OrderId> {
         info!(
             "STUB: Would place order on Lighter DEX: {} {} @ {} (size: {})",
             order.side, order.id, order.price, order.size
@@ -54,12 +58,19 @@ impl Executor for LighterExecutor {
             order.side, order.price, order.size
         );
 
-        // STUB: Just mark as open, don't actually send
-        order.status = OrderStatus::Open;
-        order.updated_at = std::time::SystemTime::now();
-
         let order_id = order.id.clone();
-        self.orders.insert(order_id.clone(), order);
+
+        // Create state machine wrapper from legacy order (WITH VALIDATION!)
+        let mut order_wrapper = OrderStateWrapper::from_legacy(&order)
+            .map_err(|e| anyhow!("Invalid order ID: {}", e))?;
+
+        // Acknowledge the order (Pending → Open) using type-safe transition
+        if let Err(e) = order_wrapper.acknowledge() {
+            return Err(anyhow!("Failed to acknowledge order: {}", e));
+        }
+
+        // Store the state machine wrapper
+        self.orders.insert(order_id.clone(), order_wrapper);
 
         warn!("STUB: Order {} logged but NOT sent to exchange", order_id);
 
@@ -70,10 +81,13 @@ impl Executor for LighterExecutor {
         info!("STUB: Would cancel order {} on Lighter DEX", order_id);
         info!("  API endpoint: DELETE {}/orders/{}", self.api_url, order_id);
 
-        if let Some(order) = self.orders.get_mut(order_id) {
-            if order.is_active() {
-                order.status = OrderStatus::Cancelled;
-                order.updated_at = std::time::SystemTime::now();
+        if let Some(order_wrapper) = self.orders.get_mut(order_id) {
+            if order_wrapper.is_active() {
+                // Use state machine to cancel (type-safe!)
+                if let Err(e) = order_wrapper.cancel() {
+                    return Err(anyhow!("Failed to cancel order {}: {}", order_id, e));
+                }
+
                 warn!("STUB: Order {} marked as cancelled but NOT sent to exchange", order_id);
                 Ok(())
             } else {
@@ -94,16 +108,22 @@ impl Executor for LighterExecutor {
         info!("STUB: Would query order status for {}", order_id);
         info!("  API endpoint: GET {}/orders/{}", self.api_url, order_id);
 
-        self.orders.get(order_id).map(|o| o.status)
+        // Use state machine to get status (type-safe!)
+        self.orders.get(order_id).map(|wrapper| wrapper.status())
     }
 
     fn get_active_orders(&self) -> Vec<&Order> {
         info!("STUB: Would query active orders");
         info!("  API endpoint: GET {}/orders?status=active", self.api_url);
 
+        // Compute legacy view on-demand (saves memory and hot-path latency)
         self.orders
             .values()
-            .filter(|o| o.is_active())
+            .filter(|wrapper| wrapper.is_active())
+            .map(|wrapper| wrapper.to_legacy())
+            .collect::<Vec<Order>>()
+            .leak()
+            .iter()
             .collect()
     }
 

@@ -204,13 +204,98 @@ pub fn mid_price(snapshot: &MarketSnapshot) -> u64 {
 /// Spread as u32 in basis points (1 bp = 0.01%)
 #[inline(always)]
 pub fn spread_bps(snapshot: &MarketSnapshot) -> u32 {
-    if snapshot.best_bid_price == 0 {
+    spread_bps_from_prices(snapshot.best_bid_price, snapshot.best_ask_price)
+}
+
+/// Calculate spread in basis points from raw prices
+///
+/// Helper function for L2OrderBook that works on raw u64 prices.
+#[inline(always)]
+pub fn spread_bps_from_prices(bid_price: u64, ask_price: u64) -> u32 {
+    if bid_price == 0 {
         return 0;
     }
 
-    let spread = snapshot.best_ask_price.saturating_sub(snapshot.best_bid_price);
-    let spread_bps = (spread as u128 * 10_000) / snapshot.best_bid_price as u128;
+    let spread = ask_price.saturating_sub(bid_price);
+    let spread_bps = (spread as u128 * 10_000) / bid_price as u128;
     spread_bps as u32
+}
+
+/// Calculate VWAP from raw price and size arrays
+///
+/// Helper function for L2OrderBook that works on raw arrays.
+#[inline]
+pub fn calculate_vwap_u64(
+    prices: &[u64],
+    sizes: &[u64],
+    max_levels: usize,
+) -> Option<u64> {
+    let max_levels = max_levels.min(prices.len().min(sizes.len()));
+
+    let mut total_value: u128 = 0;
+    let mut total_size: u128 = 0;
+
+    for i in 0..max_levels {
+        let size = sizes[i];
+        if size == 0 {
+            break;
+        }
+
+        let price = prices[i];
+        total_value += price as u128 * size as u128;
+        total_size += size as u128;
+    }
+
+    if total_size == 0 {
+        return None;
+    }
+
+    Some((total_value / total_size) as u64)
+}
+
+/// Calculate orderbook imbalance from raw arrays (returns i64 -100 to +100)
+///
+/// Helper function for L2OrderBook that works on raw arrays.
+/// Returns imbalance scaled to -100 to +100 range instead of -1.0 to +1.0.
+#[inline]
+pub fn calculate_imbalance_i64(
+    bid_prices: &[u64],
+    bid_sizes: &[u64],
+    ask_prices: &[u64],
+    ask_sizes: &[u64],
+    max_levels: usize,
+) -> i64 {
+    let max_levels = max_levels.min(bid_prices.len().min(ask_prices.len()));
+
+    let mut bid_volume: u128 = 0;
+    let mut ask_volume: u128 = 0;
+
+    for i in 0..max_levels {
+        if bid_sizes[i] > 0 {
+            bid_volume += bid_sizes[i] as u128;
+        }
+        if ask_sizes[i] > 0 {
+            ask_volume += ask_sizes[i] as u128;
+        }
+    }
+
+    if bid_volume == 0 && ask_volume == 0 {
+        return 0; // No liquidity
+    }
+
+    let total = bid_volume + ask_volume;
+    if total == 0 {
+        return 0;
+    }
+
+    // Imbalance = (bid - ask) / total * 100
+    // Returns -100 to +100
+    let bid_i128 = bid_volume as i128;
+    let ask_i128 = ask_volume as i128;
+    let total_i128 = total as i128;
+
+    let imbalance = ((bid_i128 - ask_i128) * 100) / total_i128;
+    imbalance as i64
 }
 
 #[cfg(test)]

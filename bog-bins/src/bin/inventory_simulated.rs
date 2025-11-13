@@ -13,6 +13,7 @@ use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::{Engine, SimulatedExecutor};
+use bog_core::resilience::install_panic_handler;
 use bog_strategies::InventoryBased;
 use clap::Parser;
 
@@ -22,6 +23,9 @@ fn main() -> Result<()> {
 
     // Initialize logging
     init_logging(&args.log_level)?;
+
+    // Install panic handler for graceful shutdown
+    install_panic_handler();
 
     tracing::info!("=== Bog: Inventory-Based + Simulated Executor ===");
     tracing::warn!("NOTE: InventoryBased strategy is currently a stub");

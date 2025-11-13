@@ -2,6 +2,7 @@ pub mod types;
 pub mod simulated;
 pub mod lighter;
 pub mod production;
+pub mod order_bridge;
 
 pub use types::{
     ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce,
@@ -9,6 +10,7 @@ pub use types::{
 pub use simulated::{SimulatedExecutor, RealisticFillConfig};
 pub use lighter::LighterExecutor;
 pub use production::{ProductionExecutor, ProductionExecutorConfig, ExecutionMetrics};
+pub use order_bridge::{OrderStateWrapper, order_state_to_legacy, legacy_order_to_pending};
 
 use anyhow::Result;
 

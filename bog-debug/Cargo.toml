@@ -1,0 +1,35 @@
+[package]
+name = "bog-debug"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+# Core dependencies
+bog-core = { path = "../bog-core" }
+huginn = { path = "../../huginn" }
+
+# TUI framework
+ratatui = "0.28"
+crossterm = "0.28"
+
+# Utilities
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+rust_decimal.workspace = true
+rust_decimal_macros.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# For charts and histograms
+unicode-width = "0.1"
+
+[[bin]]
+name = "orderbook-tui"
+path = "src/bin/orderbook_tui.rs"
+
+[[bin]]
+name = "print-orderbook"
+path = "src/bin/print_orderbook.rs"

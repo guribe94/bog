@@ -11,6 +11,7 @@ use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::{Engine, SimulatedExecutor};
+use bog_core::resilience::install_panic_handler;
 use bog_strategies::SimpleSpread;
 use clap::Parser;
 
@@ -20,6 +21,9 @@ fn main() -> Result<()> {
 
     // Initialize logging
     init_logging(&args.log_level)?;
+
+    // Install panic handler for graceful shutdown
+    install_panic_handler();
 
     tracing::info!("=== Bog: Simple Spread + Simulated Executor ===");
     tracing::info!("Market ID: {}", args.market_id);
@@ -31,7 +35,9 @@ fn main() -> Result<()> {
     let strategy = SimpleSpread;
     tracing::info!("Strategy size: {} bytes", std::mem::size_of_val(&strategy));
 
-    // Create executor with default pool sizes
+    // Create executor with default configuration
+    // This is the HFT-optimized SimulatedExecutor (instant fills, fee accounting enabled)
+    tracing::info!("Using HFT SimulatedExecutor (instant fills with fee accounting)");
     let executor = SimulatedExecutor::new_default();
 
     // Create engine with full compile-time monomorphization
