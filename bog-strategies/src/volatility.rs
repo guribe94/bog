@@ -6,7 +6,7 @@
 //! - Parkinson estimator (high-low range)
 //! - All calculations in u64 fixed-point arithmetic
 
-use std::cmp::{max, min};
+use std::cmp::min;
 
 /// Rolling volatility estimator with fixed-size circular buffer
 ///

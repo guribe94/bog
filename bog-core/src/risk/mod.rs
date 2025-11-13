@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Risk manager - validates signals and tracks positions
 pub struct RiskManager {

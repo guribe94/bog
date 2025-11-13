@@ -35,7 +35,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 /// Kill switch state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

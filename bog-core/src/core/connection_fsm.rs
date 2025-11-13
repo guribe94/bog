@@ -68,7 +68,7 @@
 //! }
 //! ```
 
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 // ============================================================================
 // Connection Data (shared by all states)

@@ -32,7 +32,6 @@
 use crate::data::MarketSnapshot;
 use crate::orderbook::depth;
 use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
 
 /// Number of price levels stored
 pub const DEPTH_LEVELS: usize = 10;

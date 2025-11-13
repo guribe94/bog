@@ -9,7 +9,6 @@ pub use inventory_based::InventoryBasedStrategy;
 use crate::data::MarketSnapshot;
 use crate::execution::Fill;
 use crate::orderbook::OrderBookManager;
-use anyhow::Result;
 
 /// Strategy trait - all trading strategies must implement this
 pub trait Strategy: Send {

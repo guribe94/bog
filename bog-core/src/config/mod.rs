@@ -4,7 +4,7 @@ pub mod profiles;
 pub use types::*;
 pub use profiles::{ConfigProfile, ProfileName};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 // TODO: Add config crate dependency for TOML file loading
 // use config::{Config as ConfigLoader, Environment, File};
 use std::path::Path;

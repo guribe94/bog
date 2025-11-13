@@ -2,7 +2,7 @@ pub mod types;
 
 pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 

@@ -22,7 +22,7 @@
 //! 6. **Kill Switch** - Is trading enabled?
 
 use crate::resilience::KillSwitch;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use tracing::{debug, warn};
