@@ -210,6 +210,7 @@ impl Executor for LighterExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Side;
     use rust_decimal_macros::dec;
 
     #[test]

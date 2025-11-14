@@ -358,6 +358,7 @@ impl RiskManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::RiskConfig;
     use crate::execution::OrderId;
     use rust_decimal_macros::dec;
 

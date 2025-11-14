@@ -12,6 +12,11 @@ pub struct MockHuginnFeed {
     market_id: u64,
     snapshots: VecDeque<MarketSnapshot>,
     stats: ConsumerStats,
+    // Internal tracking (ConsumerStats no longer has these fields)
+    total_reads: u64,
+    successful_reads: u64,
+    empty_reads: u64,
+    sequence_gaps: u64,
     last_sequence: u64,
     inject_sequence_gap: bool,
     inject_latency: Option<Duration>,
@@ -24,13 +29,11 @@ impl MockHuginnFeed {
         Self {
             market_id,
             snapshots: VecDeque::new(),
-            stats: ConsumerStats {
-                total_reads: 0,
-                successful_reads: 0,
-                empty_reads: 0,
-                sequence_gaps: 0,
-                last_sequence: 0,
-            },
+            stats: ConsumerStats::default(),
+            total_reads: 0,
+            successful_reads: 0,
+            empty_reads: 0,
+            sequence_gaps: 0,
             last_sequence: 0,
             inject_sequence_gap: false,
             inject_latency: None,
@@ -127,19 +130,19 @@ impl MockHuginnFeed {
             std::thread::sleep(latency);
         }
 
-        self.stats.total_reads += 1;
+        self.total_reads += 1;
 
         if let Some(snapshot) = self.snapshots.pop_front() {
-            // Check for sequence gap
-            if self.stats.last_sequence > 0 && snapshot.sequence > self.stats.last_sequence + 1 {
-                self.stats.sequence_gaps += 1;
+            // Track sequence for gap detection
+            if self.last_sequence > 0 && snapshot.sequence > self.last_sequence + 1 {
+                self.sequence_gaps += 1;
             }
 
-            self.stats.successful_reads += 1;
-            self.stats.last_sequence = snapshot.sequence;
+            self.successful_reads += 1;
+            self.last_sequence = snapshot.sequence;
             Some(snapshot)
         } else {
-            self.stats.empty_reads += 1;
+            self.empty_reads += 1;
             None
         }
     }
@@ -151,13 +154,11 @@ impl MockHuginnFeed {
 
     /// Reset statistics
     pub fn reset_stats(&mut self) {
-        self.stats = ConsumerStats {
-            total_reads: 0,
-            successful_reads: 0,
-            empty_reads: 0,
-            sequence_gaps: 0,
-            last_sequence: self.stats.last_sequence,
-        };
+        self.stats = ConsumerStats::default();
+        self.total_reads = 0;
+        self.successful_reads = 0;
+        self.empty_reads = 0;
+        self.sequence_gaps = 0;
     }
 
     /// Get market ID

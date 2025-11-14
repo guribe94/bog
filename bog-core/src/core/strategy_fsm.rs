@@ -397,10 +397,10 @@ mod tests {
     fn test_multiple_pause_resume_cycles() {
         let mut strategy = StrategyInitializing::new("TestStrategy".to_string()).start();
 
-        for _ in 0..3 {
+        for i in 0..3 {
             thread::sleep(Duration::from_millis(5));
             let paused = strategy.pause();
-            assert_eq!(paused.data().pause_count, _ + 1);
+            assert_eq!(paused.data().pause_count, i + 1);
 
             thread::sleep(Duration::from_millis(2));
             strategy = paused.resume();

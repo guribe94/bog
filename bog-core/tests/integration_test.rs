@@ -23,18 +23,11 @@ fn test_engine_with_simple_spread() -> Result<()> {
         market_id: 1,
         sequence: 1,
         exchange_timestamp_ns: 0,
-        local_recv_ns: 0,
-        local_publish_ns: 0,
         best_bid_price: 50_000_000_000_000, // $50,000
         best_bid_size: 1_000_000_000,        // 1.0 BTC
         best_ask_price: 50_010_000_000_000, // $50,010 (2bps spread)
         best_ask_size: 1_000_000_000,
-        bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-        dex_type: 1,
-        _padding: [0; 111],
+        ..Default::default()
     };
 
     // Process tick
@@ -61,18 +54,11 @@ fn test_engine_multiple_ticks() -> Result<()> {
             market_id: 1,
             sequence: i + 1,
             exchange_timestamp_ns: i * 1_000_000,
-            local_recv_ns: i * 1_000_000,
-            local_publish_ns: i * 1_000_000,
             best_bid_price: 50_000_000_000_000 + i * 1_000_000_000,
             best_bid_size: 1_000_000_000,
             best_ask_price: 50_010_000_000_000 + i * 1_000_000_000,
             best_ask_size: 1_000_000_000,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            dex_type: 1,
-            _padding: [0; 111],
+            ..Default::default()
         };
 
         engine.process_tick(&snapshot)?;
@@ -97,18 +83,11 @@ fn test_engine_market_change_detection() -> Result<()> {
         market_id: 1,
         sequence: 1,
         exchange_timestamp_ns: 0,
-        local_recv_ns: 0,
-        local_publish_ns: 0,
         best_bid_price: 50_000_000_000_000,
         best_bid_size: 1_000_000_000,
         best_ask_price: 50_010_000_000_000,
         best_ask_size: 1_000_000_000,
-        bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-        dex_type: 1,
-        _padding: [0; 111],
+        ..Default::default()
     };
 
     // First tick - should process
@@ -168,18 +147,11 @@ fn test_tick_processing_latency() -> Result<()> {
         market_id: 1,
         sequence: 1,
         exchange_timestamp_ns: 0,
-        local_recv_ns: 0,
-        local_publish_ns: 0,
         best_bid_price: 50_000_000_000_000,
         best_bid_size: 1_000_000_000,
         best_ask_price: 50_010_000_000_000,
         best_ask_size: 1_000_000_000,
-        bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-        dex_type: 1,
-        _padding: [0; 111],
+        ..Default::default()
     };
 
     // Warmup

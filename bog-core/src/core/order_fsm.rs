@@ -860,11 +860,15 @@ mod tests {
 
         let result = order.fill(1_000_000_000, 50_000_000_000_000);
 
-        assert!(result.is_filled());
-        if let FillResult::Filled(order) = result {
-            assert_eq!(order.status(), OrderStatus::Filled);
-            assert_eq!(order.filled_quantity(), 1_000_000_000);
-            assert!(order.data().completed_at.is_some());
+        if let FillResultOrError::Ok(fill_result) = result {
+            assert!(fill_result.is_filled());
+            if let FillResult::Filled(order) = fill_result {
+                assert_eq!(order.status(), OrderStatus::Filled);
+                assert_eq!(order.filled_quantity(), 1_000_000_000);
+                assert!(order.data().completed_at.is_some());
+            }
+        } else {
+            panic!("Expected Ok result");
         }
     }
 
@@ -874,12 +878,16 @@ mod tests {
 
         let result = order.fill(500_000_000, 50_000_000_000_000); // Half fill
 
-        assert!(result.is_partially_filled());
-        if let FillResult::PartiallyFilled(order) = result {
-            assert_eq!(order.status(), OrderStatus::PartiallyFilled);
-            assert_eq!(order.filled_quantity(), 500_000_000);
-            assert_eq!(order.remaining_quantity(), 500_000_000);
-            assert!(order.data().completed_at.is_none()); // Not completed yet
+        if let FillResultOrError::Ok(fill_result) = result {
+            assert!(fill_result.is_partially_filled());
+            if let FillResult::PartiallyFilled(order) = fill_result {
+                assert_eq!(order.status(), OrderStatus::PartiallyFilled);
+                assert_eq!(order.filled_quantity(), 500_000_000);
+                assert_eq!(order.remaining_quantity(), 500_000_000);
+                assert!(order.data().completed_at.is_none()); // Not completed yet
+            }
+        } else {
+            panic!("Expected Ok result");
         }
     }
 

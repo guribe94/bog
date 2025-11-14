@@ -67,38 +67,25 @@ pub fn create_test_position_with_pnl(quantity: i64, realized_pnl: i64, daily_pnl
 
 /// Create a test signal for quote-both action
 pub fn create_quote_both_signal(bid_price: u64, ask_price: u64, size: u64) -> Signal {
-    let mut signal = Signal::new();
-    signal.action = SignalAction::QuoteBoth;
-    signal.bid_price = bid_price;
-    signal.ask_price = ask_price;
-    signal.size = size;
-    signal
+    Signal::quote_both(bid_price, ask_price, size)
 }
 
 /// Create a test signal for single-side quote
 pub fn create_quote_signal(side: Side, price: u64, size: u64) -> Signal {
-    let mut signal = Signal::new();
-    signal.action = SignalAction::Quote;
-    signal.side = side;
-    if matches!(side, Side::Buy) {
-        signal.bid_price = price;
-    } else {
-        signal.ask_price = price;
+    match side {
+        Side::Buy => Signal::quote_bid(price, size),
+        Side::Sell => Signal::quote_ask(price, size),
     }
-    signal.size = size;
-    signal
 }
 
 /// Create a cancel signal
-pub fn create_cancel_signal(order_id: OrderId) -> Signal {
-    let mut signal = Signal::new();
-    signal.action = SignalAction::Cancel;
-    signal
+pub fn create_cancel_signal(_order_id: OrderId) -> Signal {
+    Signal::cancel_all()
 }
 
 /// Create a no-action signal
 pub fn create_no_action_signal() -> Signal {
-    Signal::new() // Default is NoAction
+    Signal::no_action()
 }
 
 /// Assert that an operation completes within expected latency

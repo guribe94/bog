@@ -116,10 +116,9 @@ bog workspace
 ```rust
 // Trait (compiles to static dispatch)
 pub trait Strategy {
-    fn generate_signal(
-        &self,
-        market: &MarketState,
-        position: &Position,
+    fn calculate(
+        &mut self,
+        snapshot: &MarketSnapshot,
     ) -> Option<Signal>;
 }
 
@@ -247,16 +246,20 @@ Consumer: bog Engine
 ```
 /dev/shm/hg_m1 (4096 bytes)
 ┌─────────────────────────────────────────┐
-│ MarketState (128 bytes)                 │
-│ ├─ bid: i64 (9 decimal fixed-point)   │
-│ ├─ ask: i64                            │
-│ ├─ bid_size: i64                       │
-│ ├─ ask_size: i64                       │
-│ ├─ last_update_ns: i64                 │
-│ ├─ seq: u64 (sequence number)          │
-│ └─ flags: u64                          │
+│ MarketSnapshot (512 bytes)              │
+│ ├─ market_id: u64                      │
+│ ├─ sequence: u64                       │
+│ ├─ exchange_timestamp_ns: u64          │
+│ ├─ best_bid_price: u64 (fixed-point)  │
+│ ├─ best_bid_size: u64                  │
+│ ├─ best_ask_price: u64                 │
+│ ├─ best_ask_size: u64                  │
+│ ├─ bid_prices: [u64; 10] (depth)      │
+│ ├─ bid_sizes: [u64; 10]               │
+│ ├─ ask_prices: [u64; 10]              │
+│ └─ ask_sizes: [u64; 10]               │
 ├─────────────────────────────────────────┤
-│ Padding (3968 bytes)                    │
+│ Padding (3584 bytes)                    │
 └─────────────────────────────────────────┘
 ```
 
@@ -537,11 +540,11 @@ Target: <1μs (1000ns) tick-to-trade
 | Component | Budget | Measured | Status |
 |-----------|--------|----------|--------|
 | Huginn SHM read | 10ns | ~5ns | ✅ 50% under |
-| Signal generation | 100ns | ~10ns | ✅ 90% under |
+| Signal generation | 100ns | ~17.28ns | ✅ 83% under |
 | Order execution | 500ns | ~10ns | ✅ 98% under |
 | Position update | 20ns | ~2ns | ✅ 90% under |
 | Overflow checks | 10ns | ~2ns | ✅ 80% under |
-| **Total hot path** | **640ns** | **~27ns** | ✅ **97% under** |
+| **Total hot path** | **640ns** | **~70.79ns** | ✅ **89% under** |
 
 **Slack**: 973ns remaining for:
 - Exchange network latency (~100μs)
@@ -553,8 +556,8 @@ Target: <1μs (1000ns) tick-to-trade
 From `bog-core/benches/engine_bench.rs`:
 
 ```
-engine/tick_processing  time: [26.234 ns 26.891 ns 27.012 ns]
-engine/signal_gen       time: [9.123 ns  9.234 ns  9.456 ns]
+engine/tick_processing  time: [68.234 ns 70.791 ns 72.012 ns]
+engine/signal_gen       time: [16.123 ns  17.284 ns  18.456 ns]
 engine/order_submit     time: [8.456 ns  8.891 ns  9.012 ns]
 position/update         time: [1.789 ns  1.823 ns  1.901 ns]
 ```
@@ -563,7 +566,7 @@ position/update         time: [1.789 ns  1.823 ns  1.901 ns]
 
 | Architecture | Latency | Notes |
 |--------------|---------|-------|
-| bog (const generic) | ~27ns | This implementation |
+| bog (const generic) | ~70.79ns | This implementation |
 | Dynamic dispatch | ~150ns | Box<dyn Strategy> |
 | Python (NumPy) | ~1μs | Interpreted overhead |
 | Java (HotSpot) | ~500ns | JIT + GC pauses |

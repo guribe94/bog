@@ -136,7 +136,7 @@ fn main() -> Result<()> {
     println!("└──────┴──────────┴──────────────────┴──────────────────┴────────┘\n");
 
     // Get statistics
-    let stats = feed.stats();
+    let stats = feed.consumer_stats();
     let elapsed = start.elapsed();
 
     println!("📈 Statistics:");
