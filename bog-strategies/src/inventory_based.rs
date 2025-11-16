@@ -168,8 +168,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         let signal = strategy.calculate(&snapshot);

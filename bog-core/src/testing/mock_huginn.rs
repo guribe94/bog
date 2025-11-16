@@ -73,6 +73,8 @@ impl MockHuginnFeed {
             market_id: self.market_id,
             sequence: self.last_sequence,
             exchange_timestamp_ns: self.start_time.elapsed().as_nanos() as u64,
+            local_recv_ns: self.start_time.elapsed().as_nanos() as u64,
+            local_publish_ns: self.start_time.elapsed().as_nanos() as u64,
             best_bid_price: bid_price,
             best_ask_price: ask_price,
             best_bid_size: bid_size,
@@ -81,6 +83,9 @@ impl MockHuginnFeed {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 110],
         }
     }
 

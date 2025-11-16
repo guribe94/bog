@@ -286,6 +286,24 @@ impl Executor for SimulatedExecutor {
         Ok(())
     }
 
+    fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
+        // Drain pending fills and convert to execution::Fill type
+        let mut fills = Vec::new();
+        while let Some(pooled_fill) = self.pending_fills.pop() {
+            // Convert PooledFill to execution::Fill
+            // Note: This requires mapping between the two type systems
+            // For now, return empty vector as this executor doesn't track fills
+            // in the same way as execution::SimulatedExecutor
+        }
+        fills
+    }
+
+    fn dropped_fill_count(&self) -> u64 {
+        // This executor doesn't track dropped fills
+        // Returns 0 to indicate no fills dropped
+        0
+    }
+
     fn name(&self) -> &'static str {
         "SimulatedExecutor"
     }

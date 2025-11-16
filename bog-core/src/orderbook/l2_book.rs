@@ -76,15 +76,59 @@ impl L2OrderBook {
 
     /// Synchronize from Huginn MarketSnapshot
     ///
-    /// This is a direct memcpy of all 10 levels - extremely fast (~20ns).
+    /// Detects snapshot type via IS_FULL_SNAPSHOT flag and chooses optimal path:
+    /// - Full snapshot (flag=1): Rebuild all 10 levels (~50ns)
+    /// - Incremental (flag=0): Update only top-of-book (~20ns)
+    ///
     /// No validation is performed here (validation happens in circuit breaker).
     #[inline]
     pub fn sync_from_snapshot(&mut self, snapshot: &MarketSnapshot) {
+        if snapshot.is_full_snapshot() {
+            self.full_rebuild(snapshot);
+        } else {
+            self.incremental_update(snapshot);
+        }
+    }
+
+    /// Full rebuild of all orderbook levels
+    ///
+    /// Called when IS_FULL_SNAPSHOT flag is set.
+    /// Replaces ALL state with fresh data from Huginn.
+    ///
+    /// Performance: ~50ns (memcpy of 40 u64 values)
+    #[inline]
+    pub fn full_rebuild(&mut self, snapshot: &MarketSnapshot) {
         // Copy all 10 levels (zero-copy from shared memory)
+        // This is critical: replaces ALL state with fresh data
         self.bid_prices.copy_from_slice(&snapshot.bid_prices);
         self.bid_sizes.copy_from_slice(&snapshot.bid_sizes);
         self.ask_prices.copy_from_slice(&snapshot.ask_prices);
         self.ask_sizes.copy_from_slice(&snapshot.ask_sizes);
+
+        self.last_sequence = snapshot.sequence;
+        self.last_update_ns = snapshot.exchange_timestamp_ns;
+    }
+
+    /// Incremental update of top-of-book only
+    ///
+    /// Called when IS_FULL_SNAPSHOT flag is NOT set.
+    /// Updates only the best bid/ask prices and sizes (level 0).
+    /// Deeper levels (1-9) are preserved from previous state.
+    ///
+    /// This is used during continuous trading when only top-of-book changes.
+    /// Deeper levels only update when a full snapshot arrives.
+    ///
+    /// Performance: ~20ns (copy 4 u64 values)
+    #[inline]
+    pub fn incremental_update(&mut self, snapshot: &MarketSnapshot) {
+        // Update only level 0 (best bid/ask)
+        self.bid_prices[0] = snapshot.best_bid_price;
+        self.bid_sizes[0] = snapshot.best_bid_size;
+        self.ask_prices[0] = snapshot.best_ask_price;
+        self.ask_sizes[0] = snapshot.best_ask_size;
+
+        // Preserve levels 1-9 from previous state
+        // (deeper levels don't change in incremental updates)
 
         self.last_sequence = snapshot.sequence;
         self.last_update_ns = snapshot.exchange_timestamp_ns;
@@ -412,6 +456,7 @@ mod tests {
         snapshot.market_id = 1;
         snapshot.sequence = 100;
         snapshot.exchange_timestamp_ns = 1000000000;
+        snapshot.snapshot_flags = 0; // Default: incremental (no flag)
 
         // Best bid/ask (level 0)
         snapshot.best_bid_price = 50_000_000_000_000; // $50,000
@@ -429,6 +474,18 @@ mod tests {
         }
 
         snapshot
+    }
+
+    fn set_full_snapshot(snapshot: &mut MarketSnapshot, is_full: bool) {
+        if is_full {
+            snapshot.snapshot_flags = 0x01; // IS_FULL_SNAPSHOT flag
+        } else {
+            snapshot.snapshot_flags = 0x00;
+        }
+    }
+
+    fn is_full_snapshot(snapshot: &MarketSnapshot) -> bool {
+        (snapshot.snapshot_flags & 0x01) != 0
     }
 
     #[test]
@@ -652,5 +709,242 @@ mod tests {
         assert_eq!(bid_decimal.to_string(), "50000");
         assert_eq!(ask_decimal.to_string(), "50010");
         assert_eq!(mid_decimal.to_string(), "50005");
+    }
+
+    // ========================================================================
+    // SNAPSHOT FLAG HANDLING TESTS
+    // ========================================================================
+
+    #[test]
+    fn test_full_rebuild_replaces_all_state() {
+        let mut book = L2OrderBook::new(1);
+
+        // First snapshot A
+        let mut snapshot_a = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_a, true);
+        snapshot_a.sequence = 100;
+        book.full_rebuild(&snapshot_a);
+
+        assert_eq!(book.best_bid_price(), 50_000_000_000_000);
+        assert_eq!(book.best_ask_price(), 50_010_000_000_000);
+        assert_eq!(book.last_sequence, 100);
+
+        // Second snapshot B with different prices
+        let mut snapshot_b = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_b, true);
+        snapshot_b.sequence = 101;
+        // Change prices dramatically
+        snapshot_b.best_bid_price = 51_000_000_000_000; // $51,000
+        snapshot_b.best_ask_price = 51_010_000_000_000; // $51,010
+        for i in 0..10 {
+            snapshot_b.bid_prices[i] = 51_000_000_000_000 - (i as u64 * 10_000_000_000);
+            snapshot_b.ask_prices[i] = 51_010_000_000_000 + (i as u64 * 10_000_000_000);
+        }
+        book.full_rebuild(&snapshot_b);
+
+        // Verify B completely replaced A
+        assert_eq!(book.best_bid_price(), 51_000_000_000_000);
+        assert_eq!(book.best_ask_price(), 51_010_000_000_000);
+        assert_eq!(book.last_sequence, 101);
+        // Verify all 10 levels match B (not A)
+        for i in 0..10 {
+            assert_eq!(book.bid_prices[i], snapshot_b.bid_prices[i]);
+            assert_eq!(book.ask_prices[i], snapshot_b.ask_prices[i]);
+        }
+    }
+
+    #[test]
+    fn test_incremental_update_only_changes_level_0() {
+        let mut book = L2OrderBook::new(1);
+
+        // Initialize with full snapshot
+        let mut snapshot_full = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_full, true);
+        book.full_rebuild(&snapshot_full);
+
+        // Store level 2-9 prices from initial state
+        let saved_bid_level_2 = book.bid_prices[2];
+        let saved_bid_level_5 = book.bid_prices[5];
+        let saved_ask_level_2 = book.ask_prices[2];
+        let saved_ask_level_5 = book.ask_prices[5];
+
+        // Now send incremental update with different top-of-book
+        let mut snapshot_incr = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_incr, false);
+        snapshot_incr.sequence = 101;
+        snapshot_incr.best_bid_price = 49_500_000_000_000; // Different
+        snapshot_incr.best_ask_price = 49_510_000_000_000; // Different
+        book.incremental_update(&snapshot_incr);
+
+        // Verify level 0 changed
+        assert_eq!(book.best_bid_price(), 49_500_000_000_000);
+        assert_eq!(book.best_ask_price(), 49_510_000_000_000);
+        assert_eq!(book.last_sequence, 101);
+
+        // Verify levels 1-9 preserved (NOT updated from incremental)
+        assert_eq!(book.bid_prices[2], saved_bid_level_2);
+        assert_eq!(book.bid_prices[5], saved_bid_level_5);
+        assert_eq!(book.ask_prices[2], saved_ask_level_2);
+        assert_eq!(book.ask_prices[5], saved_ask_level_5);
+    }
+
+    #[test]
+    fn test_sync_dispatches_to_full_rebuild_when_full_flag_set() {
+        let mut book = L2OrderBook::new(1);
+
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true);
+        snapshot.sequence = 50;
+
+        // Call generic sync_from_snapshot which should detect flag
+        book.sync_from_snapshot(&snapshot);
+
+        // Verify full rebuild was performed (all levels updated)
+        assert_eq!(book.last_sequence, 50);
+        for i in 0..10 {
+            assert_eq!(book.bid_prices[i], snapshot.bid_prices[i]);
+            assert_eq!(book.ask_prices[i], snapshot.ask_prices[i]);
+        }
+    }
+
+    #[test]
+    fn test_sync_dispatches_to_incremental_when_full_flag_clear() {
+        let mut book = L2OrderBook::new(1);
+
+        // Initialize with full snapshot first
+        let mut snapshot_full = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_full, true);
+        book.sync_from_snapshot(&snapshot_full);
+
+        let saved_level_5 = book.bid_prices[5];
+
+        // Now send incremental update
+        let mut snapshot_incr = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_incr, false);
+        snapshot_incr.best_bid_price = 45_000_000_000_000;
+
+        book.sync_from_snapshot(&snapshot_incr);
+
+        // Verify only level 0 updated
+        assert_eq!(book.best_bid_price(), 45_000_000_000_000);
+        // Level 5 should still be the saved value
+        assert_eq!(book.bid_prices[5], saved_level_5);
+    }
+
+    #[test]
+    fn test_full_rebuild_maintains_orderbook_invariants() {
+        let mut book = L2OrderBook::new(1);
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true);
+
+        book.full_rebuild(&snapshot);
+
+        // Verify invariants are maintained
+        assert!(!book.is_crossed(), "Orderbook should not be crossed after rebuild");
+
+        // Bids should be descending
+        for i in 1..10 {
+            assert!(book.bid_prices[i] <= book.bid_prices[i-1],
+                "Bids should be descending");
+        }
+
+        // Asks should be ascending
+        for i in 1..10 {
+            assert!(book.ask_prices[i] >= book.ask_prices[i-1],
+                "Asks should be ascending");
+        }
+    }
+
+    #[test]
+    fn test_incremental_preserves_deeper_level_sizes() {
+        let mut book = L2OrderBook::new(1);
+
+        // Initialize
+        let mut snapshot_full = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_full, true);
+        book.full_rebuild(&snapshot_full);
+
+        // Save all sizes from levels 1-9
+        let saved_bid_sizes: Vec<u64> = book.bid_sizes[1..10].to_vec();
+        let saved_ask_sizes: Vec<u64> = book.ask_sizes[1..10].to_vec();
+
+        // Apply incremental with different sizes at level 0
+        let mut snapshot_incr = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_incr, false);
+        snapshot_incr.best_bid_size = 999_999_999; // Very different
+        snapshot_incr.best_ask_size = 888_888_888; // Very different
+        book.incremental_update(&snapshot_incr);
+
+        // Verify level 0 changed
+        assert_eq!(book.best_bid_size(), 999_999_999);
+        assert_eq!(book.best_ask_size(), 888_888_888);
+
+        // Verify levels 1-9 preserved
+        for i in 1..10 {
+            assert_eq!(book.bid_sizes[i], saved_bid_sizes[i-1]);
+            assert_eq!(book.ask_sizes[i], saved_ask_sizes[i-1]);
+        }
+    }
+
+    #[test]
+    fn test_empty_orderbook_incremental_update() {
+        let mut book = L2OrderBook::new(1);
+        // Don't initialize - book is empty
+
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, false);
+        book.incremental_update(&snapshot);
+
+        // Should update level 0 even if book was empty
+        assert_eq!(book.best_bid_price(), 50_000_000_000_000);
+        assert_eq!(book.best_ask_price(), 50_010_000_000_000);
+        // But levels 1-9 should remain zero (no previous state)
+        assert_eq!(book.bid_prices[1], 0);
+        assert_eq!(book.ask_prices[1], 0);
+    }
+
+    #[test]
+    fn test_state_machine_full_to_incremental_to_full() {
+        let mut book = L2OrderBook::new(1);
+
+        // 1. Full snapshot
+        let mut snap1 = create_test_snapshot();
+        set_full_snapshot(&mut snap1, true);
+        snap1.sequence = 1;
+        book.sync_from_snapshot(&snap1);
+        let level_5_after_full = book.bid_prices[5];
+
+        // 2. Incremental update (changes level 0 only)
+        let mut snap2 = create_test_snapshot();
+        set_full_snapshot(&mut snap2, false);
+        snap2.sequence = 2;
+        snap2.best_bid_price = 40_000_000_000_000;
+        book.sync_from_snapshot(&snap2);
+
+        assert_eq!(book.best_bid_price(), 40_000_000_000_000);
+        assert_eq!(book.bid_prices[5], level_5_after_full); // Preserved
+
+        // 3. Another full snapshot (resets everything)
+        let mut snap3 = create_test_snapshot();
+        set_full_snapshot(&mut snap3, true);
+        snap3.sequence = 3;
+        snap3.bid_prices[5] = 48_000_000_000_000; // Different from snap1
+        book.sync_from_snapshot(&snap3);
+
+        assert_eq!(book.bid_prices[5], 48_000_000_000_000); // Updated
+        assert_eq!(book.last_sequence, 3);
+    }
+
+    #[test]
+    fn test_snapshot_flag_type_checking() {
+        let mut snapshot = create_test_snapshot();
+
+        // Test full snapshot flag
+        set_full_snapshot(&mut snapshot, true);
+        assert!(is_full_snapshot(&snapshot), "Flag should be set");
+
+        // Test incremental (flag clear)
+        set_full_snapshot(&mut snapshot, false);
+        assert!(!is_full_snapshot(&snapshot), "Flag should be clear");
     }
 }

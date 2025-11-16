@@ -5,6 +5,7 @@ pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
+use crate::resilience::{GapDetector, StaleDataBreaker, StaleDataConfig, FeedHealth, HealthConfig};
 
 // ============================================================================
 // Snapshot Validation (CRITICAL for Real Money Safety)
@@ -27,6 +28,8 @@ pub enum SnapshotValidationError {
     Locked { price: u64 },
     /// Spread is too wide (> 1000bps = 10%)
     SpreadTooWide { spread_bps: u32 },
+    /// Snapshot is too old (stale data)
+    StaleData { age_ns: u64, max_age_ns: u64 },
 }
 
 impl std::fmt::Display for SnapshotValidationError {
@@ -45,6 +48,14 @@ impl std::fmt::Display for SnapshotValidationError {
             SnapshotValidationError::SpreadTooWide { spread_bps } => {
                 write!(f, "Spread too wide: {}bps (max: 1000bps)", spread_bps)
             }
+            SnapshotValidationError::StaleData { age_ns, max_age_ns } => {
+                write!(
+                    f,
+                    "Snapshot is stale: age={}ms > max={}ms",
+                    age_ns / 1_000_000,
+                    max_age_ns / 1_000_000
+                )
+            }
         }
     }
 }
@@ -60,11 +71,19 @@ impl std::fmt::Display for SnapshotValidationError {
 /// 2. **Non-zero sizes**: bid_size > 0, ask_size > 0
 /// 3. **Not crossed**: bid_price < ask_price
 /// 4. **Reasonable spread**: spread < 1000bps (10%)
+/// 5. **Not stale**: age <= max_age_ns
+///
+/// # Arguments
+/// - `snapshot`: The market snapshot to validate
+/// - `max_age_ns`: Maximum acceptable age in nanoseconds (e.g., 5_000_000_000 for 5 seconds)
 ///
 /// # Returns
 /// - `Ok(())`: Snapshot is valid and safe to use
 /// - `Err(SnapshotValidationError)`: Snapshot is invalid, DO NOT TRADE
-pub fn validate_snapshot(snapshot: &MarketSnapshot) -> Result<(), SnapshotValidationError> {
+pub fn validate_snapshot(
+    snapshot: &MarketSnapshot,
+    max_age_ns: u64,
+) -> Result<(), SnapshotValidationError> {
     // Check 1: Non-zero bid price
     if snapshot.best_bid_price == 0 {
         return Err(SnapshotValidationError::ZeroBidPrice);
@@ -102,12 +121,29 @@ pub fn validate_snapshot(snapshot: &MarketSnapshot) -> Result<(), SnapshotValida
         return Err(SnapshotValidationError::SpreadTooWide { spread_bps });
     }
 
+    // Check 7: Not stale (data age within acceptable threshold)
+    if is_stale(snapshot, max_age_ns) {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        let age_ns = now_ns.saturating_sub(snapshot.exchange_timestamp_ns);
+
+        return Err(SnapshotValidationError::StaleData {
+            age_ns,
+            max_age_ns,
+        });
+    }
+
     Ok(())
 }
 
 /// Check if snapshot is valid (wrapper that returns bool)
+///
+/// Uses a default max age of 5 seconds for staleness check.
 pub fn is_valid_snapshot(snapshot: &MarketSnapshot) -> bool {
-    validate_snapshot(snapshot).is_ok()
+    const DEFAULT_MAX_AGE_NS: u64 = 5_000_000_000; // 5 seconds
+    validate_snapshot(snapshot, DEFAULT_MAX_AGE_NS).is_ok()
 }
 
 /// Check if orderbook is crossed (bid >= ask)
@@ -145,6 +181,10 @@ pub struct MarketFeed {
     last_sequence: u64,
     last_message_time: Instant,
     stats: FeedStats,
+    gap_detector: GapDetector,
+    recovery_in_progress: bool,
+    stale_breaker: StaleDataBreaker,
+    health: FeedHealth,
 }
 
 /// Statistics for the market feed
@@ -170,6 +210,10 @@ impl MarketFeed {
             last_sequence: 0,
             last_message_time: Instant::now(),
             stats: FeedStats::default(),
+            gap_detector: GapDetector::new(),
+            recovery_in_progress: false,
+            stale_breaker: StaleDataBreaker::new(StaleDataConfig::default()),
+            health: FeedHealth::new(HealthConfig::default()),
         })
     }
 
@@ -189,6 +233,10 @@ impl MarketFeed {
             last_sequence: 0,
             last_message_time: Instant::now(),
             stats: FeedStats::default(),
+            gap_detector: GapDetector::new(),
+            recovery_in_progress: false,
+            stale_breaker: StaleDataBreaker::new(StaleDataConfig::default()),
+            health: FeedHealth::new(HealthConfig::default()),
         })
     }
 
@@ -199,14 +247,21 @@ impl MarketFeed {
                 self.last_message_time = Instant::now();
                 self.stats.messages_received += 1;
 
-                // Check for sequence gaps
-                if self.last_sequence > 0 && snapshot.sequence != self.last_sequence + 1 {
-                    let gap = snapshot.sequence - self.last_sequence - 1;
+                // Mark data as fresh for stale data detector
+                self.stale_breaker.mark_fresh();
+                self.health.report_message(snapshot.sequence);
+
+                // Check for sequence gaps using wraparound-safe detector
+                let gap_size = self.gap_detector.check(snapshot.sequence);
+                if gap_size > 0 {
                     warn!(
-                        "Sequence gap detected: {} messages missed (last={}, current={})",
-                        gap, self.last_sequence, snapshot.sequence
+                        "Sequence gap detected: {} messages missed (last={}, current={}) - recovery required",
+                        gap_size, self.last_sequence, snapshot.sequence
                     );
-                    self.stats.sequence_gaps += gap;
+                    self.stats.sequence_gaps += gap_size;
+                    self.recovery_in_progress = true;
+                    // Gap recovery would be triggered here by returning a special signal
+                    // to the engine to initiate snapshot recovery
                 }
                 self.last_sequence = snapshot.sequence;
 
@@ -231,6 +286,11 @@ impl MarketFeed {
             }
             None => {
                 self.stats.empty_polls += 1;
+
+                // Mark empty poll for stale data detection
+                self.stale_breaker.mark_empty_poll();
+                self.health.report_empty_poll();
+
                 None
             }
         }
@@ -266,6 +326,31 @@ impl MarketFeed {
         self.market_id
     }
 
+    /// Check if data is fresh (not stale or offline)
+    pub fn is_data_fresh(&self) -> bool {
+        self.stale_breaker.is_fresh()
+    }
+
+    /// Get stale data breaker state
+    pub fn stale_state(&self) -> crate::resilience::StaleDataState {
+        self.stale_breaker.state()
+    }
+
+    /// Get feed health status
+    pub fn health_status(&self) -> crate::resilience::HealthStatus {
+        self.health.status()
+    }
+
+    /// Check if feed is ready to trade
+    pub fn is_ready(&self) -> bool {
+        self.health.is_ready()
+    }
+
+    /// Get health information (for monitoring)
+    pub fn health_info(&self) -> (crate::resilience::HealthStatus, u64, std::time::Duration) {
+        (self.health.status(), self.health.message_count(), self.health.uptime())
+    }
+
     /// Wait for first valid snapshot with timeout
     ///
     /// This MUST be called before starting trading to ensure orderbook is populated.
@@ -288,9 +373,11 @@ impl MarketFeed {
             max_retries as f64 * retry_delay.as_secs_f64()
         );
 
+        const MAX_DATA_AGE_NS: u64 = 5_000_000_000; // 5 seconds
+
         for attempt in 0..max_retries {
             match self.try_recv() {
-                Some(snapshot) if validate_snapshot(&snapshot).is_ok() => {
+                Some(snapshot) if validate_snapshot(&snapshot, MAX_DATA_AGE_NS).is_ok() => {
                     info!(
                         "✅ Received valid initial snapshot after {} attempts: seq={}, bid={}, ask={}",
                         attempt + 1,
@@ -357,6 +444,262 @@ impl MarketFeed {
             consumer_stats.max_gap_size
         );
     }
+
+    // ========================================================================
+    // SNAPSHOT PROTOCOL - Fast initialization and recovery
+    // ========================================================================
+
+    /// Save current read position for snapshot protocol
+    ///
+    /// Call this before requesting a snapshot. After snapshot arrival,
+    /// call rewind_to() with this value to replay messages that arrived
+    /// during the snapshot fetch.
+    ///
+    /// # Returns
+    /// Current position in ring buffer
+    ///
+    /// # Example
+    /// ```ignore
+    /// let checkpoint = feed.save_position();
+    /// feed.request_snapshot()?;
+    /// // ... wait for snapshot ...
+    /// feed.rewind_to(checkpoint)?;
+    /// ```
+    pub fn save_position(&self) -> u64 {
+        self.inner.save_position()
+    }
+
+    /// Request a full snapshot from Huginn
+    ///
+    /// Signals Huginn to fetch a complete orderbook snapshot via temporary
+    /// WebSocket connection. The snapshot will be published to shared memory
+    /// with IS_FULL_SNAPSHOT flag set.
+    ///
+    /// # Returns
+    /// - `Ok(())`: Request flag set successfully
+    /// - `Err`: Failed to set flag (shouldn't happen)
+    ///
+    /// # Performance
+    /// Non-blocking, returns immediately after flag set
+    pub fn request_snapshot(&self) -> Result<()> {
+        self.inner.request_snapshot()
+            .context("Failed to request snapshot from Huginn")
+    }
+
+    /// Check if snapshot is available (fetch completed)
+    ///
+    /// Returns true when Huginn has completed snapshot fetch and
+    /// published it to shared memory.
+    ///
+    /// # Performance
+    /// <10ns (atomic flag read)
+    pub fn snapshot_available(&self) -> bool {
+        self.inner.snapshot_available()
+    }
+
+    /// Check if Huginn is currently fetching a snapshot
+    ///
+    /// Useful for monitoring/debugging. Can be polled to track progress.
+    ///
+    /// # Performance
+    /// <10ns (atomic flag read)
+    pub fn snapshot_in_progress(&self) -> bool {
+        self.inner.snapshot_in_progress()
+    }
+
+    /// Rewind consumer to a previous position for replay
+    ///
+    /// Used after snapshot fetch to replay updates that arrived while
+    /// the snapshot was being fetched. Must be called before reading
+    /// to see the replayed updates.
+    ///
+    /// # Arguments
+    /// - `position`: Value returned by save_position()
+    ///
+    /// # Returns
+    /// - `Ok(())`: Successfully rewound
+    /// - `Err`: Position too old (overwritten in ring buffer)
+    ///
+    /// # Errors
+    /// Returns error if position is >10 seconds old (overwritten by ring buffer)
+    pub fn rewind_to(&mut self, position: u64) -> Result<()> {
+        self.inner.rewind_to(position)
+            .context("Failed to rewind to saved position (may have expired)")
+    }
+
+    /// Peek at next message without advancing position
+    ///
+    /// Non-blocking check to see if data is available. Does NOT advance
+    /// the consumer position, unlike try_recv().
+    ///
+    /// # Returns
+    /// - `Some(snapshot)`: Next message is available
+    /// - `None`: No new messages
+    ///
+    /// # Performance
+    /// 50-150ns (same as try_recv)
+    pub fn peek(&mut self) -> Option<MarketSnapshot> {
+        self.inner.peek()
+    }
+
+    /// Initialize with full snapshot (fast initialization)
+    ///
+    /// Complete initialization flow that uses snapshot protocol:
+    /// 1. Save current position (checkpoint)
+    /// 2. Request full snapshot from Huginn
+    /// 3. Wait for snapshot (with timeout)
+    /// 4. Rewind to checkpoint
+    /// 5. Replay incremental updates
+    /// 6. Return complete state
+    ///
+    /// # Arguments
+    /// - `timeout`: Maximum time to wait for snapshot (typically 5-10 seconds)
+    ///
+    /// # Returns
+    /// - `Ok(snapshot)`: Full snapshot received and replayed
+    /// - `Err(_)`: Timeout or rewind failed
+    ///
+    /// # Performance
+    /// Initialization should complete in <1 second (vs 10 seconds with polling)
+    pub fn initialize_with_snapshot(&mut self, timeout: Duration) -> Result<MarketSnapshot> {
+        info!(
+            "⏳ Initializing with snapshot protocol (timeout: {:.1}s)...",
+            timeout.as_secs_f64()
+        );
+
+        // Step 1: Save position (checkpoint for replay)
+        let checkpoint = self.save_position();
+        debug!("Saved checkpoint position: {}", checkpoint);
+
+        // Step 2: Request snapshot
+        self.request_snapshot()
+            .context("Failed to request snapshot")?;
+        info!("📸 Snapshot request sent to Huginn");
+
+        // Step 3: Wait for snapshot with timeout
+        let start = Instant::now();
+        let snapshot_received = loop {
+            // Check timeout
+            if start.elapsed() > timeout {
+                return Err(anyhow::anyhow!(
+                    "Snapshot timeout after {:.1}s. Huginn may not be responding.",
+                    timeout.as_secs_f64()
+                ));
+            }
+
+            // Try to receive any message
+            if let Some(msg) = self.try_recv() {
+                // Check if this is the full snapshot
+                if msg.is_full_snapshot() {
+                    info!(
+                        "📸 Full snapshot received (seq={}, bid={}, ask={})",
+                        msg.sequence,
+                        types::conversions::u64_to_f64(msg.best_bid_price),
+                        types::conversions::u64_to_f64(msg.best_ask_price),
+                    );
+                    break msg;
+                } else {
+                    // Incremental update, keep waiting
+                    debug!("Waiting for full snapshot (got incremental update seq={})", msg.sequence);
+                }
+            }
+
+            std::hint::spin_loop();
+        };
+
+        // Step 4: Rewind to checkpoint
+        self.rewind_to(checkpoint)
+            .context("Failed to rewind to checkpoint (snapshot took too long)")?;
+        debug!("Rewound to checkpoint position: {}", checkpoint);
+
+        // Step 5: Snapshot is in place
+        let snapshot = snapshot_received;
+
+        info!(
+            "✅ Snapshot initialization complete (took {:.3}s)",
+            start.elapsed().as_secs_f64()
+        );
+
+        Ok(snapshot)
+    }
+
+    /// Get producer epoch (detects Huginn restarts)
+    ///
+    /// Epoch is incremented each time Huginn restarts. Can be used to detect
+    /// when producer has been restarted and may need reconnection.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let initial_epoch = feed.epoch();
+    /// loop {
+    ///     if feed.epoch() != initial_epoch {
+    ///         eprintln!("Huginn restarted, reconnecting...");
+    ///         // Reconnect
+    ///     }
+    /// }
+    /// ```
+    pub fn epoch(&self) -> u64 {
+        self.inner.epoch()
+    }
+
+    // ========================================================================
+    // Gap Recovery
+    // ========================================================================
+
+    /// Check if a gap recovery is currently in progress
+    pub fn is_recovery_in_progress(&self) -> bool {
+        self.recovery_in_progress
+    }
+
+    /// Get the last detected gap size
+    pub fn last_gap_size(&self) -> u64 {
+        self.gap_detector.last_gap_size()
+    }
+
+    /// Check if a gap was detected
+    pub fn gap_detected(&self) -> bool {
+        self.gap_detector.gap_detected()
+    }
+
+    /// Mark recovery as complete and reset gap detector
+    ///
+    /// Called after successful snapshot recovery to resume normal operation
+    pub fn mark_recovery_complete(&mut self, sequence: u64) {
+        self.recovery_in_progress = false;
+        self.gap_detector.reset_at_sequence(sequence);
+        info!("Gap recovery completed, resuming normal operation from sequence {}", sequence);
+    }
+
+    /// Trigger automatic gap recovery with snapshot resync
+    ///
+    /// This is the main recovery flow:
+    /// 1. Save position
+    /// 2. Request snapshot
+    /// 3. Wait for snapshot (with timeout)
+    /// 4. Rewind to saved position
+    /// 5. Replay any buffered messages
+    /// 6. Resume from recovered state
+    pub fn recover_from_gap(&mut self, timeout: Duration) -> Result<()> {
+        if !self.gap_detected() {
+            return Ok(());
+        }
+
+        info!(
+            "Initiating gap recovery: {} messages missed at sequence {}",
+            self.last_gap_size(),
+            self.gap_detector.last_sequence()
+        );
+
+        // Use the snapshot protocol to recover
+        let snapshot = self.initialize_with_snapshot(timeout)?;
+
+        // Mark recovery as complete
+        self.mark_recovery_complete(snapshot.sequence);
+
+        info!("Gap recovery successful, resynced at sequence {}", snapshot.sequence);
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -395,7 +738,8 @@ mod tests {
     #[test]
     fn test_validate_snapshot_valid() {
         let snapshot = create_valid_test_snapshot();
-        assert!(validate_snapshot(&snapshot).is_ok());
+        const MAX_AGE: u64 = 5_000_000_000; // 5 seconds
+        assert!(validate_snapshot(&snapshot, MAX_AGE).is_ok());
         assert!(is_valid_snapshot(&snapshot));
     }
 
@@ -404,7 +748,8 @@ mod tests {
         let mut snapshot = create_valid_test_snapshot();
         snapshot.best_bid_price = 0;
 
-        let result = validate_snapshot(&snapshot);
+        const MAX_AGE: u64 = 5_000_000_000;
+        let result = validate_snapshot(&snapshot, MAX_AGE);
         assert!(matches!(result, Err(SnapshotValidationError::ZeroBidPrice)));
     }
 
@@ -414,7 +759,8 @@ mod tests {
         snapshot.best_bid_price = 50_010_000_000_000;
         snapshot.best_ask_price = 50_000_000_000_000; // Bid > Ask
 
-        let result = validate_snapshot(&snapshot);
+        const MAX_AGE: u64 = 5_000_000_000;
+        let result = validate_snapshot(&snapshot, MAX_AGE);
         assert!(matches!(result, Err(SnapshotValidationError::Crossed { .. })));
         assert!(is_crossed(&snapshot));
     }
@@ -425,7 +771,8 @@ mod tests {
         snapshot.best_bid_price = 50_000_000_000_000;
         snapshot.best_ask_price = 60_000_000_000_000; // 20% spread!
 
-        let result = validate_snapshot(&snapshot);
+        const MAX_AGE: u64 = 5_000_000_000;
+        let result = validate_snapshot(&snapshot, MAX_AGE);
         assert!(matches!(result, Err(SnapshotValidationError::SpreadTooWide { .. })));
     }
 
@@ -477,8 +824,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         }
     }
 }

@@ -474,8 +474,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         let signal = strategy.calculate(&snapshot);
@@ -507,8 +508,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         let signal = strategy.calculate(&snapshot);
@@ -565,8 +567,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         // This should be <100ns (measure with criterion in benchmarks)
@@ -595,8 +598,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         // Strategy should refuse to trade
@@ -623,8 +627,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         assert!(strategy.calculate(&low_price_snapshot).is_none());
@@ -644,8 +649,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         assert!(strategy.calculate(&high_price_snapshot).is_none());
@@ -670,8 +676,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         // Strategy should not quote in thin markets
@@ -698,8 +705,9 @@ mod tests {
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
+            _padding: [0; 110],
         };
 
         let signal = strategy.calculate(&good_snapshot);

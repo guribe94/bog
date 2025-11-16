@@ -184,7 +184,11 @@ impl RiskManager {
     }
 
     /// Update position from a fill
-    pub fn update_position(&mut self, fill: &Fill) {
+    ///
+    /// # Safety
+    /// Returns Err if position state is invalid (e.g., zero cost_basis with non-zero quantity).
+    /// This prevents trading with corrupted accounting state.
+    pub fn update_position(&mut self, fill: &Fill) -> Result<()> {
         self.check_daily_reset();
 
         // Update position
@@ -201,16 +205,14 @@ impl RiskManager {
 
                     // Invariant: if we have a non-zero position, cost_basis must be non-zero
                     // Division by zero would indicate a critical accounting bug
-                    if old_quantity == Decimal::ZERO || self.position.cost_basis == Decimal::ZERO {
-                        error!(
-                            "CRITICAL BUG: Invalid position state when covering short. \
-                             old_quantity={}, cost_basis={}, fill={:?}. \
-                             Cannot calculate PnL - skipping.",
-                            old_quantity,
-                            self.position.cost_basis,
-                            fill
-                        );
-                        Decimal::ZERO // Skip PnL calc rather than panic
+                    if old_quantity != Decimal::ZERO && self.position.cost_basis == Decimal::ZERO {
+                        return Err(anyhow!(
+                            "HALTING: Invalid position state when covering short - \
+                             old_quantity={} but cost_basis=0. This indicates position accounting corruption.",
+                            old_quantity
+                        ));
+                    } else if old_quantity == Decimal::ZERO {
+                        Decimal::ZERO
                     } else {
                         let avg_short_price = -self.position.cost_basis / old_quantity;
                         (avg_short_price - fill.price) * cover_size
@@ -227,16 +229,14 @@ impl RiskManager {
 
                     // Invariant: if we have a non-zero position, cost_basis must be non-zero
                     // Division by zero would indicate a critical accounting bug
-                    if old_quantity == Decimal::ZERO || self.position.cost_basis == Decimal::ZERO {
-                        error!(
-                            "CRITICAL BUG: Invalid position state when selling long. \
-                             old_quantity={}, cost_basis={}, fill={:?}. \
-                             Cannot calculate PnL - skipping.",
-                            old_quantity,
-                            self.position.cost_basis,
-                            fill
-                        );
-                        Decimal::ZERO // Skip PnL calc rather than panic
+                    if old_quantity != Decimal::ZERO && self.position.cost_basis == Decimal::ZERO {
+                        return Err(anyhow!(
+                            "HALTING: Invalid position state when selling long - \
+                             old_quantity={} but cost_basis=0. This indicates position accounting corruption.",
+                            old_quantity
+                        ));
+                    } else if old_quantity == Decimal::ZERO {
+                        Decimal::ZERO
                     } else {
                         let avg_long_price = self.position.cost_basis / old_quantity;
                         (fill.price - avg_long_price) * sell_size
@@ -276,6 +276,35 @@ impl RiskManager {
         if pnl != Decimal::ZERO {
             info!("Realized PnL from fill: {}", pnl);
         }
+
+        // ====================================================================
+        // CRITICAL: Post-fill position limit validation
+        // ====================================================================
+        // Check position limits AFTER fill is processed
+        // This catches cases where fills arrive out of order or are larger than expected
+
+        if self.position.quantity > Decimal::ZERO {
+            // Long position - check max long limit
+            if self.position.quantity > self.limits.max_position {
+                return Err(anyhow!(
+                    "HALTING: Position limit exceeded after fill - {} BTC > max {} BTC",
+                    self.position.quantity,
+                    self.limits.max_position
+                ));
+            }
+        } else if self.position.quantity < Decimal::ZERO {
+            // Short position - check max short limit
+            let short_qty = self.position.quantity.abs();
+            if short_qty > self.limits.max_short {
+                return Err(anyhow!(
+                    "HALTING: Short limit exceeded after fill - {} BTC > max {} BTC",
+                    short_qty,
+                    self.limits.max_short
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Increment outstanding order count

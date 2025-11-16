@@ -26,14 +26,19 @@ pub fn create_test_snapshot(
         market_id,
         sequence,
         exchange_timestamp_ns: 0,
+        local_recv_ns: 0,
+        local_publish_ns: 0,
         best_bid_price: bid_price,
         best_ask_price: ask_price,
         best_bid_size: bid_size,
         best_ask_size: ask_size,
         bid_prices: [0; 10],
-            bid_sizes: [0; 10],
+        bid_sizes: [0; 10],
         ask_prices: [0; 10],
-            ask_sizes: [0; 10],
+        ask_sizes: [0; 10],
+        snapshot_flags: 0,
+        dex_type: 1,
+        _padding: [0; 110],
     }
 }
 

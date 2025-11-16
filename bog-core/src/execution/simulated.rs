@@ -239,7 +239,11 @@ impl SimulatedExecutor {
     /// With realistic configuration, uses queue position to determine fill size
     ///
     /// Now uses state machine for type-safe transitions!
-    fn simulate_fill(&mut self, order_wrapper: &mut OrderStateWrapper, order_for_calc: &Order, order_id: &OrderId) -> Fill {
+    ///
+    /// # Safety
+    /// Returns Err if fill conversion fails (size or price converts to 0 or overflows).
+    /// This prevents position tracking from becoming inconsistent.
+    fn simulate_fill(&mut self, order_wrapper: &mut OrderStateWrapper, order_for_calc: &Order, order_id: &OrderId) -> Result<Fill> {
         let remaining = order_for_calc.remaining_size();
 
         // Calculate fill size based on queue position and configuration
@@ -258,34 +262,33 @@ impl SimulatedExecutor {
         // Convert to u64 fixed-point for state machine (WITH VALIDATION!)
         let fill_size_u64 = match (fill_size * Decimal::from(1_000_000_000)).to_u64() {
             Some(0) => {
-                warn!("⚠️ Fill size converted to zero for order {}: {} - CANNOT UPDATE STATE", order_for_calc.id, fill_size);
-                // Create fill event for tracking but don't update order state
-                let fill = Fill::new(order_for_calc.id.clone(), order_for_calc.side, fill_price, fill_size);
-                self.total_fills += 1;
-                return fill;
+                return Err(anyhow!(
+                    "HALTING: Fill size converted to zero for order {}: {} BTC - cannot update state safely",
+                    order_for_calc.id, fill_size
+                ));
             }
             Some(size) => size, // Valid size
             None => {
-                warn!("⚠️ Fill size conversion OVERFLOW for order {}: {} - CANNOT UPDATE STATE", order_for_calc.id, fill_size);
-                let fill = Fill::new(order_for_calc.id.clone(), order_for_calc.side, fill_price, fill_size);
-                self.total_fills += 1;
-                return fill;
+                return Err(anyhow!(
+                    "HALTING: Fill size conversion OVERFLOW for order {}: {} BTC - cannot update state safely",
+                    order_for_calc.id, fill_size
+                ));
             }
         };
 
         let fill_price_u64 = match (fill_price * Decimal::from(1_000_000_000)).to_u64() {
             Some(0) => {
-                warn!("🚨 Fill price converted to ZERO for order {} - WOULD GIVE AWAY MONEY! SKIPPING", order_for_calc.id);
-                let fill = Fill::new(order_for_calc.id.clone(), order_for_calc.side, fill_price, fill_size);
-                self.total_fills += 1;
-                return fill;
+                return Err(anyhow!(
+                    "HALTING: Fill price converted to ZERO for order {} - would give away money!",
+                    order_for_calc.id
+                ));
             }
             Some(price) => price, // Valid price
             None => {
-                warn!("⚠️ Fill price conversion OVERFLOW for order {}: {} - CANNOT UPDATE STATE", order_for_calc.id, fill_price);
-                let fill = Fill::new(order_for_calc.id.clone(), order_for_calc.side, fill_price, fill_size);
-                self.total_fills += 1;
-                return fill;
+                return Err(anyhow!(
+                    "HALTING: Fill price conversion OVERFLOW for order {}: ${} - cannot update state safely",
+                    order_for_calc.id, fill_price
+                ));
             }
         };
 
@@ -320,8 +323,10 @@ impl SimulatedExecutor {
 
         // Use state machine to apply fill (type-safe!)
         if let Err(e) = order_wrapper.apply_fill(fill_size_u64, fill_price_u64) {
-            warn!("Failed to apply fill to order {}: {}", order_for_calc.id, e);
-            // Fill event was created but state wasn't updated - this is tracked as a discrepancy
+            return Err(anyhow!(
+                "HALTING: Failed to apply fill to order state machine for order {}: {}",
+                order_for_calc.id, e
+            ));
         }
 
         self.total_fills += 1;
@@ -337,7 +342,7 @@ impl SimulatedExecutor {
             fill.notional()
         );
 
-        fill
+        Ok(fill)
     }
 }
 
@@ -379,7 +384,8 @@ impl Executor for SimulatedExecutor {
 
         // Simulate fill (immediate or partial based on configuration)
         // In reality, limit orders may not fill immediately
-        let fill = self.simulate_fill(&mut order_wrapper, &order, &order_id);
+        // Returns Err if conversion fails (halts trading)
+        let fill = self.simulate_fill(&mut order_wrapper, &order, &order_id)?;
 
         // Try to push fill to bounded queue
         if let Err(returned_fill) = self.pending_fills.push(fill) {

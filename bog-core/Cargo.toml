@@ -69,6 +69,10 @@ harness = false
 name = "tls_overhead_bench"
 harness = false
 
+[[bench]]
+name = "resilience_bench"
+harness = false
+
 [features]
 default = []
 

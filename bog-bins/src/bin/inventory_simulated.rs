@@ -59,13 +59,18 @@ fn main() -> Result<()> {
 }
 
 /// Create a test market feed (replace with Huginn in production)
-fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<Option<MarketSnapshot>> {
+/// Returns (snapshot, is_data_fresh) tuple
+fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<(Option<MarketSnapshot>, bool)> {
     let mut tick_count = 0u64;
     const MAX_TICKS: u64 = 1000;
+    let start_time_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
 
     move || {
         if tick_count >= MAX_TICKS {
-            return Ok(None);
+            return Ok((None, false));
         }
 
         tick_count += 1;
@@ -83,12 +88,18 @@ fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<Option<MarketSnaps
             base_price.saturating_sub((-price_offset) as u64)
         };
 
-        Ok(Some(MarketSnapshot {
+        // Use realistic current timestamps
+        let current_ns = start_time_ns + (tick_count * 100_000); // 100μs per tick
+
+        // Data is always fresh in simulated feed
+        let data_fresh = true;
+
+        Ok((Some(MarketSnapshot {
             market_id,
             sequence: tick_count,
-            exchange_timestamp_ns: tick_count * 100_000, // 100μs per tick
-            local_recv_ns: tick_count * 100_000,
-            local_publish_ns: tick_count * 100_000,
+            exchange_timestamp_ns: current_ns,
+            local_recv_ns: current_ns,
+            local_publish_ns: current_ns,
             best_bid_price: bid_price,
             best_bid_size: 1_000_000_000, // 1.0 BTC
             best_ask_price: bid_price + spread,
@@ -97,8 +108,9 @@ fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<Option<MarketSnaps
             bid_sizes: [0; 10],
             ask_prices: [0; 10],
             ask_sizes: [0; 10],
+            snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 111],
-        }))
+            _padding: [0; 110],
+        }), data_fresh))
     }
 }
