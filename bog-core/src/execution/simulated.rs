@@ -243,7 +243,7 @@ impl SimulatedExecutor {
     /// # Safety
     /// Returns Err if fill conversion fails (size or price converts to 0 or overflows).
     /// This prevents position tracking from becoming inconsistent.
-    fn simulate_fill(&mut self, order_wrapper: &mut OrderStateWrapper, order_for_calc: &Order, order_id: &OrderId) -> Result<Fill> {
+    fn simulate_fill(&mut self, order_wrapper: &mut OrderStateWrapper, order_for_calc: &Order, _order_id: &OrderId) -> Result<Fill> {
         let remaining = order_for_calc.remaining_size();
 
         // Calculate fill size based on queue position and configuration

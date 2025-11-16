@@ -721,7 +721,7 @@ mod tests {
         // In a real scenario, you'd use a mock or test harness
 
         // We can't easily test this without mocking, but we can test the logic
-        let now = Instant::now();
+        let _now = Instant::now();
         let timeout = Duration::from_secs(1);
 
         // Simulating idle check logic

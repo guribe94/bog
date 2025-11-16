@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn test_position_limit_rule() {
         let rule = PositionLimitRule::new(1_000_000_000, AlertSeverity::Critical);
-        let mut context = create_test_context();
+        let context = create_test_context();
 
         // Within limit - no alert
         assert!(rule.evaluate(&context).is_none());
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_daily_loss_limit_rule() {
         let rule = DailyLossLimitRule::new(1_000_000_000_000, AlertSeverity::Critical);
-        let mut context = create_test_context();
+        let context = create_test_context();
 
         // Within limit - no alert
         assert!(rule.evaluate(&context).is_none());

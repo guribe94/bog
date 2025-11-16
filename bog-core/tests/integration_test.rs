@@ -31,7 +31,7 @@ fn test_engine_with_simple_spread() -> Result<()> {
     };
 
     // Process tick
-    engine.process_tick(&snapshot)?;
+    engine.process_tick(&snapshot, true)?;
 
     // Check stats
     let stats = engine.stats();
@@ -61,7 +61,7 @@ fn test_engine_multiple_ticks() -> Result<()> {
             ..Default::default()
         };
 
-        engine.process_tick(&snapshot)?;
+        engine.process_tick(&snapshot, true)?;
     }
 
     // Check stats
@@ -156,13 +156,13 @@ fn test_tick_processing_latency() -> Result<()> {
 
     // Warmup
     for _ in 0..100 {
-        engine.process_tick(&snapshot)?;
+        engine.process_tick(&snapshot, true)?;
     }
 
     // Measure 1000 ticks
     let start = Instant::now();
     for _ in 0..1000 {
-        engine.process_tick(&snapshot)?;
+        engine.process_tick(&snapshot, true)?;
     }
     let elapsed = start.elapsed();
 

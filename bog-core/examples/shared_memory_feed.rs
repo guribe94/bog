@@ -147,10 +147,16 @@ fn main() -> Result<()> {
     }
     println!("\n📊 Feed Statistics:");
     println!("   Total reads: {}", stats.total_reads);
-    println!("   Successful reads: {}", stats.successful_reads);
     println!("   Empty reads: {}", stats.empty_reads);
+    let successful = stats.total_reads - stats.empty_reads;
+    println!("   Successful reads: {}", successful);
+    let rate = if stats.total_reads > 0 {
+        successful as f64 / stats.total_reads as f64
+    } else {
+        0.0
+    };
+    println!("   Success rate: {:.1}%", rate * 100.0);
     println!("   Sequence gaps: {}", stats.sequence_gaps);
-    println!("   Success rate: {:.1}%", stats.read_success_rate() * 100.0);
 
     println!("\n✅ Summary:");
     println!("   • Read {} market snapshots from shared memory", count);

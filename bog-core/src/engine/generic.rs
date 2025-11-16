@@ -643,11 +643,11 @@ mod tests {
         };
 
         // First tick - should process
-        engine.process_tick(&snapshot).unwrap();
+        engine.process_tick(&snapshot, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 1);
 
         // Second tick with same prices - should skip
-        engine.process_tick(&snapshot).unwrap();
+        engine.process_tick(&snapshot, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 2);
 
         // Strategy called but signal generated only on even calls

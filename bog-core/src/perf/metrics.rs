@@ -196,7 +196,7 @@ mod tests {
 
         // Check that counters are actually separated
         let metrics = Metrics::new();
-        let base = &metrics as *const _ as usize;
+        let _base = &metrics as *const _ as usize;
         let updates_ptr = &metrics.updates_received as *const _ as usize;
         let signals_ptr = &metrics.signals_generated as *const _ as usize;
 
