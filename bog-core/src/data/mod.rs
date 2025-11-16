@@ -1,6 +1,8 @@
 pub mod types;
+pub mod validator;
 
 pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
+pub use validator::SnapshotValidator;
 
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
@@ -174,6 +176,55 @@ pub fn is_stale(snapshot: &MarketSnapshot, max_age_ns: u64) -> bool {
     age_ns > max_age_ns
 }
 
+/// Configuration for epoch change monitoring
+#[derive(Debug, Clone)]
+pub struct EpochCheckConfig {
+    /// Check epoch every N messages (0 = disabled)
+    pub check_interval_messages: u64,
+    /// Check epoch every M milliseconds (0 = disabled)
+    pub check_interval_ms: u64,
+}
+
+impl Default for EpochCheckConfig {
+    fn default() -> Self {
+        Self {
+            check_interval_messages: 1000,  // Check every 1000 messages
+            check_interval_ms: 100,         // Check every 100ms
+        }
+    }
+}
+
+/// Configuration for adaptive backpressure handling
+#[derive(Debug, Clone)]
+pub struct BackpressureConfig {
+    /// Queue depth threshold to trigger backpressure (0 = disabled)
+    pub queue_depth_threshold: usize,
+    /// Throttle strategy when backpressured
+    pub throttle_strategy: ThrottleStrategy,
+}
+
+/// Throttle strategy for backpressure
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThrottleStrategy {
+    /// Sleep for calculated duration
+    Sleep,
+    /// Yield CPU (spin_loop hint)
+    Yield,
+    /// Skip messages to reduce backlog
+    Skip,
+    /// No throttling
+    Disabled,
+}
+
+impl Default for BackpressureConfig {
+    fn default() -> Self {
+        Self {
+            queue_depth_threshold: 1000,
+            throttle_strategy: ThrottleStrategy::Yield,
+        }
+    }
+}
+
 /// Wrapper around Huginn's MarketFeed with additional functionality
 pub struct MarketFeed {
     inner: huginn::MarketFeed,
@@ -185,6 +236,12 @@ pub struct MarketFeed {
     recovery_in_progress: bool,
     stale_breaker: StaleDataBreaker,
     health: FeedHealth,
+    last_epoch: u64,
+    epoch_check_counter: u64,
+    epoch_check_config: EpochCheckConfig,
+    last_epoch_check_time: Instant,
+    backpressure_config: BackpressureConfig,
+    backpressure_triggered: bool,
 }
 
 /// Statistics for the market feed
@@ -194,15 +251,30 @@ pub struct FeedStats {
     pub empty_polls: u64,
     pub sequence_gaps: u64,
     pub max_queue_depth: usize,
+    pub epoch_changes: u64,
+    pub messages_skipped: u64,
+    pub skipped_bytes: u64,
+    pub backpressure_events: u64,
+    pub total_throttle_ms: u64,
 }
 
 impl MarketFeed {
-    /// Connect to Huginn shared memory for a given market ID
-    pub fn connect(market_id: u64) -> Result<Self> {
+    /// Connect to Huginn shared memory for a given encoded market ID
+    ///
+    /// # Arguments
+    /// - `market_id`: Encoded market ID (dex_type * 1_000_000 + raw_market_id)
+    ///               Example: 1_000_001 for Lighter market 1
+    ///
+    /// # Recommended
+    /// Use [`connect_with_dex()`](#method.connect_with_dex) for better readability
+    pub fn connect(market_id: types::EncodedMarketId) -> Result<Self> {
         info!("Connecting to Huginn market feed for market {}", market_id);
 
         let inner = huginn::MarketFeed::connect(market_id)
             .context("Failed to connect to Huginn shared memory")?;
+
+        // Get initial epoch from huginn
+        let initial_epoch = inner.epoch();
 
         Ok(Self {
             inner,
@@ -214,11 +286,28 @@ impl MarketFeed {
             recovery_in_progress: false,
             stale_breaker: StaleDataBreaker::new(StaleDataConfig::default()),
             health: FeedHealth::new(HealthConfig::default()),
+            last_epoch: initial_epoch,
+            epoch_check_counter: 0,
+            epoch_check_config: EpochCheckConfig::default(),
+            last_epoch_check_time: Instant::now(),
+            backpressure_config: BackpressureConfig::default(),
+            backpressure_triggered: false,
         })
     }
 
-    /// Connect with explicit DEX type
-    pub fn connect_with_dex(dex_type: u8, market_id: u64) -> Result<Self> {
+    /// Connect with explicit DEX type and raw market ID (recommended)
+    ///
+    /// # Arguments
+    /// - `dex_type`: DEX identifier (1 = Lighter, 2 = Binance, etc.)
+    /// - `market_id`: Raw DEX-specific market ID (e.g., 1, 2, 3...)
+    ///
+    /// Internally encodes to: `(dex_type * 1_000_000) + market_id`
+    ///
+    /// # Example
+    /// ```ignore
+    /// let feed = MarketFeed::connect_with_dex(1, 1)?; // Lighter market 1
+    /// ```
+    pub fn connect_with_dex(dex_type: u8, market_id: types::RawMarketId) -> Result<Self> {
         info!(
             "Connecting to Huginn market feed for DEX {} market {}",
             dex_type, market_id
@@ -227,6 +316,9 @@ impl MarketFeed {
         let inner = huginn::MarketFeed::connect_with_dex(dex_type, market_id)
             .context("Failed to connect to Huginn shared memory")?;
 
+        // Get initial epoch from huginn
+        let initial_epoch = inner.epoch();
+
         Ok(Self {
             inner,
             market_id,
@@ -237,6 +329,12 @@ impl MarketFeed {
             recovery_in_progress: false,
             stale_breaker: StaleDataBreaker::new(StaleDataConfig::default()),
             health: FeedHealth::new(HealthConfig::default()),
+            last_epoch: initial_epoch,
+            epoch_check_counter: 0,
+            epoch_check_config: EpochCheckConfig::default(),
+            last_epoch_check_time: Instant::now(),
+            backpressure_config: BackpressureConfig::default(),
+            backpressure_triggered: false,
         })
     }
 
@@ -469,42 +567,23 @@ impl MarketFeed {
         self.inner.save_position()
     }
 
-    /// Request a full snapshot from Huginn
+    /// Wait for and fetch a full snapshot from the ring buffer
     ///
-    /// Signals Huginn to fetch a complete orderbook snapshot via temporary
-    /// WebSocket connection. The snapshot will be published to shared memory
-    /// with IS_FULL_SNAPSHOT flag set.
+    /// Blocks until a full snapshot arrives in the ring buffer, skipping
+    /// over any incremental updates. Use this after detecting a gap or
+    /// during initialization to get a complete orderbook state.
+    ///
+    /// # Arguments
+    /// - `timeout`: Optional timeout duration. If None, returns immediately.
     ///
     /// # Returns
-    /// - `Ok(())`: Request flag set successfully
-    /// - `Err`: Failed to set flag (shouldn't happen)
+    /// - `Some(snapshot)`: A full snapshot was received
+    /// - `None`: Timeout expired or no timeout provided and no snapshot available
     ///
     /// # Performance
-    /// Non-blocking, returns immediately after flag set
-    pub fn request_snapshot(&self) -> Result<()> {
-        self.inner.request_snapshot()
-            .context("Failed to request snapshot from Huginn")
-    }
-
-    /// Check if snapshot is available (fetch completed)
-    ///
-    /// Returns true when Huginn has completed snapshot fetch and
-    /// published it to shared memory.
-    ///
-    /// # Performance
-    /// <10ns (atomic flag read)
-    pub fn snapshot_available(&self) -> bool {
-        self.inner.snapshot_available()
-    }
-
-    /// Check if Huginn is currently fetching a snapshot
-    ///
-    /// Useful for monitoring/debugging. Can be polled to track progress.
-    ///
-    /// # Performance
-    /// <10ns (atomic flag read)
-    pub fn snapshot_in_progress(&self) -> bool {
-        self.inner.snapshot_in_progress()
+    /// Blocks for up to the timeout duration
+    pub fn fetch_snapshot(&mut self, timeout: Option<Duration>) -> Option<MarketSnapshot> {
+        self.inner.fetch_snapshot(timeout)
     }
 
     /// Rewind consumer to a previous position for replay
@@ -516,15 +595,15 @@ impl MarketFeed {
     /// # Arguments
     /// - `position`: Value returned by save_position()
     ///
-    /// # Returns
-    /// - `Ok(())`: Successfully rewound
-    /// - `Err`: Position too old (overwritten in ring buffer)
+    /// # Note
+    /// Position becomes invalid if the ring buffer wraps around (typically ~1-2 seconds).
+    /// No error is returned if the position is stale - the rewind will fail silently
+    /// and the consumer will read from the current head position instead.
     ///
-    /// # Errors
-    /// Returns error if position is >10 seconds old (overwritten by ring buffer)
-    pub fn rewind_to(&mut self, position: u64) -> Result<()> {
-        self.inner.rewind_to(position)
-            .context("Failed to rewind to saved position (may have expired)")
+    /// # Performance
+    /// <10ns (atomic write)
+    pub fn rewind_to(&mut self, position: u64) {
+        self.inner.rewind_to(position);
     }
 
     /// Peek at next message without advancing position
@@ -538,7 +617,7 @@ impl MarketFeed {
     ///
     /// # Performance
     /// 50-150ns (same as try_recv)
-    pub fn peek(&mut self) -> Option<MarketSnapshot> {
+    pub fn peek(&self) -> Option<MarketSnapshot> {
         self.inner.peek()
     }
 
@@ -567,56 +646,20 @@ impl MarketFeed {
             timeout.as_secs_f64()
         );
 
-        // Step 1: Save position (checkpoint for replay)
-        let checkpoint = self.save_position();
-        debug!("Saved checkpoint position: {}", checkpoint);
-
-        // Step 2: Request snapshot
-        self.request_snapshot()
-            .context("Failed to request snapshot")?;
-        info!("📸 Snapshot request sent to Huginn");
-
-        // Step 3: Wait for snapshot with timeout
         let start = Instant::now();
-        let snapshot_received = loop {
-            // Check timeout
-            if start.elapsed() > timeout {
-                return Err(anyhow::anyhow!(
-                    "Snapshot timeout after {:.1}s. Huginn may not be responding.",
-                    timeout.as_secs_f64()
-                ));
-            }
 
-            // Try to receive any message
-            if let Some(msg) = self.try_recv() {
-                // Check if this is the full snapshot
-                if msg.is_full_snapshot() {
-                    info!(
-                        "📸 Full snapshot received (seq={}, bid={}, ask={})",
-                        msg.sequence,
-                        types::conversions::u64_to_f64(msg.best_bid_price),
-                        types::conversions::u64_to_f64(msg.best_ask_price),
-                    );
-                    break msg;
-                } else {
-                    // Incremental update, keep waiting
-                    debug!("Waiting for full snapshot (got incremental update seq={})", msg.sequence);
-                }
-            }
-
-            std::hint::spin_loop();
-        };
-
-        // Step 4: Rewind to checkpoint
-        self.rewind_to(checkpoint)
-            .context("Failed to rewind to checkpoint (snapshot took too long)")?;
-        debug!("Rewound to checkpoint position: {}", checkpoint);
-
-        // Step 5: Snapshot is in place
-        let snapshot = snapshot_received;
+        // Fetch full snapshot directly (blocking with timeout)
+        let snapshot = self.fetch_snapshot(Some(timeout))
+            .ok_or_else(|| anyhow::anyhow!(
+                "Snapshot timeout after {:.1}s. Huginn may not have published a snapshot.",
+                timeout.as_secs_f64()
+            ))?;
 
         info!(
-            "✅ Snapshot initialization complete (took {:.3}s)",
+            "✅ Snapshot initialization complete (seq={}, bid={}, ask={}, took {:.3}s)",
+            snapshot.sequence,
+            types::conversions::u64_to_f64(snapshot.best_bid_price),
+            types::conversions::u64_to_f64(snapshot.best_ask_price),
             start.elapsed().as_secs_f64()
         );
 
@@ -640,6 +683,215 @@ impl MarketFeed {
     /// ```
     pub fn epoch(&self) -> u64 {
         self.inner.epoch()
+    }
+
+    /// Set the epoch check configuration
+    ///
+    /// # Arguments
+    /// - `config`: Epoch check configuration (check interval in messages and time)
+    pub fn set_epoch_check_config(&mut self, config: EpochCheckConfig) {
+        self.epoch_check_config = config;
+    }
+
+    /// Check if epoch has changed (Huginn restarted) and update tracking
+    ///
+    /// Epoch increments each time Huginn restarts. This method detects changes
+    /// and logs them for operational awareness.
+    ///
+    /// Checking respects the configured interval (messages and/or time based).
+    ///
+    /// # Returns
+    /// - `true`: Epoch changed (Huginn restarted)
+    /// - `false`: Epoch unchanged or check skipped due to interval
+    ///
+    /// # Performance
+    /// <10ns (single u64 comparison, when check is skipped)
+    /// <50ns (full check, when interval is met)
+    pub fn check_epoch_change(&mut self) -> bool {
+        // Check if we should skip this check based on interval
+        let should_check = {
+            let message_check = self.epoch_check_config.check_interval_messages > 0
+                && self.epoch_check_counter >= self.epoch_check_config.check_interval_messages;
+
+            let time_check = self.epoch_check_config.check_interval_ms > 0
+                && self.last_epoch_check_time.elapsed().as_millis()
+                    >= self.epoch_check_config.check_interval_ms as u128;
+
+            message_check || time_check
+        };
+
+        if !should_check {
+            self.epoch_check_counter += 1;
+            return false;
+        }
+
+        // Time to check - read current epoch
+        let current_epoch = self.inner.epoch();
+
+        if current_epoch != self.last_epoch {
+            warn!(
+                "🔄 Huginn restart detected! Epoch changed: {} → {} (market_id={})",
+                self.last_epoch, current_epoch, self.market_id
+            );
+            self.last_epoch = current_epoch;
+            self.stats.epoch_changes += 1;
+            self.epoch_check_counter = 0;
+            self.last_epoch_check_time = Instant::now();
+            true
+        } else {
+            self.epoch_check_counter = 0;
+            self.last_epoch_check_time = Instant::now();
+            false
+        }
+    }
+
+    // ========================================================================
+    // Conditional Processing (Peek-based skipping)
+    // ========================================================================
+
+    /// Peek at the next message to decide if it should be processed
+    ///
+    /// Useful for conditional processing - skip redundant updates when not trading,
+    /// or skip incremental updates when waiting for snapshots.
+    ///
+    /// # Example
+    /// ```ignore
+    /// if let Some(snapshot) = feed.peek() {
+    ///     if !snapshot.is_full_snapshot() && !is_trading() {
+    ///         // Skip incremental updates while waiting for full snapshot
+    ///         feed.try_recv();  // Consume without processing
+    ///         continue;
+    ///     }
+    /// }
+    /// ```
+    pub fn peek_next(&self) -> Option<MarketSnapshot> {
+        self.peek()
+    }
+
+    /// Skip the next message if it matches a condition
+    ///
+    /// Returns true if message was skipped (and consumed), false if processed.
+    ///
+    /// # Arguments
+    /// - `skip_condition`: Closure returning true if message should be skipped
+    ///
+    /// # Returns
+    /// - `true`: Message was skipped and consumed
+    /// - `false`: Message should be processed
+    pub fn skip_if<F>(&mut self, skip_condition: F) -> bool
+    where
+        F: Fn(&MarketSnapshot) -> bool,
+    {
+        if let Some(snapshot) = self.peek() {
+            if skip_condition(&snapshot) {
+                // Consume the message without processing
+                let _ = self.try_recv();
+                const SNAPSHOT_SIZE_BYTES: u64 = 512;
+                self.stats.messages_skipped += 1;
+                self.stats.skipped_bytes += SNAPSHOT_SIZE_BYTES;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get the skip rate (percentage of messages skipped)
+    pub fn skip_rate(&self) -> f64 {
+        let total = self.stats.messages_received + self.stats.messages_skipped;
+        if total == 0 {
+            0.0
+        } else {
+            (self.stats.messages_skipped as f64 / total as f64) * 100.0
+        }
+    }
+
+    // ========================================================================
+    // Backpressure Handling
+    // ========================================================================
+
+    /// Set the backpressure configuration
+    ///
+    /// # Arguments
+    /// - `config`: Backpressure configuration (threshold and throttle strategy)
+    pub fn set_backpressure_config(&mut self, config: BackpressureConfig) {
+        self.backpressure_config = config;
+    }
+
+    /// Check and handle backpressure based on queue depth
+    ///
+    /// Monitors the queue depth and applies throttling if configured threshold is exceeded.
+    ///
+    /// # Returns
+    /// - `true`: Backpressure is active (consumer behind on processing)
+    /// - `false`: Queue is normal
+    ///
+    /// # Performance
+    /// <50ns (single queue_depth check + comparison)
+    pub fn check_backpressure(&mut self) -> bool {
+        if self.backpressure_config.queue_depth_threshold == 0 {
+            return false; // Backpressure disabled
+        }
+
+        let queue_depth = self.queue_depth();
+        let threshold = self.backpressure_config.queue_depth_threshold;
+        let now_triggered = queue_depth > threshold;
+
+        // Detect transition to backpressure
+        if now_triggered && !self.backpressure_triggered {
+            warn!(
+                "⚠️ Backpressure triggered! Queue depth {} > threshold {}",
+                queue_depth, threshold
+            );
+            self.stats.backpressure_events += 1;
+            self.backpressure_triggered = true;
+        }
+
+        // Release backpressure when recovered
+        if !now_triggered && self.backpressure_triggered {
+            info!("✅ Backpressure released. Queue depth normalized to {}", queue_depth);
+            self.backpressure_triggered = false;
+        }
+
+        // Apply throttling if needed
+        if now_triggered {
+            match self.backpressure_config.throttle_strategy {
+                ThrottleStrategy::Sleep => {
+                    // Calculate throttle duration based on how far behind we are
+                    let backlog = queue_depth - threshold;
+                    let throttle_ms = ((backlog as f64 / 100.0).min(50.0)) as u64;
+                    self.stats.total_throttle_ms += throttle_ms;
+                    std::thread::sleep(std::time::Duration::from_millis(throttle_ms));
+                }
+                ThrottleStrategy::Yield => {
+                    // Just yield CPU, let other threads run
+                    std::hint::spin_loop();
+                }
+                ThrottleStrategy::Skip => {
+                    // Skip next message to reduce backlog
+                    let _ = self.try_recv();
+                }
+                ThrottleStrategy::Disabled => {
+                    // No throttling, even though backpressured
+                }
+            }
+        }
+
+        now_triggered
+    }
+
+    /// Get backpressure status
+    pub fn is_backpressured(&self) -> bool {
+        self.backpressure_triggered
+    }
+
+    /// Get backpressure percentage (how often backpressured)
+    pub fn backpressure_percentage(&self) -> f64 {
+        if self.stats.backpressure_events == 0 {
+            0.0
+        } else {
+            (self.stats.backpressure_events as f64 / self.stats.messages_received.max(1) as f64)
+                * 100.0
+        }
     }
 
     // ========================================================================

@@ -94,7 +94,7 @@ impl StaleDataBreaker {
 
         // Check for stale condition: data too old
         let age = self.last_update.elapsed();
-        if age > self.config.max_age {
+        if age >= self.config.max_age {
             self.state = StaleDataState::Stale;
         }
     }

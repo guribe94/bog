@@ -7,6 +7,78 @@ pub use huginn::shm::{ConsumerStats, MarketSnapshot};
 // Re-export extension trait
 pub use conversions::*;
 
+/// Type alias for encoded market IDs
+/// Encoded format: (dex_type * 1_000_000) + raw_market_id
+/// Example: Lighter (dex_type=1) market 1 = 1,000,001
+pub type EncodedMarketId = u64;
+
+/// Type alias for raw market IDs
+/// Raw format: DEX-specific market identifier (e.g., 1, 2, 3...)
+pub type RawMarketId = u64;
+
+/// Encode a market ID by combining DEX type and raw market ID
+///
+/// # Arguments
+/// - `dex_type`: DEX identifier (1 = Lighter, 2 = Binance, etc.)
+/// - `market_id`: Raw DEX-specific market ID (e.g., 1, 2, 3...)
+///
+/// # Returns
+/// Encoded market ID: `(dex_type * 1_000_000) + market_id`
+///
+/// # Example
+/// ```rust
+/// let encoded = encode_market_id(1, 1); // Lighter market 1
+/// assert_eq!(encoded, 1_000_001);
+/// ```
+#[inline]
+pub fn encode_market_id(dex_type: u8, market_id: u64) -> EncodedMarketId {
+    ((dex_type as u64) * 1_000_000) + market_id
+}
+
+/// Encode a market ID with validation
+///
+/// Returns an error if the market_id >= 1_000_000 (would exceed encoding space)
+///
+/// # Arguments
+/// - `dex_type`: DEX identifier
+/// - `market_id`: Raw market ID
+///
+/// # Returns
+/// - `Ok(encoded)`: Successfully encoded market ID
+/// - `Err`: Market ID >= 1_000_000 (exceeds encoding capacity)
+#[inline]
+pub fn encode_market_id_checked(dex_type: u8, market_id: u64) -> Result<EncodedMarketId, String> {
+    if market_id >= 1_000_000 {
+        Err(format!(
+            "Market ID {} exceeds maximum (999,999). DEX encoding requires space for 1M markets per DEX.",
+            market_id
+        ))
+    } else {
+        Ok(encode_market_id(dex_type, market_id))
+    }
+}
+
+/// Decode a market ID into DEX type and raw market ID
+///
+/// # Arguments
+/// - `encoded_id`: Encoded market ID (from `encode_market_id()`)
+///
+/// # Returns
+/// Tuple of `(dex_type, raw_market_id)`
+///
+/// # Example
+/// ```rust
+/// let (dex, market) = decode_market_id(1_000_001);
+/// assert_eq!(dex, 1);    // Lighter
+/// assert_eq!(market, 1); // market 1
+/// ```
+#[inline]
+pub fn decode_market_id(encoded_id: EncodedMarketId) -> (u8, RawMarketId) {
+    let dex_type = (encoded_id / 1_000_000) as u8;
+    let market_id = encoded_id % 1_000_000;
+    (dex_type, market_id)
+}
+
 /// Helper functions for price conversions
 pub mod conversions {
     use super::*;
