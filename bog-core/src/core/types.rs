@@ -61,7 +61,20 @@ impl OrderId {
 
         let counter = COUNTER.with(|c| {
             let val = c.get();
-            c.set(val.wrapping_add(1));
+            let next = val.wrapping_add(1);
+
+            // SAFETY: Detect and log OrderId counter wraparound
+            // This is a critical event that should never happen in production
+            // u32 allows 4 billion orders before wrap
+            if next < val {
+                // Counter wrapped around!
+                // In production, this should trigger alerts
+                eprintln!("CRITICAL: OrderId counter wraparound detected! Old: {}, New: {}", val, next);
+                // Could also panic here in debug mode:
+                // debug_assert!(false, "OrderId counter wraparound!");
+            }
+
+            c.set(next);
             val
         });
 
@@ -386,6 +399,217 @@ impl Position {
         let new = old.saturating_add(delta);
         self.daily_pnl.store(new, Ordering::Release);
         new
+    }
+
+    // ===== FILL PROCESSING =====
+    //
+    // Methods for processing fills (trade executions) and updating position state.
+    // Critical for accurate position tracking in paper trading and live execution.
+
+    /// Process a fill from the simulated executor (using fixed-point arithmetic)
+    ///
+    /// Updates position quantity, realized PnL, and trade count atomically.
+    /// Uses u64 fixed-point values (9 decimal places) for zero-allocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `order_side` - 0 for Buy, 1 for Sell
+    /// * `price` - Fill price in fixed-point (9 decimals)
+    /// * `size` - Fill size in fixed-point (9 decimals)
+    /// * `fee_bps` - Fee in basis points (e.g., 2 for 0.02%)
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(())` if the fill was processed successfully
+    /// - `Err(OverflowError)` if any arithmetic operation would overflow
+    ///
+    /// # Performance
+    ///
+    /// Target: <10ns for the entire operation
+    /// Uses relaxed ordering where safe, AcqRel for critical updates
+    #[inline(always)]
+    pub fn process_fill_fixed_with_fee(
+        &self,
+        order_side: u8,
+        price: u64,
+        size: u64,
+        fee_bps: u32,
+    ) -> Result<(), OverflowError> {
+        // Convert size to i64 for position delta
+        let size_i64 = size as i64;
+
+        // Calculate position delta based on side
+        // Buy (0) increases position, Sell (1) decreases position
+        let position_delta = if order_side == 0 {
+            size_i64  // Buy: increase position
+        } else {
+            -size_i64  // Sell: decrease position
+        };
+
+        // Get current position before update
+        let old_qty = self.quantity.load(Ordering::Acquire);
+
+        // Calculate PnL if we're reducing/closing position
+        let pnl = if (old_qty > 0 && position_delta < 0) || (old_qty < 0 && position_delta > 0) {
+            // We're reducing or reversing position - calculate PnL
+            let closing_qty = if position_delta.abs() > old_qty.abs() {
+                old_qty.abs()  // Closing entire position
+            } else {
+                position_delta.abs()  // Partial close
+            };
+
+            // Get current average entry price
+            let entry_price = self.entry_price.load(Ordering::Acquire);
+
+            if entry_price > 0 {
+                // Calculate PnL: (exit_price - entry_price) * quantity for long
+                // or (entry_price - exit_price) * quantity for short
+                let price_diff = if old_qty > 0 {
+                    // Long position: profit if exit > entry
+                    price as i64 - entry_price as i64
+                } else {
+                    // Short position: profit if exit < entry
+                    entry_price as i64 - price as i64
+                };
+
+                // PnL = price_diff * closing_quantity / SCALE
+                // We divide by SCALE because both price and quantity are in fixed-point
+                let gross_pnl = (price_diff as i128 * closing_qty as i128 / 1_000_000_000) as i64;
+
+                // Calculate fee in fixed-point
+                // fee = (price * closing_qty * fee_bps) / (10000 * SCALE)
+                // Careful with order to avoid overflow
+                let fee = ((price as u128 * closing_qty as u128 * fee_bps as u128)
+                    / (10_000 * 1_000_000_000)) as i64;
+
+                // Net PnL = Gross PnL - Fee
+                gross_pnl.saturating_sub(fee)
+            } else {
+                0  // No entry price set, no PnL
+            }
+        } else {
+            0  // Not closing, no realized PnL
+        };
+
+        // Update position quantity with overflow check
+        let new_qty = old_qty.checked_add(position_delta)
+            .ok_or(OverflowError::QuantityOverflow { old: old_qty, delta: position_delta })?;
+
+        self.quantity.store(new_qty, Ordering::Release);
+
+        // Update entry price (weighted average for increases)
+        if (new_qty > 0 && position_delta > 0) || (new_qty < 0 && position_delta < 0) {
+            // Position increased in same direction - update weighted average entry
+            let old_entry = self.entry_price.load(Ordering::Acquire);
+
+            if old_entry == 0 || old_qty == 0 {
+                // First position or was flat - set entry price
+                self.entry_price.store(price, Ordering::Release);
+            } else {
+                // Calculate weighted average: (old_entry * old_qty + new_price * new_qty) / total_qty
+                let old_value = (old_entry as u128 * old_qty.abs() as u128) / 1_000_000_000;
+                let new_value = (price as u128 * position_delta.abs() as u128) / 1_000_000_000;
+                let total_value = old_value + new_value;
+                let total_qty = old_qty.abs() + position_delta.abs();
+
+                if total_qty > 0 {
+                    let avg_entry_u128 = (total_value * 1_000_000_000) / total_qty as u128;
+
+                    // Check for overflow before casting to u64
+                    if avg_entry_u128 > u64::MAX as u128 {
+                        // Entry price would overflow - clamp to maximum
+                        // This is an extreme edge case (BTC at billions per coin)
+                        // Better to clamp than corrupt the value
+                        self.entry_price.store(u64::MAX, Ordering::Release);
+                    } else {
+                        let avg_entry = avg_entry_u128 as u64;
+                        self.entry_price.store(avg_entry, Ordering::Release);
+                    }
+                }
+            }
+        } else if new_qty == 0 {
+            // Position closed - reset entry price
+            self.entry_price.store(0, Ordering::Release);
+        }
+
+        // Update realized PnL if we had any
+        if pnl != 0 {
+            self.update_realized_pnl_checked(pnl)?;
+            self.update_daily_pnl_checked(pnl)?;
+        }
+
+        // Increment trade count
+        self.increment_trades_checked()?;
+
+        Ok(())
+    }
+
+    /// Process a fill from the simulated executor (backward compatibility)
+    ///
+    /// Calls process_fill_fixed_with_fee with 0 fees for backward compatibility.
+    #[inline(always)]
+    pub fn process_fill_fixed(
+        &self,
+        order_side: u8,
+        price: u64,
+        size: u64,
+    ) -> Result<(), OverflowError> {
+        // Call with 0 fee for backward compatibility
+        self.process_fill_fixed_with_fee(order_side, price, size, 0)
+    }
+
+    /// Get current average entry price
+    #[inline(always)]
+    pub fn get_entry_price(&self) -> u64 {
+        self.entry_price.load(Ordering::Relaxed)
+    }
+
+    /// Calculate unrealized PnL given current market price
+    ///
+    /// # Arguments
+    ///
+    /// * `market_price` - Current market price in fixed-point (9 decimals)
+    ///
+    /// # Returns
+    ///
+    /// Unrealized PnL in fixed-point (9 decimals), or 0 if no position or no entry price
+    ///
+    /// # Safety
+    ///
+    /// This method handles the edge case where entry_price is 0 (corrupted state)
+    /// by returning 0 instead of panicking from division by zero.
+    #[inline(always)]
+    pub fn get_unrealized_pnl(&self, market_price: u64) -> i64 {
+        let qty = self.quantity.load(Ordering::Relaxed);
+        if qty == 0 {
+            return 0; // No position, no unrealized PnL
+        }
+
+        let entry_price = self.entry_price.load(Ordering::Relaxed);
+        if entry_price == 0 {
+            // SAFETY: Handle corrupted state gracefully
+            // This could happen due to:
+            // 1. Bug in fill processing
+            // 2. Concurrent modification issues
+            // 3. Memory corruption
+            // Return 0 rather than panic
+            return 0;
+        }
+
+        // Calculate price difference based on position side
+        let price_diff = if qty > 0 {
+            // Long position: profit if market > entry
+            market_price as i64 - entry_price as i64
+        } else {
+            // Short position: profit if market < entry
+            entry_price as i64 - market_price as i64
+        };
+
+        // PnL = price_diff * abs(quantity) / SCALE
+        // We divide by SCALE because both price and quantity are in fixed-point
+        let abs_qty = qty.abs();
+        let pnl = (price_diff as i128 * abs_qty as i128 / 1_000_000_000) as i64;
+        pnl
     }
 }
 

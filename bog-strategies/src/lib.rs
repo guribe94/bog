@@ -143,6 +143,10 @@ pub mod inventory_based;
 pub mod volatility;
 pub mod fees;
 
+// Test utilities (only available in test builds)
+#[cfg(test)]
+pub mod test_helpers;
+
 // Re-export strategies for convenience
 pub use simple_spread::SimpleSpread;
 pub use inventory_based::InventoryBased;

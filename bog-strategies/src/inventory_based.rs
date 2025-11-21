@@ -11,7 +11,7 @@
 //! TODO: Full implementation in Phase 4
 //! For now, this is a stub that demonstrates the ZST pattern.
 
-use bog_core::core::Signal;
+use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
 
@@ -88,7 +88,7 @@ impl InventoryBased {
 
 impl Strategy for InventoryBased {
     #[inline(always)]
-    fn calculate(&mut self, snapshot: &MarketSnapshot) -> Option<Signal> {
+    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal> {
         // Extract best bid and ask
         let bid = snapshot.best_bid_price;
         let ask = snapshot.best_ask_price;
@@ -101,9 +101,8 @@ impl Strategy for InventoryBased {
         // Calculate mid price
         let mid_price = bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2;
 
-        // TODO: Get actual inventory from Position
-        // For now, use 0 (neutral)
-        let current_inventory = 0i64;
+        // Get actual inventory from Position
+        let current_inventory = position.get_quantity();
 
         // Calculate inventory skew
         let skew = Self::calculate_inventory_skew(current_inventory);
@@ -173,7 +172,8 @@ mod tests {
             _padding: [0; 110],
         };
 
-        let signal = strategy.calculate(&snapshot);
+        let position = Position::new();
+        let signal = strategy.calculate(&snapshot, &position);
         assert!(signal.is_some());
     }
 

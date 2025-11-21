@@ -1,0 +1,11 @@
+COMMIT RULES - DO NOT VIOLATE
+==============================
+
+1. NEVER add attribution lines to commits
+2. NEVER add "Generated with Claude Code" or similar
+3. NEVER add "Co-Authored-By" lines
+4. Keep commit messages clean and minimal
+5. Only commit when explicitly asked
+6. Use concise, direct language in messages
+
+VIOLATIONS RESULT IN USER ANGER. DO NOT VIOLATE.

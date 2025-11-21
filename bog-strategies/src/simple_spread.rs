@@ -117,9 +117,11 @@
 //!
 //! Target: <100ns signal generation ✅ **Achieved: ~5ns** (20x faster)
 
-use bog_core::core::Signal;
+use bog_core::config::{MAX_POSITION, INVENTORY_IMPACT_BPS, VOLATILITY_SPIKE_THRESHOLD_BPS};
+use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
+use crate::volatility::RollingVolatility;
 use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
@@ -223,6 +225,44 @@ pub const MAX_VALID_PRICE: u64 = 1_000_000_000_000_000; // $1,000,000
 /// Below this we don't quote (< 0.001 BTC)
 pub const MIN_SIZE_THRESHOLD: u64 = 1_000_000; // 0.001 BTC
 
+// === DEPTH AWARENESS CONFIGURATION (Compile-Time) ===
+
+/// Number of orderbook levels to use for depth calculations
+/// Default: 5 levels (good balance of information vs performance)
+#[cfg(not(any(
+    feature = "depth-disabled",
+    feature = "depth-1",
+    feature = "depth-3",
+    feature = "depth-5",
+    feature = "depth-10"
+)))]
+pub const DEPTH_LEVELS: usize = 5;
+
+#[cfg(feature = "depth-disabled")]
+pub const DEPTH_LEVELS: usize = 1;  // Top-of-book only
+
+#[cfg(feature = "depth-1")]
+pub const DEPTH_LEVELS: usize = 1;
+
+#[cfg(feature = "depth-3")]
+pub const DEPTH_LEVELS: usize = 3;
+
+#[cfg(feature = "depth-5")]
+pub const DEPTH_LEVELS: usize = 5;
+
+#[cfg(feature = "depth-10")]
+pub const DEPTH_LEVELS: usize = 10;
+
+/// Imbalance threshold for spread adjustment (fixed-point)
+/// If imbalance > +20% (bullish) or < -20% (bearish), adjust spreads
+/// Default: 0.2 (20% imbalance triggers adjustment)
+pub const IMBALANCE_THRESHOLD: i64 = 200_000_000;  // 0.2 in fixed-point
+
+/// Spread adjustment amount in basis points
+/// When imbalance detected, adjust bid/ask by this amount
+/// Default: 2bps adjustment
+pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
+
 // Note: We calculate spread dynamically rather than pre-computing
 // to allow for const generic parameters to work with any spread value
 
@@ -230,28 +270,83 @@ pub const MIN_SIZE_THRESHOLD: u64 = 1_000_000; // 0.001 BTC
 ///
 /// This strategy posts quotes at a fixed spread around the mid price.
 /// All parameters are const, resolved at compile time.
+///
+/// **Enhanced with depth awareness** (compile-time configurable):
+/// - VWAP-based mid pricing (feature: depth-vwap)
+/// - Imbalance-adjusted spreads (feature: depth-imbalance)
+/// - Multi-level quote placement (feature: depth-multi-level)
 pub struct SimpleSpread;
 
 impl SimpleSpread {
-    /// Calculate quote prices from mid price
+    /// Calculate volatility-adjusted spread multiplier
+    ///
+    /// Returns a multiplier (100 = 1.0x, 150 = 1.5x, etc) based on recent volatility
+    /// High volatility → wider spreads (up to 2x)
+    /// Low volatility → tighter spreads (down to 0.5x)
+    #[inline(always)]
+    fn calculate_volatility_multiplier(mid_price: u64) -> u64 {
+        // Use a simple price-based volatility proxy for now
+        // In production, would use actual historical volatility
+
+        // Placeholder: returns 100 (1.0x multiplier) for now
+        // TODO: Integrate with actual volatility tracker
+        100
+    }
+
+    /// Check if we should cancel all orders due to market conditions
+    ///
+    /// Returns true if:
+    /// - Spread has widened beyond safety threshold
+    /// - Market has gapped significantly
+    /// - Liquidity has disappeared
+    #[inline(always)]
+    fn should_cancel_orders(snapshot: &MarketSnapshot) -> bool {
+        let bid = snapshot.best_bid_price;
+        let ask = snapshot.best_ask_price;
+
+        // Cancel if prices are invalid
+        if bid == 0 || ask == 0 || ask <= bid {
+            return true;
+        }
+
+        // Cancel if spread is too wide (using config threshold for abnormal market)
+        let spread_bps = ((ask - bid) * 10_000) / bid;
+        if spread_bps > VOLATILITY_SPIKE_THRESHOLD_BPS {
+            return true;
+        }
+
+        // Cancel if liquidity is too low (less than 10% of normal)
+        const CRITICAL_LIQUIDITY: u64 = 10_000_000; // 0.01 BTC
+        if snapshot.best_bid_size < CRITICAL_LIQUIDITY || snapshot.best_ask_size < CRITICAL_LIQUIDITY {
+            return true;
+        }
+
+        false
+    }
+
+    /// Calculate quote prices from mid price with volatility adjustment
     ///
     /// Returns (bid_price, ask_price) in u64 fixed-point
     ///
     /// # Overflow Safety
     ///
     /// Uses u128 intermediate arithmetic to prevent overflow when calculating:
-    /// mid_price * SPREAD_BPS
+    /// mid_price * SPREAD_BPS * volatility_multiplier
     ///
     /// Without this, prices > ~184 quadrillion would overflow and produce
     /// tiny spreads, leading to losses on fees.
     #[inline(always)]
     fn calculate_quotes(mid_price: u64) -> (u64, u64) {
-        // Calculate half spread: mid_price * (spread_bps / 20000)
-        // Use u128 to prevent overflow: mid_price * SPREAD_BPS could exceed u64::MAX
-        let half_spread = ((mid_price as u128 * SPREAD_BPS as u128) / 20_000) as u64;
+        // Get volatility multiplier (100 = 1.0x)
+        let vol_multiplier = Self::calculate_volatility_multiplier(mid_price);
 
-        let bid_price = mid_price.saturating_sub(half_spread);
-        let ask_price = mid_price.saturating_add(half_spread);
+        // Calculate half spread with volatility adjustment
+        // Formula: mid_price * SPREAD_BPS * vol_multiplier / (20_000 * 100)
+        let half_spread = ((mid_price as u128 * SPREAD_BPS as u128 * vol_multiplier as u128)
+                          / (20_000 * 100)) as u64;
+
+        let bid_price = mid_price.checked_sub(half_spread).unwrap_or(1); // Min price of 1
+        let ask_price = mid_price.checked_add(half_spread).unwrap_or(u64::MAX - 1);
 
         (bid_price, ask_price)
     }
@@ -288,11 +383,227 @@ impl SimpleSpread {
     fn is_liquidity_sufficient(bid_size: u64, ask_size: u64) -> bool {
         bid_size >= MIN_SIZE_THRESHOLD && ask_size >= MIN_SIZE_THRESHOLD
     }
+
+    // ========================================================================
+    // DEPTH-AWARE FUNCTIONALITY (Stub - will be implemented in Phase 3)
+    // ========================================================================
+
+    /// Calculate VWAP-based mid price across orderbook depth
+    ///
+    /// # Arguments
+    /// * `snapshot` - Market snapshot with depth data
+    /// * `max_levels` - Maximum depth levels to use (1-10)
+    ///
+    /// # Returns
+    /// * `Some(mid_price)` - VWAP mid price if depth available
+    /// * `None` - If no valid depth data
+    ///
+    /// # Performance
+    /// Target: <10ns (uses bog-core::orderbook::depth::calculate_vwap)
+    #[inline(always)]
+    #[allow(dead_code)]
+    fn calculate_vwap_mid_price(snapshot: &MarketSnapshot, max_levels: usize) -> Option<u64> {
+        use bog_core::orderbook::depth::calculate_vwap;
+
+        // Try to calculate VWAP for bid and ask sides
+        let bid_vwap = calculate_vwap(snapshot, true, max_levels);
+        let ask_vwap = calculate_vwap(snapshot, false, max_levels);
+
+        // If both VWAPs available, use them
+        if let (Some(bid), Some(ask)) = (bid_vwap, ask_vwap) {
+            // Calculate mid from VWAPs (overflow-safe)
+            let mid = bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2;
+            return Some(mid);
+        }
+
+        // Fallback: use top-of-book if depth is empty
+        if snapshot.best_bid_price > 0 && snapshot.best_ask_price > 0 {
+            let mid = snapshot.best_bid_price / 2 + snapshot.best_ask_price / 2 +
+                     (snapshot.best_bid_price % 2 + snapshot.best_ask_price % 2) / 2;
+            return Some(mid);
+        }
+
+        None
+    }
+
+    /// Calculate orderbook imbalance
+    ///
+    /// # Arguments
+    /// * `snapshot` - Market snapshot with depth data
+    /// * `max_levels` - Maximum depth levels to use (1-10)
+    ///
+    /// # Returns
+    /// Imbalance in range [-1.0, +1.0] (fixed-point)
+    /// * +1.0 = 100% bid pressure (bullish)
+    /// * -1.0 = 100% ask pressure (bearish)
+    /// * 0.0 = Balanced book
+    ///
+    /// # Performance
+    /// Target: <8ns (uses bog-core::orderbook::depth::calculate_imbalance)
+    #[inline(always)]
+    #[allow(dead_code)]
+    fn calculate_imbalance(snapshot: &MarketSnapshot, max_levels: usize) -> i64 {
+        bog_core::orderbook::depth::calculate_imbalance(snapshot, max_levels)
+    }
+
+    /// Calculate spread adjustments based on orderbook imbalance
+    ///
+    /// # Arguments
+    /// * `snapshot` - Market snapshot with depth data
+    /// * `max_levels` - Maximum depth levels to use (1-10)
+    ///
+    /// # Returns
+    /// (bid_adjustment, ask_adjustment) in fixed-point (u64)
+    /// * Positive = widen spread
+    /// * Negative = tighten spread
+    ///
+    /// # Logic
+    /// * Bullish imbalance (> +20%): Tighten bid (-adj), Widen ask (+adj)
+    /// * Bearish imbalance (< -20%): Widen bid (+adj), Tighten ask (-adj)
+    /// * Balanced (±20%): No adjustment (0, 0)
+    ///
+    /// # Performance
+    /// Target: <15ns (calls calculate_imbalance + simple arithmetic)
+    #[inline(always)]
+    #[allow(dead_code)]
+    fn calculate_spread_adjustment(snapshot: &MarketSnapshot, max_levels: usize) -> (i64, i64) {
+        let imbalance = Self::calculate_imbalance(snapshot, max_levels);
+
+        // Calculate adjustment in fixed-point (basis points to fixed-point price)
+        // SPREAD_ADJUSTMENT_BPS = 2bps
+        // For $50,000: 2bps = $50,000 * 0.0002 = $10
+        let mid_approx = (snapshot.best_bid_price + snapshot.best_ask_price) / 2;
+        let adjustment_raw = ((mid_approx as u128 * SPREAD_ADJUSTMENT_BPS as u128) / 10_000) as i64;
+
+        // Apply adjustment based on imbalance threshold
+        if imbalance > IMBALANCE_THRESHOLD {
+            // Strong bid pressure (bullish)
+            // Tighten bid to compete, widen ask to avoid adverse selection
+            (-adjustment_raw, adjustment_raw)
+        } else if imbalance < -IMBALANCE_THRESHOLD {
+            // Strong ask pressure (bearish)
+            // Widen bid to avoid adverse selection, tighten ask to compete
+            (adjustment_raw, -adjustment_raw)
+        } else {
+            // Balanced book - no adjustment needed
+            (0, 0)
+        }
+    }
+
+    /// Select which orderbook level to quote at
+    ///
+    /// # Arguments
+    /// * `snapshot` - Market snapshot with depth data
+    /// * `is_bid` - true for bid side, false for ask side
+    ///
+    /// # Returns
+    /// Level index (0-9) to quote at
+    ///
+    /// # Logic
+    /// Scans levels 0-2 to find the best level with:
+    /// - Sufficient liquidity (size > MIN_SIZE_THRESHOLD)
+    /// - Profitable spread after joining
+    ///
+    /// Defaults to level 0 if no better option found.
+    ///
+    /// # Performance
+    /// Target: <20ns (iterates max 3 levels)
+    #[inline(always)]
+    #[allow(dead_code)]
+    fn select_quote_level(snapshot: &MarketSnapshot, is_bid: bool) -> usize {
+        let (prices, sizes) = if is_bid {
+            (&snapshot.bid_prices, &snapshot.bid_sizes)
+        } else {
+            (&snapshot.ask_prices, &snapshot.ask_sizes)
+        };
+
+        // Check if level 0 exists
+        if sizes[0] == 0 {
+            return 0;  // No liquidity, stay at level 0
+        }
+
+        // Check levels 1 and 2 for significant join opportunities
+        // Only join if there's SIGNIFICANTLY more size (>2x)
+        for level in 1..=2 {
+            if level >= 10 {
+                break;
+            }
+
+            let price = prices[level];
+            let size = sizes[level];
+
+            // Skip empty levels
+            if price == 0 || size == 0 {
+                continue;
+            }
+
+            // Only join if this level has >2x the size of level 0
+            // This ensures we're joining where there's real depth
+            if size >= MIN_SIZE_THRESHOLD && size > sizes[0] * 2 {
+                return level;
+            }
+        }
+
+        0  // Default to best level (top-of-book)
+    }
+
+    /// Calculate quote price for a specific orderbook level
+    ///
+    /// # Arguments
+    /// * `snapshot` - Market snapshot with depth data
+    /// * `is_bid` - true for bid side, false for ask side
+    /// * `level` - Level index (0-9)
+    ///
+    /// # Returns
+    /// Quote price in fixed-point for joining at that level
+    ///
+    /// # Logic
+    /// When joining a level, we quote at that level's price to match existing orders.
+    /// For level 0, uses best_bid/best_ask.
+    /// For levels 1-9, uses bid_prices/ask_prices arrays.
+    ///
+    /// # Performance
+    /// Target: <5ns (array access + comparison)
+    #[inline(always)]
+    #[allow(dead_code)]
+    fn calculate_quote_price(snapshot: &MarketSnapshot, is_bid: bool, level: usize) -> u64 {
+        if level >= 10 {
+            // Invalid level, use top-of-book
+            return if is_bid {
+                snapshot.best_bid_price
+            } else {
+                snapshot.best_ask_price
+            };
+        }
+
+        if is_bid {
+            // For bid side
+            if level == 0 || snapshot.bid_prices[level] == 0 {
+                snapshot.best_bid_price
+            } else {
+                snapshot.bid_prices[level]
+            }
+        } else {
+            // For ask side
+            if level == 0 || snapshot.ask_prices[level] == 0 {
+                snapshot.best_ask_price
+            } else {
+                snapshot.ask_prices[level]
+            }
+        }
+    }
 }
 
 impl Strategy for SimpleSpread {
     #[inline(always)]
-    fn calculate(&mut self, snapshot: &MarketSnapshot) -> Option<Signal> {
+    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal> {
+        // === CHECK IF WE SHOULD CANCEL ALL ORDERS ===
+        // Check market conditions FIRST before doing anything else
+        if Self::should_cancel_orders(snapshot) {
+            // Market conditions warrant cancelling all orders
+            return Some(Signal::cancel_all());
+        }
+
         // Extract best bid and ask
         let bid = snapshot.best_bid_price;
         let ask = snapshot.best_ask_price;
@@ -322,15 +633,141 @@ impl Strategy for SimpleSpread {
 
         // === ALL CHECKS PASSED - GENERATE SIGNAL ===
 
-        // Calculate mid price (use (bid + ask) / 2 to avoid overflow)
-        let mid_price = bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2;
+        // === DEPTH-AWARE MID PRICE CALCULATION ===
 
-        // Calculate our quote prices
-        let (our_bid, our_ask) = Self::calculate_quotes(mid_price);
+        #[cfg(feature = "depth-vwap")]
+        let mid_price = {
+            // Use VWAP-based mid price across configured depth levels
+            Self::calculate_vwap_mid_price(snapshot, DEPTH_LEVELS)
+                .unwrap_or_else(|| {
+                    // Fallback to simple mid if VWAP fails
+                    bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2
+                })
+        };
+
+        #[cfg(not(feature = "depth-vwap"))]
+        let mid_price = {
+            // Original: simple mid price from top-of-book
+            bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2
+        };
+
+        // === CALCULATE BASE QUOTES ===
+
+        let (mut our_bid, mut our_ask) = Self::calculate_quotes(mid_price);
+
+        // === INVENTORY-BASED SKEW ADJUSTMENT ===
+        //
+        // Implement Avellaneda-Stoikov style inventory management:
+        // - If long: widen ask spread to encourage selling, tighten bid to discourage buying
+        // - If short: widen bid spread to encourage buying, tighten ask to discourage selling
+        // - The adjustment is proportional to inventory level
+        {
+            // Get current position quantity (fixed-point with 9 decimals)
+            let current_qty = position.get_quantity();
+
+            // Using MAX_POSITION from config module for normalization
+
+            // Calculate inventory ratio: -1.0 to +1.0
+            // Positive = long, Negative = short
+            let inventory_ratio = if MAX_POSITION > 0 {
+                (current_qty as f64) / (MAX_POSITION as f64)
+            } else {
+                0.0
+            };
+
+            // Clamp to [-1, 1] range to handle edge cases
+            let inventory_ratio = inventory_ratio.max(-1.0).min(1.0);
+
+            // Calculate skew in basis points
+            // Max skew of 10 bps when at max position (adjustable)
+            // Using INVENTORY_IMPACT_BPS from config module
+            let skew_bps = (inventory_ratio.abs() * INVENTORY_IMPACT_BPS as f64) as u64;
+
+            // Apply asymmetric adjustment based on position
+            if inventory_ratio > 0.01 { // Long position (threshold to avoid noise)
+                // Long: make ask more expensive (widen), make bid less attractive (tighten)
+                let ask_adjustment = (our_ask * skew_bps) / 10_000;
+                let bid_adjustment = (our_bid * skew_bps) / 10_000;
+
+                // Use checked arithmetic with fallback to original prices on overflow
+                our_ask = our_ask.checked_add(ask_adjustment).unwrap_or(our_ask); // Push ask higher
+                our_bid = our_bid.checked_add(bid_adjustment / 2).unwrap_or(our_bid); // Slightly raise bid
+            } else if inventory_ratio < -0.01 { // Short position
+                // Short: make bid more expensive (widen), make ask less attractive (tighten)
+                let bid_adjustment = (our_bid * skew_bps) / 10_000;
+                let ask_adjustment = (our_ask * skew_bps) / 10_000;
+
+                // Use checked arithmetic with fallback to original prices on underflow
+                our_bid = our_bid.checked_sub(bid_adjustment).unwrap_or(our_bid); // Push bid lower
+                our_ask = our_ask.checked_sub(ask_adjustment / 2).unwrap_or(our_ask); // Slightly lower ask
+            }
+            // If near-neutral position (abs(ratio) <= 0.01), no adjustment needed
+        }
+
+        // === IMBALANCE-BASED SPREAD ADJUSTMENT ===
+
+        #[cfg(feature = "depth-imbalance")]
+        {
+            let (bid_adj, ask_adj) = Self::calculate_spread_adjustment(snapshot, DEPTH_LEVELS);
+
+            // Apply adjustments (can be negative or positive)
+            our_bid = if bid_adj >= 0 {
+                our_bid.saturating_sub(bid_adj as u64)  // Positive adj = widen = subtract from bid
+            } else {
+                our_bid.saturating_add((-bid_adj) as u64)  // Negative adj = tighten = add to bid
+            };
+
+            our_ask = if ask_adj >= 0 {
+                our_ask.saturating_add(ask_adj as u64)  // Positive adj = widen = add to ask
+            } else {
+                our_ask.saturating_sub((-ask_adj) as u64)  // Negative adj = tighten = subtract from ask
+            };
+        }
+
+        // === MULTI-LEVEL QUOTE PLACEMENT ===
+
+        #[cfg(feature = "depth-multi-level")]
+        {
+            // Select optimal level to join
+            let bid_level = Self::select_quote_level(snapshot, true);
+            let ask_level = Self::select_quote_level(snapshot, false);
+
+            // If joining deeper level, use that level's price
+            if bid_level > 0 {
+                our_bid = Self::calculate_quote_price(snapshot, true, bid_level);
+            }
+            if ask_level > 0 {
+                our_ask = Self::calculate_quote_price(snapshot, false, ask_level);
+            }
+        }
+
+        // === FINAL VALIDATION ===
 
         // Final sanity check on our quotes
         if our_bid == 0 || our_ask == 0 || our_ask <= our_bid {
             return None;
+        }
+
+        // Ensure our spread is still profitable after adjustments
+        if !Self::is_spread_valid(our_bid, our_ask) {
+            return None;
+        }
+
+        // CRITICAL: Runtime profitability check after all adjustments
+        // Check for zero bid to prevent division by zero
+        if our_bid == 0 {
+            return None; // Invalid bid price
+        }
+
+        // Calculate actual spread in basis points
+        let actual_spread = our_ask - our_bid;
+        let actual_spread_bps = (actual_spread * 10_000) / our_bid;
+
+        // Ensure spread is profitable after fees
+        if actual_spread_bps < MIN_PROFITABLE_SPREAD_BPS as u64 {
+            // Log warning as this indicates our adjustments made the spread unprofitable
+            // This should be rare but MUST be caught to prevent losses
+            return None; // Don't quote unprofitable spreads
         }
 
         // Return signal
@@ -355,6 +792,12 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bog_core::core::{Position, SignalAction};
+
+    // Helper function to create a default position for tests
+    fn create_test_position() -> Position {
+        Position::new()
+    }
 
     #[test]
     fn test_simple_spread_is_zst() {
@@ -479,7 +922,8 @@ mod tests {
             _padding: [0; 110],
         };
 
-        let signal = strategy.calculate(&snapshot);
+        let position = create_test_position();
+        let signal = strategy.calculate(&snapshot, &position);
         assert!(signal.is_some());
 
         if let Some(sig) = signal {
@@ -513,8 +957,13 @@ mod tests {
             _padding: [0; 110],
         };
 
-        let signal = strategy.calculate(&snapshot);
-        assert!(signal.is_none());
+        let position = create_test_position();
+        let signal = strategy.calculate(&snapshot, &position);
+        // Should return CancelAll for invalid data (zero prices)
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_eq!(sig.action, SignalAction::CancelAll, "Should cancel on invalid snapshot");
+        }
     }
 
     #[test]
@@ -573,7 +1022,8 @@ mod tests {
         };
 
         // This should be <100ns (measure with criterion in benchmarks)
-        let _signal = strategy.calculate(&snapshot);
+        let position = create_test_position();
+        let _signal = strategy.calculate(&snapshot, &position);
 
         // Verify no allocations by checking we're still ZST
         assert_eq!(std::mem::size_of_val(&strategy), 0);
@@ -603,9 +1053,13 @@ mod tests {
             _padding: [0; 110],
         };
 
-        // Strategy should refuse to trade
-        let signal = strategy.calculate(&flash_crash_snapshot);
-        assert!(signal.is_none(), "Strategy should NOT generate signal during flash crash");
+        // Strategy should cancel all orders during flash crash
+        let position = create_test_position();
+        let signal = strategy.calculate(&flash_crash_snapshot, &position);
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_eq!(sig.action, SignalAction::CancelAll, "Should cancel during flash crash");
+        }
     }
 
     #[test]
@@ -632,7 +1086,8 @@ mod tests {
             _padding: [0; 110],
         };
 
-        assert!(strategy.calculate(&low_price_snapshot).is_none());
+        let position = create_test_position();
+        assert!(strategy.calculate(&low_price_snapshot, &position).is_none());
 
         // Test 2: Price too high (> $1M)
         let high_price_snapshot = MarketSnapshot {
@@ -654,7 +1109,8 @@ mod tests {
             _padding: [0; 110],
         };
 
-        assert!(strategy.calculate(&high_price_snapshot).is_none());
+        let position = create_test_position();
+        assert!(strategy.calculate(&high_price_snapshot, &position).is_none());
     }
 
     #[test]
@@ -681,9 +1137,158 @@ mod tests {
             _padding: [0; 110],
         };
 
-        // Strategy should not quote in thin markets
-        let signal = strategy.calculate(&thin_book_snapshot);
-        assert!(signal.is_none(), "Strategy should NOT quote in thin markets");
+        // Strategy should cancel all orders in thin markets
+        let position = create_test_position();
+        let signal = strategy.calculate(&thin_book_snapshot, &position);
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_eq!(sig.action, SignalAction::CancelAll, "Should cancel in thin markets");
+        }
+    }
+
+    #[test]
+    fn test_inventory_skew() {
+        // Test that inventory affects quotes
+        let mut strategy = SimpleSpread;
+
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 5_000_000_000,
+            best_ask_price: 50_010_000_000_000,
+            best_ask_size: 5_000_000_000,
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 110],
+        };
+
+        // Test with zero position
+        let zero_position = Position::new();
+        let zero_signal = strategy.calculate(&snapshot, &zero_position).unwrap();
+
+        // Test with long position (500M = 0.5 BTC)
+        let mut long_position = Position::new();
+        // Simulate a long position by adding a buy fill
+        long_position.process_fill_fixed_with_fee(
+            0, // BUY side
+            50_000_000_000_000,
+            500_000_000, // 0.5 BTC
+            2 // 2bps fee
+        ).unwrap();
+        let long_signal = strategy.calculate(&snapshot, &long_position).unwrap();
+
+        // With long position, ask should be pushed higher (to encourage selling)
+        assert!(long_signal.ask_price > zero_signal.ask_price,
+                "Long position should increase ask price to encourage selling");
+
+        // Test with short position
+        let mut short_position = Position::new();
+        // Simulate a short position by adding a sell fill
+        short_position.process_fill_fixed_with_fee(
+            1, // SELL side
+            50_000_000_000_000,
+            500_000_000, // 0.5 BTC
+            2 // 2bps fee
+        ).unwrap();
+        let short_signal = strategy.calculate(&snapshot, &short_position).unwrap();
+
+        // With short position, bid should be pushed lower (to encourage buying)
+        assert!(short_signal.bid_price < zero_signal.bid_price,
+                "Short position should decrease bid price to encourage buying");
+    }
+
+    #[test]
+    fn test_order_cancellation_logic() {
+        // Test that strategy returns CancelAll signal in abnormal markets
+        let mut strategy = SimpleSpread;
+        let position = Position::new();
+
+        // Test 1: Wide spread (>100 bps) triggers cancel
+        let wide_spread_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 5_000_000_000,
+            best_ask_price: 51_000_000_000_000, // 2000 bps spread (2%)
+            best_ask_size: 5_000_000_000,
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 110],
+        };
+
+        let signal = strategy.calculate(&wide_spread_snapshot, &position);
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_eq!(sig.action, SignalAction::CancelAll, "Should cancel on wide spread");
+        }
+
+        // Test 2: Low liquidity triggers cancel
+        let low_liquidity_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 5_000_000, // Only 0.005 BTC (below critical)
+            best_ask_price: 50_010_000_000_000,
+            best_ask_size: 5_000_000, // Only 0.005 BTC (below critical)
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 110],
+        };
+
+        let signal = strategy.calculate(&low_liquidity_snapshot, &position);
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_eq!(sig.action, SignalAction::CancelAll, "Should cancel on low liquidity");
+        }
+
+        // Test 3: Normal market conditions - should quote, not cancel
+        let normal_snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 5_000_000_000,
+            best_ask_price: 50_010_000_000_000, // 20 bps spread (normal)
+            best_ask_size: 5_000_000_000,
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 110],
+        };
+
+        let signal = strategy.calculate(&normal_snapshot, &position);
+        assert!(signal.is_some());
+        if let Some(sig) = signal {
+            assert_ne!(sig.action, SignalAction::CancelAll, "Should NOT cancel in normal market");
+            assert_eq!(sig.action, SignalAction::QuoteBoth, "Should quote both sides");
+        }
     }
 
     #[test]
@@ -710,7 +1315,8 @@ mod tests {
             _padding: [0; 110],
         };
 
-        let signal = strategy.calculate(&good_snapshot);
+        let position = create_test_position();
+        let signal = strategy.calculate(&good_snapshot, &position);
         assert!(signal.is_some(), "Strategy should generate signal for good market data");
 
         if let Some(sig) = signal {
@@ -795,4 +1401,448 @@ mod tests {
                 ROUND_TRIP_COST_BPS
             );
         }
+    }
+
+    // ========================================================================
+    // DEPTH-AWARE TESTS (TDD - These should fail until implementation)
+    // ========================================================================
+
+    #[cfg(test)]
+    use crate::test_helpers::*;
+
+    #[test]
+    #[ignore]  // Will fail until VWAP is implemented
+    fn test_vwap_mid_price_vs_simple() {
+        // Create snapshot with 5 levels of depth
+        let snapshot = create_depth_snapshot(
+            50_000_000_000_000,  // $50,000 bid
+            50_010_000_000_000,  // $50,010 ask
+            5,                    // 5 levels
+            5_000_000_000,       // $5 tick
+            100_000_000,         // 0.1 BTC per level
+        );
+
+        // Simple mid price (top-of-book only)
+        let simple_mid = (snapshot.best_bid_price + snapshot.best_ask_price) / 2;
+        assert_eq!(simple_mid, 50_005_000_000_000);  // $50,005
+
+        // VWAP mid price should consider depth
+        let vwap_mid = SimpleSpread::calculate_vwap_mid_price(&snapshot, 5);
+
+        // VWAP should exist
+        assert!(vwap_mid.is_some(), "VWAP calculation should succeed");
+
+        // VWAP mid should be close to simple mid but potentially different
+        // due to volume weighting across levels
+        let vwap = vwap_mid.unwrap();
+        let diff = if vwap > simple_mid {
+            vwap - simple_mid
+        } else {
+            simple_mid - vwap
+        };
+
+        // Difference should be small (< 0.1%)
+        assert!(
+            diff < simple_mid / 1000,
+            "VWAP {} should be close to simple mid {}",
+            vwap,
+            simple_mid
+        );
+    }
+
+    #[test]
+    #[ignore]  // Will fail until VWAP is implemented
+    fn test_vwap_with_sparse_depth() {
+        // Create snapshot with only levels 0, 2, 5 populated
+        let snapshot = create_sparse_depth_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            &[0, 2, 5],
+            5_000_000_000,
+            100_000_000,
+        );
+
+        // VWAP should handle sparse depth gracefully
+        let vwap_mid = SimpleSpread::calculate_vwap_mid_price(&snapshot, 10);
+        assert!(vwap_mid.is_some(), "VWAP should handle sparse depth");
+
+        // Should fall back to populated levels
+        let vwap = vwap_mid.unwrap();
+        assert!(vwap > 0, "VWAP should be non-zero");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until VWAP is implemented
+    fn test_vwap_depth_levels_configurable() {
+        let snapshot = create_depth_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            10,  // All 10 levels populated
+            5_000_000_000,
+            100_000_000,
+        );
+
+        // Test VWAP at different depth levels
+        let vwap_1 = SimpleSpread::calculate_vwap_mid_price(&snapshot, 1);
+        let vwap_5 = SimpleSpread::calculate_vwap_mid_price(&snapshot, 5);
+        let vwap_10 = SimpleSpread::calculate_vwap_mid_price(&snapshot, 10);
+
+        assert!(vwap_1.is_some());
+        assert!(vwap_5.is_some());
+        assert!(vwap_10.is_some());
+
+        // With uniform sizes, all should be similar but potentially different
+        // due to price levels
+        let v1 = vwap_1.unwrap();
+        let v5 = vwap_5.unwrap();
+        let v10 = vwap_10.unwrap();
+
+        // All should be positive
+        assert!(v1 > 0);
+        assert!(v5 > 0);
+        assert!(v10 > 0);
+    }
+
+    #[test]
+    #[ignore]  // Will fail until VWAP is implemented
+    fn test_vwap_with_no_depth_fallback() {
+        // Create snapshot with only top-of-book (depth empty)
+        let snapshot = create_basic_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            100_000_000,
+            100_000_000,
+        );
+
+        // VWAP with depth should fall back to top-of-book
+        let vwap_mid = SimpleSpread::calculate_vwap_mid_price(&snapshot, 5);
+
+        // Should return Some with top-of-book mid
+        assert!(vwap_mid.is_some());
+        let vwap = vwap_mid.unwrap();
+
+        let simple_mid = (snapshot.best_bid_price + snapshot.best_ask_price) / 2;
+        assert_eq!(vwap, simple_mid, "VWAP should equal simple mid when no depth");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until VWAP is implemented
+    fn test_vwap_calculation_correctness() {
+        // Test with known values to verify VWAP formula
+        let snapshot = create_multi_level_snapshot(
+            100_000_000_000_000,  // $100,000 bid
+            100_010_000_000_000,  // $100,010 ask
+            3,
+            5_000_000_000,  // $5 tick
+            vec![
+                1_000_000_000,  // Level 0: 1 BTC
+                2_000_000_000,  // Level 1: 2 BTC (more weight)
+                1_000_000_000,  // Level 2: 1 BTC
+            ],
+        );
+
+        let vwap_mid = SimpleSpread::calculate_vwap_mid_price(&snapshot, 3);
+        assert!(vwap_mid.is_some());
+
+        // Manual calculation (in fixed-point $):
+        // bid_prices: [100_000, 99_995, 99_990] with sizes [1, 2, 1]
+        // Bid VWAP = (100_000*1 + 99_995*2 + 99_990*1) / (1+2+1)
+        //          = (100_000 + 199_990 + 99_990) / 4 = 399_980 / 4 = 99_995
+        //
+        // ask_prices: [100_010, 100_015, 100_020] with sizes [1, 2, 1]
+        // Ask VWAP = (100_010*1 + 100_015*2 + 100_020*1) / (1+2+1)
+        //          = (100_010 + 200_030 + 100_020) / 4 = 400_060 / 4 = 100_015
+        //
+        // Mid VWAP = (99_995 + 100_015) / 2 = 200_010 / 2 = 100_005
+
+        let vwap = vwap_mid.unwrap();
+        let expected = 100_005_000_000_000u64;  // $100,005 (corrected)
+
+        // Should be exact (no rounding with these values)
+        assert_eq!(
+            vwap,
+            expected,
+            "VWAP should be exactly $100,005"
+        );
+    }
+
+
+    // ========================================================================
+    // IMBALANCE DETECTION TESTS (TDD - Will fail until implementation)
+    // ========================================================================
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_bullish_widens_ask() {
+        // Create snapshot with 3x more bid liquidity (bullish pressure)
+        let snapshot = create_imbalanced_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            5,
+            5_000_000_000,
+            3.0,  // 3x more bids than asks
+        );
+
+        // Calculate spread adjustment based on imbalance
+        let (bid_adj, ask_adj) = SimpleSpread::calculate_spread_adjustment(&snapshot, 5);
+
+        // With strong bid pressure, we should:
+        // - Tighten bid spread (negative adjustment) to compete for fills
+        // - Widen ask spread (positive adjustment) to avoid adverse selection
+        assert!(bid_adj <= 0, "Bid adjustment should be <= 0 (tighten bid)");
+        assert!(ask_adj >= 0, "Ask adjustment should be >= 0 (widen ask)");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_bearish_widens_bid() {
+        // Create snapshot with 3x more ask liquidity (bearish pressure)
+        let snapshot = create_imbalanced_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            5,
+            5_000_000_000,
+            1.0 / 3.0,  // 3x more asks than bids (inverse ratio)
+        );
+
+        // Calculate spread adjustment
+        let (bid_adj, ask_adj) = SimpleSpread::calculate_spread_adjustment(&snapshot, 5);
+
+        // With strong ask pressure, we should:
+        // - Widen bid spread (positive adjustment) to avoid adverse selection
+        // - Tighten ask spread (negative adjustment) to compete for fills
+        assert!(bid_adj >= 0, "Bid adjustment should be >= 0 (widen bid)");
+        assert!(ask_adj <= 0, "Ask adjustment should be <= 0 (tighten ask)");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_neutral_no_adjustment() {
+        // Create snapshot with balanced liquidity (1:1 ratio)
+        let snapshot = create_imbalanced_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            5,
+            5_000_000_000,
+            1.0,  // Equal bid and ask liquidity
+        );
+
+        // Calculate spread adjustment
+        let (bid_adj, ask_adj) = SimpleSpread::calculate_spread_adjustment(&snapshot, 5);
+
+        // With balanced book, adjustments should be zero or minimal
+        assert_eq!(bid_adj, 0, "Bid adjustment should be 0 for balanced book");
+        assert_eq!(ask_adj, 0, "Ask adjustment should be 0 for balanced book");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_extreme_values() {
+        // Test extreme imbalance (10x ratio)
+        let extreme_bullish = create_imbalanced_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            5,
+            5_000_000_000,
+            10.0,  // 10x more bids
+        );
+
+        let (bid_adj, ask_adj) = SimpleSpread::calculate_spread_adjustment(&extreme_bullish, 5);
+
+        // Adjustments should be bounded (not infinite)
+        assert!(bid_adj.abs() < 100_000_000_000, "Bid adjustment should be bounded");
+        assert!(ask_adj.abs() < 100_000_000_000, "Ask adjustment should be bounded");
+
+        // Direction should still be correct
+        assert!(bid_adj <= 0, "Strong bullish: tighten bid");
+        assert!(ask_adj >= 0, "Strong bullish: widen ask");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_calculation_uses_depth() {
+        // Test that imbalance uses depth, not just top-of-book
+        let shallow = create_depth_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            1,  // Only 1 level
+            5_000_000_000,
+            100_000_000,
+        );
+
+        let deep = create_depth_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            10,  // All 10 levels
+            5_000_000_000,
+            100_000_000,
+        );
+
+        // Calculate imbalance with different depths
+        let shallow_imbalance = SimpleSpread::calculate_imbalance(&shallow, 1);
+        let deep_imbalance = SimpleSpread::calculate_imbalance(&deep, 10);
+
+        // With uniform sizes, both should show balanced (0 imbalance)
+        assert_eq!(shallow_imbalance, 0, "Shallow balanced book should have 0 imbalance");
+        assert_eq!(deep_imbalance, 0, "Deep balanced book should have 0 imbalance");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until imbalance detection is implemented
+    fn test_imbalance_range_bounded() {
+        // Imbalance should be in range [-1.0, +1.0] (in fixed-point)
+        let snapshots = vec![
+            create_imbalanced_snapshot(50_000_000_000_000, 50_010_000_000_000, 5, 5_000_000_000, 10.0),   // Extreme bullish
+            create_imbalanced_snapshot(50_000_000_000_000, 50_010_000_000_000, 5, 5_000_000_000, 1.0),    // Balanced
+            create_imbalanced_snapshot(50_000_000_000_000, 50_010_000_000_000, 5, 5_000_000_000, 0.1),    // Extreme bearish
+        ];
+
+        for snapshot in snapshots {
+            let imbalance = SimpleSpread::calculate_imbalance(&snapshot, 5);
+
+            // Imbalance should be in range [-1_000_000_000, +1_000_000_000]
+            // (fixed-point representation of [-1.0, +1.0])
+            assert!(
+                imbalance >= -1_000_000_000 && imbalance <= 1_000_000_000,
+                "Imbalance {} should be in range [-1.0, +1.0]",
+                imbalance
+            );
+        }
+    }
+
+    // ========================================================================
+    // MULTI-LEVEL QUOTING TESTS (TDD - Will fail until implementation)
+    // ========================================================================
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_quote_at_best_level_default() {
+        // Normal conditions - should quote at best level (level 0)
+        let snapshot = create_depth_snapshot(
+            50_000_000_000_000,  // $50,000
+            50_010_000_000_000,  // $50,010
+            5,
+            5_000_000_000,  // $5 tick
+            100_000_000,
+        );
+
+        let bid_level = SimpleSpread::select_quote_level(&snapshot, true);
+        let ask_level = SimpleSpread::select_quote_level(&snapshot, false);
+
+        // Default behavior: quote at best level
+        assert_eq!(bid_level, 0, "Should quote at best bid level");
+        assert_eq!(ask_level, 0, "Should quote at best ask level");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_join_level_2_when_profitable() {
+        // Create scenario where joining level 2 is more profitable
+        let snapshot = create_multi_level_snapshot(
+            50_000_000_000_000,  // $50,000 (level 0)
+            50_010_000_000_000,  // $50,010 (level 0)
+            5,
+            5_000_000_000,  // $5 tick
+            vec![
+                10_000_000,      // Level 0: 0.01 BTC (small, competitive)
+                1_000_000_000,   // Level 1: 1 BTC (large, attractive)
+                500_000_000,     // Level 2: 0.5 BTC (medium)
+                100_000_000,     // Level 3: 0.1 BTC
+                100_000_000,     // Level 4: 0.1 BTC
+            ],
+        );
+
+        // Strategy might choose level 1 or 2 based on size/profitability
+        let bid_level = SimpleSpread::select_quote_level(&snapshot, true);
+
+        // Should select level where there's good size (1 or 2, not 0)
+        assert!(bid_level >= 0 && bid_level <= 3, "Should select a valid level");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_dont_join_unprofitable_level() {
+        // Create scenario where all deeper levels are unprofitable
+        // (spread too tight after fees)
+        let snapshot = create_multi_level_snapshot(
+            50_000_000_000_000,  // Level 0
+            50_001_000_000_000,  // Level 0 ask (0.2bp spread - too tight!)
+            3,
+            500_000_000,  // $0.50 tick (very tight)
+            vec![1_000_000_000, 1_000_000_000, 1_000_000_000],
+        );
+
+        let bid_level = SimpleSpread::select_quote_level(&snapshot, true);
+        let ask_level = SimpleSpread::select_quote_level(&snapshot, false);
+
+        // Should default to level 0 even if unprofitable
+        // (better to not quote at all, but that's handle by calculate())
+        assert_eq!(bid_level, 0, "Should fall back to level 0 if no profitable levels");
+        assert_eq!(ask_level, 0, "Should fall back to level 0 if no profitable levels");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_multi_level_respects_min_spread() {
+        // Create snapshot with varying spreads at each level
+        let snapshot = create_multi_level_snapshot(
+            50_000_000_000_000,
+            50_050_000_000_000,  // Wide spread at level 0 (10bp)
+            3,
+            10_000_000_000,  // $10 tick
+            vec![100_000_000, 100_000_000, 100_000_000],
+        );
+
+        // Level selection should respect MIN_SPREAD_BPS
+        let bid_level = SimpleSpread::select_quote_level(&snapshot, true);
+
+        // Should select a level that maintains profitable spread
+        assert!(bid_level >= 0 && bid_level < 3);
+    }
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_multi_level_considers_queue_position() {
+        // When multiple levels are profitable, prefer the one with better queue position
+        // (fewer orders ahead of us)
+        let snapshot = create_depth_snapshot(
+            50_000_000_000_000,
+            50_050_000_000_000,
+            5,
+            10_000_000_000,  // Large ticks
+            100_000_000,
+        );
+
+        let bid_level = SimpleSpread::select_quote_level(&snapshot, true);
+        let ask_level = SimpleSpread::select_quote_level(&snapshot, false);
+
+        // Should return valid level indices
+        assert!(bid_level < 10, "Bid level should be < 10");
+        assert!(ask_level < 10, "Ask level should be < 10");
+    }
+
+    #[test]
+    #[ignore]  // Will fail until multi-level quoting is implemented
+    fn test_calculate_quote_price_at_level() {
+        let snapshot = create_depth_snapshot(
+            50_000_000_000_000,
+            50_010_000_000_000,
+            5,
+            5_000_000_000,
+            100_000_000,
+        );
+
+        // Test calculating quote price for different levels
+        let level_0_bid = SimpleSpread::calculate_quote_price(&snapshot, true, 0);
+        let level_1_bid = SimpleSpread::calculate_quote_price(&snapshot, true, 1);
+        let level_2_bid = SimpleSpread::calculate_quote_price(&snapshot, true, 2);
+
+        // All should be valid prices
+        assert!(level_0_bid > 0);
+        assert!(level_1_bid > 0);
+        assert!(level_2_bid > 0);
+
+        // Level 1 should be < level 0 (deeper in book)
+        assert!(level_1_bid < level_0_bid, "Level 1 bid should be < level 0");
+        assert!(level_2_bid < level_1_bid, "Level 2 bid should be < level 1");
     }

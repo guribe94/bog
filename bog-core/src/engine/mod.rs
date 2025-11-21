@@ -4,6 +4,8 @@
 //! - `generic`: Const generic zero-overhead engine (NEW - HFT optimized)
 //! - `simulated`: Zero-overhead simulated executor with object pools
 //! - `risk`: Const-based risk validation with zero overhead
+//! - `position_reconciliation`: Position drift detection and correction
+//! - `gap_recovery`: Automatic gap recovery for data feed issues
 //! - Legacy dynamic dispatch engine (deprecated, commented out)
 
 // New const generic engine (HFT optimized)
@@ -11,11 +13,19 @@ pub mod generic;
 pub mod traits;
 pub mod simulated;
 pub mod risk;
+pub mod position_reconciliation;
+pub mod gap_recovery;
+pub mod alert_manager;
+pub mod strategy_wrapper;
 
 // Re-export new engine types
 pub use generic::{Engine, EngineStats, Executor, Strategy};
 pub use simulated::SimulatedExecutor;
 pub use risk::{validate_signal, RiskViolation};
+pub use position_reconciliation::{PositionReconciler, ReconciliationConfig, ReconciliationStats};
+pub use gap_recovery::{GapRecoveryManager, GapRecoveryConfig, GapRecoveryStats};
+pub use alert_manager::{AlertManager, AlertConfig, AlertType, AlertSeverity, Alert, AlertStats};
+pub use strategy_wrapper::StrategyWrapper;
 
 /*
 // === OLD ENGINE (DEPRECATED) ===

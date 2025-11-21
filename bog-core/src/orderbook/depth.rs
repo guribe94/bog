@@ -160,6 +160,7 @@ pub fn calculate_imbalance(
 ///
 /// # Returns
 /// Total size in u64 fixed-point (9 decimals)
+/// If total would overflow u64::MAX, returns u64::MAX
 ///
 /// # Performance
 /// Target: <3ns
@@ -177,16 +178,23 @@ pub fn calculate_liquidity(
         &snapshot.ask_sizes
     };
 
-    let mut total: u64 = 0;
+    // Use u128 internally to detect overflow
+    let mut total: u128 = 0;
     for i in 0..max_levels {
         let size = sizes[i];
         if size == 0 {
             break;
         }
-        total = total.saturating_add(size);
+        total += size as u128;
     }
 
-    total
+    // Clamp to u64::MAX if overflow would occur
+    // This is better than silent wrapping with saturating_add
+    if total > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        total as u64
+    }
 }
 
 /// Calculate mid price from best bid/ask

@@ -58,3 +58,15 @@ taker-fee-5bps = []
 taker-fee-10bps = []
 taker-fee-20bps = []
 taker-fee-30bps = []
+
+# Depth awareness features (SimpleSpread enhancements)
+depth-disabled = []      # Top-of-book only (original behavior, backward compatible)
+depth-vwap = []          # Use VWAP for mid price calculation across depth
+depth-imbalance = []     # Adjust spreads based on orderbook imbalance
+depth-multi-level = []   # Quote at optimal orderbook level (not just best)
+
+# Depth level configuration (how many levels to use)
+depth-1 = []   # Top-of-book only (1 level)
+depth-3 = []   # Use 3 levels
+depth-5 = []   # Use 5 levels (default for depth features)
+depth-10 = []  # Use all 10 levels (maximum depth)

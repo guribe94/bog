@@ -2,7 +2,7 @@ pub mod types;
 pub mod validator;
 
 pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
-pub use validator::SnapshotValidator;
+pub use validator::{SnapshotValidator, ValidationConfig, ValidationError};
 
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};

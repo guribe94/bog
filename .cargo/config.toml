@@ -1,0 +1,15 @@
+# Bog project-specific cargo configuration
+# Optimized for memory-constrained build environments
+
+[profile.release]
+opt-level = 3
+lto = "thin"           # Thin LTO: 95% performance, 50% less memory than fat LTO
+codegen-units = 4      # Parallel codegen for faster builds
+strip = false
+debug = true
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+debug = true

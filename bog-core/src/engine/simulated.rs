@@ -11,9 +11,11 @@
 use super::Executor;
 use super::risk;
 use crate::core::{OrderId, Position, Signal, SignalAction, Side as CoreSide};
+use crate::execution::{Fill, Side as ExecutionSide};
 use crate::perf::pools::ObjectPool;
 use anyhow::Result;
 use crossbeam::queue::ArrayQueue;
+use rust_decimal::Decimal;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -150,6 +152,9 @@ pub struct SimulatedExecutor {
 
     /// Total volume traded (fixed-point)
     total_volume: AtomicU64,
+
+    /// Count of fills dropped due to queue overflow
+    dropped_fills: AtomicU64,
 }
 
 impl SimulatedExecutor {
@@ -169,6 +174,7 @@ impl SimulatedExecutor {
             total_orders: AtomicU64::new(0),
             total_fills: AtomicU64::new(0),
             total_volume: AtomicU64::new(0),
+            dropped_fills: AtomicU64::new(0),
         }
     }
 
@@ -218,7 +224,21 @@ impl SimulatedExecutor {
 
         // Push to pending fills (lock-free)
         if self.pending_fills.push(fill).is_err() {
-            tracing::warn!("Fill queue full, dropping fill");
+            // CRITICAL: Fill queue is full - we MUST NOT drop fills!
+            // Increment dropped counter for monitoring
+            self.dropped_fills.fetch_add(1, Ordering::Relaxed);
+
+            // Log critical error
+            tracing::error!(
+                "CRITICAL: Fill queue overflow! Dropping fill for order_id: {:?}. Total dropped: {}",
+                order_id,
+                self.dropped_fills.load(Ordering::Relaxed)
+            );
+
+            // Return error to halt trading - we cannot continue safely
+            return Err(anyhow::anyhow!(
+                "Fill queue overflow - position tracking corrupted! Halting trading."
+            ));
         }
 
         // Update metrics
@@ -291,17 +311,42 @@ impl Executor for SimulatedExecutor {
         let mut fills = Vec::new();
         while let Some(pooled_fill) = self.pending_fills.pop() {
             // Convert PooledFill to execution::Fill
-            // Note: This requires mapping between the two type systems
-            // For now, return empty vector as this executor doesn't track fills
-            // in the same way as execution::SimulatedExecutor
+            // Convert u64 fixed-point (9 decimals) to Decimal
+            let price = Decimal::from(pooled_fill.price) / Decimal::from(1_000_000_000_i64);
+            let size = Decimal::from(pooled_fill.size) / Decimal::from(1_000_000_000_i64);
+
+            // Convert OrderSide to execution::Side
+            let side = match pooled_fill.side {
+                OrderSide::Buy => ExecutionSide::Buy,
+                OrderSide::Sell => ExecutionSide::Sell,
+            };
+
+            // Create Fill with timestamp and fee
+            // TODO: Make fee configurable - hardcoded to 0.02% (2bps) taker fee for now
+            const FEE_RATE: &str = "0.0002";
+            let fee = Decimal::from_str_exact(FEE_RATE)
+                .ok()
+                .map(|rate| size * rate);
+
+            // Convert core::OrderId to execution::OrderId
+            let order_id_str = format!("{:032x}", pooled_fill.order_id.0);
+            let execution_order_id = crate::execution::OrderId::new(order_id_str);
+
+            let fill = Fill::new_with_fee(
+                execution_order_id,
+                side,
+                price,
+                size,
+                fee,
+            );
+
+            fills.push(fill);
         }
         fills
     }
 
     fn dropped_fill_count(&self) -> u64 {
-        // This executor doesn't track dropped fills
-        // Returns 0 to indicate no fills dropped
-        0
+        self.dropped_fills.load(Ordering::Relaxed)
     }
 
     fn name(&self) -> &'static str {

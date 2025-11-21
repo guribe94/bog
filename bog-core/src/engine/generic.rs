@@ -112,9 +112,16 @@
 //! - Complete tick processing: ~27ns average
 //! - Target: <50ns engine overhead per tick ✅ **Achieved**
 
+use crate::config::{
+    MAX_POSITION, MAX_SHORT, MAX_DRAWDOWN, MAX_DAILY_LOSS,
+    MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
+    MAX_POST_STALE_CHANGE_BPS
+};
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
+use crate::risk::circuit_breaker::{CircuitBreaker, BreakerState};
 use anyhow::{anyhow, Result};
+use rust_decimal::prelude::ToPrimitive;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -123,11 +130,15 @@ use std::sync::Arc;
 /// All implementations should be zero-sized types (ZSTs) with
 /// #[inline(always)] methods for maximum performance.
 pub trait Strategy {
-    /// Calculate trading signal from market snapshot
+    /// Calculate trading signal from market snapshot and current position
     ///
     /// This is the hot path - must be <100ns
     /// Implementers should mark this #[inline(always)]
-    fn calculate(&mut self, snapshot: &MarketSnapshot) -> Option<Signal>;
+    ///
+    /// # Arguments
+    /// * `snapshot` - Current market data snapshot
+    /// * `position` - Current position for inventory-aware quoting
+    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal>;
 
     /// Strategy name for logging
     fn name(&self) -> &'static str;
@@ -217,8 +228,7 @@ impl HotData {
     }
 }
 
-/// Queue depth warning threshold
-const QUEUE_DEPTH_WARNING_THRESHOLD: usize = 100;
+// Constants are now imported from crate::config
 
 /// Generic Trading Engine - Zero Dynamic Dispatch
 ///
@@ -241,12 +251,28 @@ pub struct Engine<S: Strategy, E: Executor> {
     /// Hot data (cache-aligned, frequently accessed)
     hot: HotData,
 
+    /// Circuit breaker for safety
+    circuit_breaker: CircuitBreaker,
+
     /// Shutdown signal
     shutdown: Arc<AtomicBool>,
 
     /// Queue monitoring stats (cold path, not in hot data)
     max_queue_depth: std::cell::Cell<usize>,
     queue_warnings: std::cell::Cell<u64>,
+
+    /// Track data staleness state for post-stale validation
+    was_stale: std::cell::Cell<bool>,
+    last_fresh_bid: std::cell::Cell<u64>,
+    last_fresh_ask: std::cell::Cell<u64>,
+
+    /// Risk management: track PnL for drawdown limits
+    peak_pnl: std::cell::Cell<i64>,
+    daily_pnl_start: std::cell::Cell<i64>,
+    current_session_start_time: std::time::SystemTime,
+
+    /// Rate limiting: track last quote time
+    last_quote_time_ns: std::cell::Cell<u64>,
 }
 
 impl<S: Strategy, E: Executor> Engine<S, E> {
@@ -259,9 +285,17 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             executor,
             position: Position::new(),
             hot: HotData::new(),
+            circuit_breaker: CircuitBreaker::new(),
             shutdown: Arc::new(AtomicBool::new(false)),
             max_queue_depth: std::cell::Cell::new(0),
             queue_warnings: std::cell::Cell::new(0),
+            was_stale: std::cell::Cell::new(false),
+            last_fresh_bid: std::cell::Cell::new(0),
+            last_fresh_ask: std::cell::Cell::new(0),
+            peak_pnl: std::cell::Cell::new(0),
+            daily_pnl_start: std::cell::Cell::new(0),
+            current_session_start_time: std::time::SystemTime::now(),
+            last_quote_time_ns: std::cell::Cell::new(0),
         }
     }
 
@@ -321,6 +355,19 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             return Ok(());
         }
 
+        // CIRCUIT BREAKER CHECK - halt trading on dangerous market conditions
+        match self.circuit_breaker.check(snapshot) {
+            BreakerState::Halted(reason) => {
+                tracing::error!("Circuit breaker tripped: {:?} - HALTING ALL TRADING", reason);
+                // Cancel all orders when circuit breaker trips
+                self.executor.cancel_all()?;
+                return Ok(()); // Skip this tick entirely
+            }
+            BreakerState::Normal => {
+                // Continue with normal processing
+            }
+        }
+
         // CRITICAL: Check data freshness before executing trades
         // If data is stale or offline, skip execution but continue monitoring
         // Measured: ~5ns inline check
@@ -331,12 +378,178 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 snapshot.best_bid_price,
                 snapshot.best_ask_price
             );
+            self.was_stale.set(true);
             return Ok(());
         }
 
+        // HIGH PRIORITY: Post-stale validation
+        // If we're transitioning from stale to fresh, validate prices haven't moved too much
+        if self.was_stale.get() {
+            let last_bid = self.last_fresh_bid.get();
+            let last_ask = self.last_fresh_ask.get();
+
+            // Only validate if we have previous fresh prices
+            if last_bid > 0 && last_ask > 0 {
+                // Calculate price change from last fresh data
+                let bid_change = if snapshot.best_bid_price > last_bid {
+                    snapshot.best_bid_price - last_bid
+                } else {
+                    last_bid - snapshot.best_bid_price
+                };
+
+                let ask_change = if snapshot.best_ask_price > last_ask {
+                    snapshot.best_ask_price - last_ask
+                } else {
+                    last_ask - snapshot.best_ask_price
+                };
+
+                // Check if price moved more than configured threshold
+                let bid_change_bps = (bid_change * 10_000) / last_bid;
+                let ask_change_bps = (ask_change * 10_000) / last_ask;
+
+                if bid_change_bps > MAX_POST_STALE_CHANGE_BPS || ask_change_bps > MAX_POST_STALE_CHANGE_BPS {
+                    tracing::warn!(
+                        "Large price movement detected after stale data recovery: bid moved {}bps, ask moved {}bps - skipping tick",
+                        bid_change_bps, ask_change_bps
+                    );
+                    // Update last fresh prices but skip this tick to avoid trading on price jumps
+                    self.last_fresh_bid.set(snapshot.best_bid_price);
+                    self.last_fresh_ask.set(snapshot.best_ask_price);
+                    self.was_stale.set(false);
+                    return Ok(());
+                }
+            }
+
+            tracing::info!("Data recovered from stale state, resuming trading");
+            self.was_stale.set(false);
+        }
+
+        // Update last fresh prices for future validation
+        self.last_fresh_bid.set(snapshot.best_bid_price);
+        self.last_fresh_ask.set(snapshot.best_ask_price);
+
         // Calculate trading signal (hot path)
         // Measured: ~17ns for SimpleSpread
-        if let Some(signal) = self.strategy.calculate(snapshot) {
+        if let Some(signal) = self.strategy.calculate(snapshot, &self.position) {
+            // PRE-TRADE POSITION LIMIT VALIDATION
+            // Check if the signal would breach position limits BEFORE execution
+            let current_qty = self.position.get_quantity();
+
+            // Validate based on signal action
+            let would_breach = match signal.action {
+                crate::core::SignalAction::QuoteBoth => {
+                    // Check both sides - worst case if either side fills
+                    // Use checked arithmetic to prevent overflow
+                    let if_bid_fills = match current_qty.checked_add(signal.size as i64) {
+                        Some(pos) => pos,
+                        None => {
+                            tracing::error!("Position overflow detected on bid fill calculation");
+                            return Ok(()); // Skip signal on overflow
+                        }
+                    };
+                    let if_ask_fills = match current_qty.checked_sub(signal.size as i64) {
+                        Some(pos) => pos,
+                        None => {
+                            tracing::error!("Position underflow detected on ask fill calculation");
+                            return Ok(()); // Skip signal on underflow
+                        }
+                    };
+
+                    if_bid_fills > MAX_POSITION || if_ask_fills < -MAX_SHORT
+                },
+                crate::core::SignalAction::QuoteBid => {
+                    // Would increase position (buying)
+                    let new_position = match current_qty.checked_add(signal.size as i64) {
+                        Some(pos) => pos,
+                        None => {
+                            tracing::error!("Position overflow detected on bid quote");
+                            return Ok(()); // Skip signal on overflow
+                        }
+                    };
+                    new_position > MAX_POSITION
+                },
+                crate::core::SignalAction::QuoteAsk => {
+                    // Would decrease position (selling)
+                    let new_position = match current_qty.checked_sub(signal.size as i64) {
+                        Some(pos) => pos,
+                        None => {
+                            tracing::error!("Position underflow detected on ask quote");
+                            return Ok(()); // Skip signal on underflow
+                        }
+                    };
+                    new_position < -MAX_SHORT
+                },
+                crate::core::SignalAction::TakePosition => {
+                    // TakePosition is aggressive order - determine side from bid/ask price
+                    // If bid_price > 0, we're buying (crossing the spread)
+                    // If ask_price > 0, we're selling
+                    if signal.bid_price > 0 {
+                        // Buying - would increase position
+                        let new_position = match current_qty.checked_add(signal.size as i64) {
+                            Some(pos) => pos,
+                            None => {
+                                tracing::error!("Position overflow detected on take position (buy)");
+                                return Ok(()); // Skip signal on overflow
+                            }
+                        };
+                        new_position > MAX_POSITION
+                    } else if signal.ask_price > 0 {
+                        // Selling - would decrease position
+                        let new_position = match current_qty.checked_sub(signal.size as i64) {
+                            Some(pos) => pos,
+                            None => {
+                                tracing::error!("Position underflow detected on take position (sell)");
+                                return Ok(()); // Skip signal on underflow
+                            }
+                        };
+                        new_position < -MAX_SHORT
+                    } else {
+                        false  // No valid price, won't execute
+                    }
+                },
+                crate::core::SignalAction::CancelAll => false,  // Cancels don't change position
+                crate::core::SignalAction::NoAction => false,   // No action doesn't change position
+            };
+
+            if would_breach {
+                tracing::warn!(
+                    "Pre-trade limit check failed: current_qty={}, signal_size={}, action={:?} would breach limits",
+                    current_qty, signal.size, signal.action
+                );
+                // Skip this signal to prevent position limit breach
+                return Ok(());
+            }
+
+            // RATE LIMITING CHECK - Prevent excessive quoting to protect exchange API limits
+            // Only apply rate limiting for quote actions (not cancels)
+            if matches!(signal.action,
+                crate::core::SignalAction::QuoteBoth |
+                crate::core::SignalAction::QuoteBid |
+                crate::core::SignalAction::QuoteAsk |
+                crate::core::SignalAction::TakePosition) {
+
+                // Get current time
+                let current_time_ns = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+
+                // Check if enough time has passed since last quote
+                let time_since_last_quote = current_time_ns.saturating_sub(self.last_quote_time_ns.get());
+
+                if time_since_last_quote < MIN_QUOTE_INTERVAL_NS {
+                    tracing::debug!(
+                        "Rate limit: Skipping quote ({}ns since last quote, min interval: {}ns)",
+                        time_since_last_quote,
+                        MIN_QUOTE_INTERVAL_NS
+                    );
+                    return Ok(()); // Skip this signal due to rate limiting
+                }
+
+                // Update last quote time
+                self.last_quote_time_ns.set(current_time_ns);
+            }
+
             self.hot.increment_signals();
 
             // Execute signal (hot path)
@@ -348,7 +561,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // CRITICAL: Process fills and check for queue overflow
         // ====================================================================
         // Get fills from executor
-        let _fills = self.executor.get_fills();
+        let fills = self.executor.get_fills();
 
         // Check for dropped fills BEFORE processing
         // If any fills were dropped, the position tracking will be inconsistent
@@ -361,9 +574,83 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                               self.executor.dropped_fill_count()));
         }
 
-        // TODO: Process fills and update position
-        // This requires integrating with RiskManager or implementing Position::process_fill
-        // For now, we've verified the fill queue overflow detection works
+        // Process fills and update position
+        for fill in fills {
+            // Log the fill for transparency
+            tracing::info!(
+                "Fill: order_id={:?}, side={:?}, price={}, size={}",
+                fill.order_id,
+                fill.side,
+                fill.price,
+                fill.size
+            );
+
+            // Update position with fill data
+            // Convert Side enum to u8 for process_fill_fixed
+            let order_side = match fill.side {
+                crate::execution::types::Side::Buy => 0,
+                crate::execution::types::Side::Sell => 1,
+            };
+
+            // Convert Decimal to fixed-point u64 (9 decimal places)
+            let price_fixed = (fill.price * rust_decimal::Decimal::from(1_000_000_000))
+                .to_u64()
+                .ok_or_else(|| anyhow!("Failed to convert price to fixed-point"))?;
+            let size_fixed = (fill.size * rust_decimal::Decimal::from(1_000_000_000))
+                .to_u64()
+                .ok_or_else(|| anyhow!("Failed to convert size to fixed-point"))?;
+
+            // Extract fee in basis points (default to 2bps if not provided)
+            let fee_bps = if let Some(fee) = fill.fee {
+                // Calculate fee as percentage of notional: (fee / (price * size)) * 10000
+                let notional = fill.price * fill.size;
+                if notional > rust_decimal::Decimal::ZERO {
+                    let fee_rate = fee / notional;
+                    let fee_bps_decimal = fee_rate * rust_decimal::Decimal::from(10_000);
+                    fee_bps_decimal.to_u32().unwrap_or(2)  // Default to 2bps if conversion fails
+                } else {
+                    2  // Default fee
+                }
+            } else {
+                2  // Default to 2bps (0.02%) if no fee provided
+            };
+
+            if let Err(e) = self.position.process_fill_fixed_with_fee(order_side, price_fixed, size_fixed, fee_bps) {
+                tracing::error!("Failed to process fill: {}", e);
+                // Position tracking error is critical - halt trading
+                return Err(anyhow!("Position update failed: {}", e));
+            }
+
+            // Log position state after fill
+            let current_qty = self.position.get_quantity();
+            let entry_price = self.position.get_entry_price();
+            let realized_pnl = self.position.get_realized_pnl();
+
+            tracing::debug!(
+                "Position after fill: qty={}, entry_price={}, realized_pnl={}, trades={}",
+                current_qty,
+                entry_price,
+                realized_pnl,
+                self.position.get_trade_count()
+            );
+
+            // CRITICAL: Check position limits after fill processing
+            if current_qty > MAX_POSITION {
+                tracing::error!(
+                    "CRITICAL: Position limit exceeded! Long position {} > max {}",
+                    current_qty, MAX_POSITION
+                );
+                return Err(anyhow!("Position limit exceeded: long {} > max {}", current_qty, MAX_POSITION));
+            }
+
+            if current_qty < -MAX_SHORT {
+                tracing::error!(
+                    "CRITICAL: Short position limit exceeded! Short {} > max {}",
+                    -current_qty, MAX_SHORT
+                );
+                return Err(anyhow!("Short position limit exceeded: {} > max {}", -current_qty, MAX_SHORT));
+            }
+        }
 
         Ok(())
     }
@@ -604,6 +891,14 @@ mod tests {
 
         fn name(&self) -> &'static str {
             "MockExecutor"
+        }
+
+        fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
+            Vec::new()
+        }
+
+        fn dropped_fill_count(&self) -> u64 {
+            0
         }
     }
 
