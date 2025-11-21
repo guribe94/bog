@@ -1,8 +1,8 @@
 //! Simple Spread Strategy - PAPER TRADING ONLY
 //!
-//! ⚠️ WARNING: This binary uses SimulatedExecutor and does NOT place real orders!
-//! ⚠️ THIS IS FOR PAPER TRADING / TESTING ONLY
-//! ⚠️ DO NOT USE FOR REAL MONEY TRADING
+//! WARNING: This binary uses SimulatedExecutor and does NOT place real orders!
+//! THIS IS FOR PAPER TRADING / TESTING ONLY
+//! DO NOT USE FOR REAL MONEY TRADING
 //!
 //! This binary combines:
 //! - SimpleSpread strategy (zero-sized type)
@@ -40,9 +40,9 @@ fn main() -> Result<()> {
     install_panic_handler();
 
     info!("=== Bog: Simple Spread + PAPER TRADING ===");
-    warn!("⚠️  PAPER TRADING MODE - NO REAL ORDERS WILL BE PLACED");
-    warn!("⚠️  Using SimulatedExecutor - This is for testing only!");
-    warn!("⚠️  DO NOT USE THIS BINARY FOR REAL MONEY TRADING");
+    warn!("PAPER TRADING MODE - NO REAL ORDERS WILL BE PLACED");
+    warn!("Using SimulatedExecutor - This is for testing only!");
+    warn!("DO NOT USE THIS BINARY FOR REAL MONEY TRADING");
     info!("Market ID: {}", args.market_id);
 
     // Setup performance (CPU pinning, real-time priority)
@@ -114,9 +114,9 @@ fn main() -> Result<()> {
     info!("  - Min Market Spread: {} bps", MIN_SPREAD_BPS);
 
     // Create executor
-    // ⚠️ PAPER TRADING: Replace with LighterExecutor for live trading
-    warn!("⚠️  PAPER TRADING: SimulatedExecutor active - NO REAL ORDERS!");
-    warn!("⚠️  All trades are simulated. No funds at risk.");
+    // PAPER TRADING: Replace with LighterExecutor for live trading
+    warn!("PAPER TRADING: SimulatedExecutor active - NO REAL ORDERS!");
+    warn!("All trades are simulated. No funds at risk.");
     let executor = SimulatedExecutor::new_default();
 
     // Create engine with full compile-time monomorphization

@@ -50,11 +50,21 @@ Target: <1 microsecond (14.1x headroom)
 
 ## Documentation
 
-- `DEPLOYMENT_CHECKLIST.md` - Pre-deployment verification
-- `SECURITY_AUDIT_REPORT.md` - Complete security audit
-- `STATE_MACHINES.md` - Typestate pattern guide
-- `MEASURED_PERFORMANCE_COMPLETE.md` - Benchmark results
-- `PRODUCTION_READINESS.md` - Operations manual
+**Start Here:**
+- [**docs/README.md**](docs/README.md) - Complete documentation hub
+
+**Quick References:**
+- [State Machines Guide](docs/architecture/STATE_MACHINES.md) - Typestate pattern
+- [Performance Benchmarks](docs/performance/MEASURED_PERFORMANCE_COMPLETE.md) - Measured results
+- [Production Readiness](docs/deployment/PRODUCTION_READINESS.md) - Operations manual
+- [Project Roadmap](docs/PROJECT_ROADMAP.md) - Development phases
+- [Huginn Integration](docs/HUGINN_INTEGRATION_GUIDE.md) - Market data setup
+
+**By Topic:**
+- **Architecture**: [docs/architecture/](docs/architecture/)
+- **Performance**: [docs/performance/](docs/performance/)
+- **Deployment**: [docs/deployment/](docs/deployment/)
+- **Guides**: [docs/guides/](docs/guides/)
 
 ## Testing
 

@@ -804,9 +804,9 @@ grep "Sequence gap" /var/log/bog/bog.log
 - `bog-debug/src/bin/print_orderbook.rs` - Snapshot printer
 
 ### Documentation
-- `SECURITY_AUDIT_REPORT.md` - Security audit (600+ lines)
-- `STATE_MACHINES.md` - State machine guide (285 lines)
+- [../architecture/STATE_MACHINES.md](../architecture/STATE_MACHINES.md) - State machine guide (587 lines)
 - `PRODUCTION_READINESS.md` - This file
+- [../README.md](../README.md) - Full documentation hub
 
 ---
 
@@ -916,6 +916,6 @@ The codebase demonstrates **exceptional engineering discipline** and has been th
 **Version:** 2.0 (Post-Audit)
 
 **For questions or clarifications, refer to:**
-- `SECURITY_AUDIT_REPORT.md` - Security details
-- `STATE_MACHINES.md` - State machine patterns
+- [../architecture/STATE_MACHINES.md](../architecture/STATE_MACHINES.md) - State machine patterns
+- [failure-modes.md](failure-modes.md) - Operational failure scenarios
 - This file - Production operations

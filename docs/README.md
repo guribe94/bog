@@ -1,24 +1,66 @@
-# bog Documentation
+# Bog Documentation Hub
 
 > Sub-microsecond HFT trading engine with zero-overhead abstractions
 
-This directory contains comprehensive documentation for bog's architecture, performance characteristics, deployment, and development practices.
+**Quick Links**: [📋 Complete Index](INDEX.md) | [🚀 Quick Start](../README.md) | [📊 Benchmarks](performance/MEASURED_PERFORMANCE_COMPLETE.md)
 
-## Documentation Structure
+---
+
+## 🎯 Start Here
+
+**New to Bog?**
+1. [Quick Start (../README.md)](../README.md) - Build and run in 5 minutes
+2. [Market Making Guide](guides/market-making-guide.md) - Understand the strategy
+3. [Command Reference](guides/command-reference.md) - Basic operations
+
+**Deploying to Production?**
+1. [Production Readiness](deployment/PRODUCTION_READINESS.md) - Complete checklist
+2. [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - Quick deployment
+3. [Failure Modes](deployment/failure-modes.md) - Troubleshooting
+
+**Developing?**
+1. [System Design](architecture/system-design.md) - Architecture deep dive
+2. [State Machines](architecture/STATE_MACHINES.md) - Safety patterns
+3. [Project Roadmap](PROJECT_ROADMAP.md) - Current status
+
+---
+
+## 📂 Documentation Structure
 
 ```
 docs/
-├── architecture/       # System design and technical architecture
-├── performance/        # Latency analysis and optimization
-├── deployment/         # Operational procedures and failure modes
-└── development/        # Development guides (future)
+├── INDEX.md                     ← Complete navigation
+├── README.md                    ← You are here
+├── PROJECT_ROADMAP.md           ← Development phases
+├── HUGINN_INTEGRATION_GUIDE.md  ← Market data IPC
+├── architecture/                ← Core design
+│   ├── system-design.md         ← Start here for architecture
+│   ├── STATE_MACHINES.md        ← Typestate FSMs
+│   ├── overflow-handling.md     ← Safety architecture
+│   └── fill-processing-trace.md ← Order lifecycle
+├── performance/                 ← Benchmarks & analysis
+│   ├── latency-budget.md        ← Component breakdown
+│   └── MEASURED_PERFORMANCE_COMPLETE.md ← Verified results
+├── deployment/                  ← Operations
+│   ├── PRODUCTION_READINESS.md  ← Complete ops manual
+│   ├── failure-modes.md         ← Troubleshooting (1116 lines!)
+│   ├── 24H_DEPLOYMENT_GUIDE.md  ← Quick deploy
+│   └── PAPER_TRADING_REALISM.md ← Testing
+├── guides/                      ← User guides
+│   ├── market-making-guide.md   ← Strategy deep dive
+│   ├── command-reference.md     ← CLI commands
+│   └── market-selection.md      ← Market config
+└── design/                      ← Historical
+    └── PHASE4_REALISTIC_FILLS.md
 ```
 
 ---
 
-## Getting Started
+## 🗂️ By Topic
 
-### For New Users
+### Architecture & Design
+
+**Core system design and implementation patterns**
 
 1. **[System Design](architecture/system-design.md)** - Start here to understand bog's architecture
    - Zero-overhead design principles
@@ -131,125 +173,177 @@ pub struct Position {
 
 **Result**: ~2ns position updates (all L1 cache hits).
 
-### Performance Summary
+---
 
-| Target | Measured | Status |
-|--------|----------|--------|
-| <1μs tick-to-trade | **27ns** | ✅ 97% under budget |
+## ⚡ Performance at a Glance
 
-**Breakdown**:
-- SHM read: ~5ns
-- Signal generation: ~10ns
-- Order execution: ~10ns (simulated)
-- Position update: ~2ns
+| Metric | Target | Measured | Status |
+|--------|--------|----------|--------|
+| **Tick-to-trade** | <1μs | **70.79ns** | ✅ **14x under budget** |
+| Strategy calc | <100ns | 17.28ns | ✅ 5.8x under |
+| Risk validation | <50ns | 2.37ns | ✅ 21x under |
+| Orderbook sync | <50ns | ~20ns | ✅ 2.5x under |
 
-**Comparison**:
-- Dynamic dispatch: ~150ns (5.5x slower)
-- Python (NumPy): ~1μs (37x slower)
-- Java (HotSpot): ~500ns (18x slower)
+→ See [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) for full benchmarks
 
 ---
 
-## Key Documents
+## 📖 Document Summaries
 
 ### Architecture
 
-#### [System Design](architecture/system-design.md)
-Comprehensive overview of bog's architecture. Essential reading for understanding design decisions.
-
-**Topics**:
-- Zero-overhead type system
-- Shared memory IPC with Huginn
-- Strategy and Executor patterns
-- Fixed-point arithmetic
-- Atomic operations and memory ordering
-- Bounded collections for backpressure
-- Deployment model and scaling
-
-**Audience**: Developers, architects
-
-**Length**: ~600 lines, ~30 min read
-
----
-
-#### [Overflow Handling](architecture/overflow-handling.md)
-Detailed documentation of overflow protection architecture. Critical for safety-critical trading code.
-
-**Topics**:
-- Design philosophy (fail loudly, not silently)
-- Position overflow protection (checked/saturating/legacy methods)
-- Fixed-point conversion safety
-- Safe ranges and realistic limits
-- Error recovery strategies
-- Testing approach (unit, property, fuzz)
-- Performance overhead (~2ns)
-- Migration guide
-
-**Audience**: Developers, risk managers
-
-**Length**: ~350 lines, ~20 min read
-
-**Key takeaway**: All arithmetic operations have overflow-safe alternatives with <1ns overhead.
-
----
+| Document | What It Covers | Read Time |
+|----------|----------------|-----------|
+| [system-design.md](architecture/system-design.md) | Zero-overhead abstractions, cache design, IPC | 30 min |
+| [STATE_MACHINES.md](architecture/STATE_MACHINES.md) | Typestate FSMs, compile-time safety | 25 min |
+| [overflow-handling.md](architecture/overflow-handling.md) | Arithmetic safety, checked operations | 20 min |
+| [fill-processing-trace.md](architecture/fill-processing-trace.md) | Order lifecycle walkthrough | 15 min |
 
 ### Performance
 
-#### [Latency Budget](performance/latency-budget.md)
-Component-by-component latency breakdown with measurements and optimization decisions.
-
-**Topics**:
-- SHM read latency (~5ns)
-- Signal generation latency (~10ns)
-- Order execution latency (~10ns simulated, ~100μs production)
-- Position update latency (~2ns)
-- Overflow check overhead (~2ns)
-- Latency variance (p50, p99, p99.99)
-- Benchmarking methodology
-- Optimization guidelines
-
-**Audience**: Performance engineers, developers
-
-**Length**: ~750 lines, ~40 min read
-
-**Key takeaway**: 27ns internal processing, network is the bottleneck in production.
-
----
+| Document | What It Covers | Read Time |
+|----------|----------------|-----------|
+| [latency-budget.md](performance/latency-budget.md) | Component-by-component breakdown | 40 min |
+| [MEASURED_PERFORMANCE_COMPLETE.md](performance/MEASURED_PERFORMANCE_COMPLETE.md) | Verified benchmark results | 20 min |
 
 ### Deployment
 
-#### [Failure Modes](deployment/failure-modes.md)
-Comprehensive catalog of failure scenarios with detection and mitigation strategies.
+| Document | What It Covers | Read Time |
+|----------|----------------|-----------|
+| [PRODUCTION_READINESS.md](deployment/PRODUCTION_READINESS.md) | Complete ops manual, checklists | 45 min |
+| [failure-modes.md](deployment/failure-modes.md) | 10 failure scenarios + mitigations | 45 min |
+| [24H_DEPLOYMENT_GUIDE.md](deployment/24H_DEPLOYMENT_GUIDE.md) | Quick deployment steps | 10 min |
+| [PAPER_TRADING_REALISM.md](deployment/PAPER_TRADING_REALISM.md) | Testing methodology | 10 min |
 
-**Topics**:
-- **10 major failure modes**:
-  1. Position overflow
-  2. Fixed-point conversion errors
-  3. Fill queue overflow
-  4. Flash crash
-  5. Clock desynchronization
-  6. Memory exhaustion
-  7. Network failures
-  8. Race conditions
-  9. Strategy logic errors
-  10. Dependency failures
+### Guides
 
-- Detection methods (primary, secondary, tertiary)
-- Mitigation strategies (prevention, recovery, monitoring)
-- Incident response procedures
-- Probability assessments
-
-**Audience**: Operators, SREs, developers
-
-**Length**: ~850 lines, ~45 min read
-
-**Key takeaway**: Defense in depth - prevent, detect early, degrade gracefully, fail loudly.
+| Document | What It Covers | Read Time |
+|----------|----------------|-----------|
+| [market-making-guide.md](guides/market-making-guide.md) | Strategy theory + examples | 35 min |
+| [command-reference.md](guides/command-reference.md) | CLI commands | 5 min |
+| [market-selection.md](guides/market-selection.md) | Market configuration | 5 min |
 
 ---
 
-## Quick Reference
+## 🎓 Learning Paths
 
-### Latency Budget at a Glance
+### Path 1: "I Want to Run It" (30 minutes)
+1. [Quick Start](../README.md) - 5 min
+2. [Market Making Guide](guides/market-making-guide.md) - 15 min (skim)
+3. [Command Reference](guides/command-reference.md) - 5 min
+4. [24H Deployment](deployment/24H_DEPLOYMENT_GUIDE.md) - 5 min
+
+### Path 2: "I Want to Understand It" (2 hours)
+1. [Market Making Guide](guides/market-making-guide.md) - 35 min (full read)
+2. [System Design](architecture/system-design.md) - 30 min
+3. [State Machines](architecture/STATE_MACHINES.md) - 25 min
+4. [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) - 20 min
+5. [Huginn Integration](HUGINN_INTEGRATION_GUIDE.md) - 15 min
+
+### Path 3: "I Want to Deploy It" (3 hours)
+1. [Production Readiness](deployment/PRODUCTION_READINESS.md) - 45 min
+2. [Failure Modes](deployment/failure-modes.md) - 45 min
+3. [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - 10 min
+4. [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) - 20 min
+5. Practice deployment - 60 min
+
+### Path 4: "I Want to Modify It" (4 hours)
+1. [System Design](architecture/system-design.md) - 30 min
+2. [State Machines](architecture/STATE_MACHINES.md) - 25 min
+3. [Overflow Handling](architecture/overflow-handling.md) - 20 min
+4. [Latency Budget](performance/latency-budget.md) - 40 min
+5. [Fill Processing Trace](architecture/fill-processing-trace.md) - 15 min
+6. [Project Roadmap](PROJECT_ROADMAP.md) - 20 min
+7. Code exploration - 90 min
+
+---
+
+## 🔧 Quick Operations
+
+### Common Tasks
+
+**Run paper trading**:
+```bash
+./target/release/bog-simple-spread-simulated --market 1
+```
+→ [Command Reference](guides/command-reference.md)
+
+**Check performance**:
+```bash
+cargo bench
+```
+→ [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md)
+
+**Deploy to production** (when ready):
+1. Review [Production Readiness](deployment/PRODUCTION_READINESS.md)
+2. Follow [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md)
+3. Monitor with [Failure Modes](deployment/failure-modes.md) guide
+
+**Troubleshoot issues**:
+1. Check [Failure Modes](deployment/failure-modes.md) - Section by symptom
+2. Review logs with [Command Reference](guides/command-reference.md)
+3. See [Production Readiness](deployment/PRODUCTION_READINESS.md) - Part 10 (Troubleshooting)
+
+---
+
+## 📊 System Status
+
+### Production Readiness: 95%
+
+✅ **Complete**:
+- Market making strategy
+- Data ingestion (Huginn)
+- Risk management
+- State machines
+- Monitoring & alerts
+- Visualization tools
+- Safety infrastructure
+
+⚠️ **Pending**:
+- Lighter SDK integration (execution stubbed)
+- Live trading deployment
+
+---
+
+## 🔗 External Resources
+
+- **Huginn Repository**: `../../huginn/` (sibling repo)
+- **Lighter DEX API**: https://docs.lighter.xyz
+- **Rust Performance Book**: https://nnethercote.github.io/perf-book/
+
+---
+
+## 📝 Contributing
+
+When updating documentation:
+1. Add header block: Purpose, Audience, Prerequisites, Related
+2. Add TL;DR section for LLM quick reference
+3. Update [INDEX.md](INDEX.md) with new document
+4. Fix all cross-references (use relative paths)
+5. Add status badge (✅ Current | ⚠️ Needs Update | 🚧 WIP | 📜 Historical)
+
+### Quality Standards
+- ✅ All code examples must compile
+- ✅ All benchmarks must be verified
+- ✅ All broken links must be fixed
+- ✅ All outdated info must be marked or updated
+
+---
+
+## 🎓 Complete Navigation
+
+Need something specific? Use the [Complete Index](INDEX.md) for:
+- By role (users, developers, operators)
+- By topic (architecture, performance, deployment)
+- By use case ("I want to...")
+- Quick reference tables
+- All 15+ documents catalogued
+
+---
+
+## 📋 Quick Reference Cards
+
+### Performance Targets
 
 | Component | Budget | Measured | Status |
 |-----------|--------|----------|--------|
@@ -301,312 +395,19 @@ rate(bog_dropped_fills_total[5m]) > 0  # Alert: CRITICAL
 
 ---
 
-## Testing
+## 🎉 You're Ready!
 
-### Test Pyramid
+**For detailed information on any topic**, see:
+- [📋 Complete Index](INDEX.md) - Master navigation
+- [🏗️ Architecture docs](architecture/) - System design
+- [⚡ Performance docs](performance/) - Benchmarks
+- [🚀 Deployment docs](deployment/) - Operations
+- [📚 User guides](guides/) - Tutorials
 
-```
-                    ▲
-                   ╱ ╲
-                  ╱   ╲
-                 ╱ Fuzz╲          3 targets, billions of executions
-                ╱───────╲
-               ╱Property╲         17 tests, 1700+ cases
-              ╱───────────╲
-             ╱    Unit     ╲      50+ tests, full coverage
-            ╱───────────────╲
-           ╱  Integration    ╲    End-to-end backtests
-          ╱───────────────────╲
-         ╱    Benchmarks       ╲  Regression detection
-        ╱───────────────────────╲
-```
-
-### Running Tests
-
-```bash
-# Unit tests
-cargo test --package bog-core
-
-# Property-based tests
-cargo test --package bog-core fixed_point_proptest
-
-# Fuzz tests (requires nightly)
-cargo +nightly fuzz run fuzz_fixed_point_conversion -- -max_total_time=300
-
-# Benchmarks
-cargo bench --package bog-core
-
-# Integration tests
-cargo run --bin simple-spread-simulated
-```
-
-### Test Coverage
-
-| Component | Unit | Property | Fuzz | Bench |
-|-----------|------|----------|------|-------|
-| Position | ✅ 12 | ✅ 5 | ✅ | ✅ |
-| Fixed-point | ✅ 8 | ✅ 12 | ✅ | ✅ |
-| Strategy | ✅ 13 | ❌ | ❌ | ✅ |
-| Executor | ✅ 6 | ❌ | ❌ | ✅ |
-| Engine | ✅ 4 | ❌ | ❌ | ✅ |
-
-**Total**: 43 unit tests, 17 property tests, 3 fuzz targets, 8 benchmark suites.
+**Need help?** Start with the [Complete Index](INDEX.md) which organizes everything by role, topic, and use case.
 
 ---
 
-## Building and Running
-
-### Quick Start
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/bog
-cd bog
-
-# Build release binary (optimized)
-cargo build --release \
-  --bin simple-spread-simulated \
-  --features spread-10bps,size-medium,min-spread-1bps
-
-# Run simulation
-./target/release/simple-spread-simulated
-
-# View metrics (in another terminal)
-curl http://localhost:9090/metrics
-```
-
-### Build Profiles
-
-```bash
-# Development (fast compile, slow runtime)
-cargo build
-
-# Release (slow compile, fast runtime)
-cargo build --release
-
-# Benchmarking (includes debug symbols for profiling)
-cargo build --profile bench
-```
-
-### CPU Pinning (Linux)
-
-```bash
-# Pin to core 0 for consistent latency
-taskset -c 0 ./target/release/simple-spread-simulated
-```
-
-### Real-Time Priority (Linux)
-
-```bash
-# Requires CAP_SYS_NICE capability
-sudo setcap cap_sys_nice=eip ./target/release/simple-spread-simulated
-./target/release/simple-spread-simulated
-```
-
----
-
-## Monitoring
-
-### Prometheus Metrics
-
-#### Performance Metrics
-```
-bog_ticks_processed_total          Counter   Total ticks processed
-bog_signals_generated_total        Counter   Total signals generated
-bog_orders_submitted_total         Counter   Total orders submitted
-bog_fills_received_total           Counter   Total fills received
-bog_tick_latency_ns               Histogram Tick processing latency
-```
-
-#### Safety Metrics
-```
-bog_overflow_errors_total{type}    Counter   Overflow errors by type
-bog_saturated_operations_total     Counter   Saturating add operations
-bog_queue_depth                    Gauge     Current fill queue depth
-bog_dropped_fills_total            Counter   Fills dropped due to queue full
-```
-
-#### Position Metrics
-```
-bog_position_quantity              Gauge     Current position (fixed-point)
-bog_position_realized_pnl          Gauge     Realized PnL (fixed-point)
-bog_position_daily_pnl             Gauge     Daily PnL (fixed-point)
-bog_position_trade_count           Counter   Total trades
-```
-
-### Alert Rules
-
-```yaml
-groups:
-  - name: bog_critical
-    interval: 10s
-    rules:
-      - alert: PositionOverflow
-        expr: rate(bog_overflow_errors_total{type="quantity"}[5m]) > 0
-        severity: critical
-        summary: "Position overflow detected"
-
-      - alert: DroppedFills
-        expr: rate(bog_dropped_fills_total[5m]) > 0
-        severity: critical
-        summary: "Fills are being dropped"
-
-  - name: bog_warning
-    interval: 30s
-    rules:
-      - alert: HighQueueDepth
-        expr: bog_queue_depth > 100
-        severity: warning
-        summary: "Fill queue depth high"
-
-      - alert: HighLatency
-        expr: histogram_quantile(0.99, bog_tick_latency_ns) > 100
-        severity: warning
-        summary: "p99 latency >100ns"
-```
-
----
-
-## Contributing
-
-### Code Quality Standards
-
-bog aims for **A+ grade (95+/100)** by Jane Street/Citadel standards:
-
-✅ **Correctness**
-- Overflow protection (checked arithmetic)
-- Property-based testing (mathematical invariants)
-- Fuzz testing (edge case discovery)
-
-✅ **Performance**
-- 27ns tick-to-trade latency (97% under 1μs budget)
-- Zero-cost abstractions (ZST, monomorphization)
-- Cache-line alignment (64-byte Position)
-
-✅ **Safety**
-- Bounded collections (prevent OOM)
-- Error types with context (not String)
-- Defensive validation (NaN, infinity, overflow)
-
-✅ **Documentation**
-- Architecture docs (system-design.md)
-- Performance analysis (latency-budget.md)
-- Operational runbook (failure-modes.md)
-- Inline code comments (why, not what)
-
-✅ **Testing**
-- 43 unit tests (core logic)
-- 17 property tests (1700+ cases)
-- 3 fuzz targets (billions of execs)
-- 8 benchmark suites (regression detection)
-
-### Development Workflow
-
-1. **Fork and clone** repository
-2. **Create feature branch** (`git checkout -b feature/my-feature`)
-3. **Write tests first** (TDD approach)
-4. **Implement feature** with documentation
-5. **Run full test suite** (`cargo test --all`)
-6. **Run benchmarks** (`cargo bench`) - Ensure no regression >10%
-7. **Update documentation** if architecture changes
-8. **Submit PR** with clear description
-
-### Code Review Checklist
-
-- [ ] Tests pass (`cargo test --all`)
-- [ ] Benchmarks show no regression (`cargo bench`)
-- [ ] New code has overflow protection (checked arithmetic)
-- [ ] Documentation updated (if architecture changed)
-- [ ] Code comments explain *why*, not *what*
-- [ ] No new warnings (`cargo clippy`)
-- [ ] Formatted (`cargo fmt`)
-
----
-
-## Resources
-
-### Internal Documentation
-- [System Design](architecture/system-design.md)
-- [Overflow Handling](architecture/overflow-handling.md)
-- [Latency Budget](performance/latency-budget.md)
-- [Failure Modes](deployment/failure-modes.md)
-
-### Code
-- [Core types](../bog-core/src/core/types.rs) - Position, Signal, OrderId
-- [Fixed-point arithmetic](../bog-core/src/core/fixed_point.rs)
-- [Engine](../bog-core/src/engine/generic.rs) - Main event loop
-- [Strategies](../bog-strategies/src/) - SimpleSpread, InventoryBased
-
-### Tests
-- [Property tests](../bog-core/src/core/fixed_point_proptest.rs)
-- [Fuzz tests](../bog-core/fuzz/) - See README
-- [Benchmarks](../bog-core/benches/)
-
-### External References
-- [Huginn](../../huginn/) - Market data feed (sibling repo)
-- [Rust Performance Book](https://nnethercote.github.io/perf-book/)
-- [Intel Optimization Manual](https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html)
-
----
-
-## FAQ
-
-### Q: Why 27ns latency but 1μs budget?
-
-**A**: The 973ns slack is for network latency (~100μs to exchange) and future features. Internal processing is 27ns, end-to-end is ~100μs (network-bound).
-
-### Q: Why fixed-point instead of f64?
-
-**A**: Determinism, performance, and exact arithmetic within 9 decimals. f64 has rounding issues and NaN/infinity edge cases. See [System Design](architecture/system-design.md#fixed-point-arithmetic).
-
-### Q: Why const generics instead of runtime config?
-
-**A**: Zero-cost abstractions. Runtime config adds ~2ns per lookup. Const generics are free (compiled to immediate values). Trade-off: Rebuild for different configs.
-
-### Q: Why single-threaded?
-
-**A**: No lock contention, better cache utilization, easier to reason about. Each market runs in its own process (horizontal scaling).
-
-### Q: How to add a new strategy?
-
-**A**:
-1. Create `bog-strategies/src/my_strategy.rs`
-2. Implement `Strategy` trait with ZST
-3. Add const parameters as `Cargo.toml` features
-4. Create binary in `bog-bins/src/`
-5. Write tests and benchmarks
-6. Document performance characteristics
-
-See [SimpleSpread](../bog-strategies/src/simple_spread.rs) as reference.
-
----
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| 0.1.0 | 2025-01 | Initial release with dynamic dispatch |
-| 0.2.0 | 2025-02 | Refactor to const generics |
-| 0.3.0 | 2025-03 | Add overflow protection (Phase 1) |
-| 0.4.0 | 2025-04 | Add backpressure (Phase 2) |
-| 0.5.0 | 2025-04 | Add property/fuzz tests (Phase 3-4) |
-| 0.6.0 | 2025-04 | Comprehensive documentation (Phase 5) |
-
----
-
-## License
-
-MIT License - See LICENSE file for details.
-
----
-
-## Support
-
-For questions or issues:
-- GitHub Issues: [github.com/yourusername/bog/issues](https://github.com/yourusername/bog/issues)
-- Documentation: This directory (`docs/`)
-- Code comments: Inline in source files
-
----
-
-**Last updated**: 2025-11-05 (Phase 5: Documentation)
+**Last Updated**: 2025-11-21
+**Status**: ✅ Current
+**Maintained by**: Bog Team

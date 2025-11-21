@@ -92,10 +92,12 @@ market-2 = []
 max-position-half = []      # 0.5 BTC
 max-position-one = []       # 1.0 BTC
 max-position-five = []      # 5.0 BTC
+max-position-2btc = []      # 2.0 BTC
 
 max-short-half = []         # 0.5 BTC
 max-short-one = []          # 1.0 BTC
 max-short-five = []         # 5.0 BTC
+max-short-2btc = []         # 2.0 BTC
 
 # Risk limits - Order sizes (in BTC)
 max-order-tenth = []        # 0.1 BTC
@@ -110,6 +112,18 @@ min-order-tenth = []        # 0.1 BTC
 max-daily-loss-100 = []
 max-daily-loss-1000 = []
 max-daily-loss-10000 = []
+max-daily-loss-20pct = []
+max-drawdown-10pct = []
+
+# Advanced risk controls
+rate-limit-50ms = []        # Minimum 50ms between orders
+rate-limit-200ms = []       # Minimum 200ms between orders
+queue-warning-200 = []      # Warn if queue depth exceeds 200
+stale-recovery-5pct = []    # Recover from stale data with 5% buffer
+breaker-gap-5000 = []       # Circuit breaker triggers at 5000 message gap
+
+# Testing features
+testing = []                # Enable test-only code paths
 
 # Risk profiles (convenience bundles)
 conservative = ["max-position-half", "max-order-tenth", "max-daily-loss-100"]
