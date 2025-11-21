@@ -9,8 +9,8 @@ name = "bog-simple-spread-simulated"
 path = "src/bin/simple_spread_simulated.rs"
 
 [[bin]]
-name = "bog-simple-spread-live"
-path = "src/bin/simple_spread_live.rs"
+name = "bog-simple-spread-paper"
+path = "src/bin/simple_spread_paper.rs"
 
 [[bin]]
 name = "bog-inventory-simulated"
