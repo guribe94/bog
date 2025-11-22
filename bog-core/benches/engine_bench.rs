@@ -45,7 +45,7 @@ fn bench_engine_tick_processing(c: &mut Criterion) {
 
     group.bench_function("tick_processing", |b| {
         b.iter(|| {
-            black_box(engine.process_tick(black_box(&snapshot)).unwrap());
+            black_box(engine.process_tick(black_box(&snapshot), true).unwrap());
         });
     });
 
@@ -59,10 +59,11 @@ fn bench_strategy_calculation(c: &mut Criterion) {
 
     let mut strategy = SimpleSpread;
     let snapshot = create_market_snapshot(0);
+    let position = Position::new();
 
     group.bench_function("simple_spread", |b| {
         b.iter(|| {
-            black_box(strategy.calculate(black_box(&snapshot)));
+            black_box(strategy.calculate(black_box(&snapshot), black_box(&position)));
         });
     });
 
@@ -107,9 +108,16 @@ fn bench_executor(c: &mut Criterion) {
         100_000_000,
     );
 
+    let mut iteration = 0;
     group.bench_function("execute_signal", |b| {
         b.iter(|| {
             black_box(executor.execute(black_box(signal), black_box(&position)).unwrap());
+
+            // Drain fills every 100 iterations to prevent queue overflow
+            iteration += 1;
+            if iteration % 100 == 0 {
+                let _ = executor.get_fills();
+            }
         });
     });
 
@@ -167,12 +175,12 @@ fn bench_market_change_detection(c: &mut Criterion) {
     let snapshot = create_market_snapshot(0);
 
     // Prime the engine with first tick
-    engine.process_tick(&snapshot).unwrap();
+    engine.process_tick(&snapshot, true).unwrap();
 
     group.bench_function("same_market", |b| {
         b.iter(|| {
             // Should skip due to market change detection
-            black_box(engine.process_tick(black_box(&snapshot)).unwrap());
+            black_box(engine.process_tick(black_box(&snapshot), true).unwrap());
         });
     });
 
@@ -224,7 +232,50 @@ fn bench_tick_to_trade_pipeline(c: &mut Criterion) {
             tick_num += 1;
 
             // Complete tick-to-trade pipeline
-            black_box(engine.process_tick(black_box(&snapshot)).unwrap());
+            black_box(engine.process_tick(black_box(&snapshot), true).unwrap());
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark: Stale data path (data_fresh = false)
+fn bench_stale_data_path(c: &mut Criterion) {
+    let mut group = c.benchmark_group("error_paths");
+    group.significance_level(0.01).sample_size(10000);
+
+    let strategy = SimpleSpread;
+    let executor = SimulatedExecutor::new_default();
+    let mut engine = Engine::new(strategy, executor);
+    let snapshot = create_market_snapshot(0);
+
+    group.bench_function("stale_data_skip", |b| {
+        b.iter(|| {
+            // Pass data_fresh = false to trigger early exit
+            black_box(engine.process_tick(black_box(&snapshot), false).unwrap());
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark: Invalid market data (crossed book)
+fn bench_invalid_market_data(c: &mut Criterion) {
+    let mut group = c.benchmark_group("error_paths");
+    group.significance_level(0.01).sample_size(10000);
+
+    let mut strategy = SimpleSpread;
+    let position = Position::new();
+
+    // Create crossed book (bid > ask - invalid)
+    let mut snapshot = create_market_snapshot(0);
+    snapshot.best_bid_price = 50_010_000_000_000;
+    snapshot.best_ask_price = 50_000_000_000_000; // Crossed!
+
+    group.bench_function("invalid_market", |b| {
+        b.iter(|| {
+            // Strategy should return None for invalid data
+            black_box(strategy.calculate(black_box(&snapshot), black_box(&position)));
         });
     });
 
@@ -242,6 +293,8 @@ criterion_group!(
     bench_market_change_detection,
     bench_varying_order_sizes,
     bench_tick_to_trade_pipeline,
+    bench_stale_data_path,
+    bench_invalid_market_data,
 );
 
 criterion_main!(benches);

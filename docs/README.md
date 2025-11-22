@@ -220,6 +220,7 @@ pub struct Position {
 | Document | What It Covers | Read Time |
 |----------|----------------|-----------|
 | [market-making-guide.md](guides/market-making-guide.md) | Strategy theory + examples | 35 min |
+| [benchmark-guide.md](guides/benchmark-guide.md) | Running and interpreting benchmarks | 20 min |
 | [command-reference.md](guides/command-reference.md) | CLI commands | 5 min |
 | [market-selection.md](guides/market-selection.md) | Market configuration | 5 min |
 

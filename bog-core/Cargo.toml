@@ -73,6 +73,34 @@ harness = false
 name = "resilience_bench"
 harness = false
 
+[[bench]]
+name = "inventory_strategy_bench"
+harness = false
+
+[[bench]]
+name = "circuit_breaker_bench"
+harness = false
+
+[[bench]]
+name = "multi_tick_bench"
+harness = false
+
+[[bench]]
+name = "order_fsm_bench"
+harness = false
+
+[[bench]]
+name = "fill_processing_bench"
+harness = false
+
+[[bench]]
+name = "throughput_bench"
+harness = false
+
+[[bench]]
+name = "reconciliation_bench"
+harness = false
+
 [features]
 default = []
 

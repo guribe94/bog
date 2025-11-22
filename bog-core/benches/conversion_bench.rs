@@ -15,9 +15,8 @@
 //! - Large values (1000.0)
 //! - Edge cases (near limits)
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use bog_core::data::conversions::*;
-use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 fn decimal_to_u64_bench(c: &mut Criterion) {

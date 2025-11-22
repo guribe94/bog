@@ -141,7 +141,7 @@ mod tests {
     struct AlwaysQuoteStrategy;
 
     impl Strategy for AlwaysQuoteStrategy {
-        fn calculate(&mut self, _snapshot: &MarketSnapshot) -> Option<Signal> {
+        fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
             Some(Signal::quote_both(
                 50_000_000_000_000,
                 50_010_000_000_000,
@@ -191,7 +191,8 @@ mod tests {
 
         // Wrapper should return None when paused
         let snapshot = create_test_snapshot();
-        let signal = wrapper.calculate(&snapshot);
+        let position = Position::new();
+        let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_none(), "Should not generate signals when paused");
         assert!(!wrapper.is_operational(), "Should not be operational when paused");
@@ -207,7 +208,8 @@ mod tests {
 
         // Wrapper should delegate to strategy when active
         let snapshot = create_test_snapshot();
-        let signal = wrapper.calculate(&snapshot);
+        let position = Position::new();
+        let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_some(), "Should generate signals when active");
         assert!(wrapper.is_operational(), "Should be operational when active");
@@ -224,7 +226,8 @@ mod tests {
 
         // Don't start - should remain in Initializing state
         let snapshot = create_test_snapshot();
-        let signal = wrapper.calculate(&snapshot);
+        let position = Position::new();
+        let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_none(), "Should not generate signals when initializing");
         assert!(!wrapper.is_operational(), "Should not be operational when initializing");
@@ -239,7 +242,8 @@ mod tests {
         wrapper.stop();
 
         let snapshot = create_test_snapshot();
-        let signal = wrapper.calculate(&snapshot);
+        let position = Position::new();
+        let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_none(), "Should not generate signals when stopped");
         assert!(!wrapper.is_operational(), "Should not be operational when stopped");
@@ -275,23 +279,24 @@ mod tests {
         let strategy = AlwaysQuoteStrategy;
         let mut wrapper = StrategyWrapper::new(strategy);
         let snapshot = create_test_snapshot();
+        let position = Position::new();
 
         wrapper.start();
 
         // Should generate signal when active
-        assert!(wrapper.calculate(&snapshot).is_some());
+        assert!(wrapper.calculate(&snapshot, &position).is_some());
 
         // Pause
         wrapper.pause();
-        assert!(wrapper.calculate(&snapshot).is_none());
+        assert!(wrapper.calculate(&snapshot, &position).is_none());
 
         // Resume
         wrapper.resume();
-        assert!(wrapper.calculate(&snapshot).is_some());
+        assert!(wrapper.calculate(&snapshot, &position).is_some());
 
         // Pause again
         wrapper.pause();
-        assert!(wrapper.calculate(&snapshot).is_none());
+        assert!(wrapper.calculate(&snapshot, &position).is_none());
     }
 
     #[test]

@@ -113,7 +113,7 @@
 //! - Target: <50ns engine overhead per tick ✅ **Achieved**
 
 use crate::config::{
-    MAX_POSITION, MAX_SHORT, MAX_DRAWDOWN, MAX_DAILY_LOSS,
+    MAX_POSITION, MAX_SHORT,
     MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
     MAX_POST_STALE_CHANGE_BPS
 };
@@ -860,7 +860,7 @@ mod tests {
     }
 
     impl Strategy for MockStrategy {
-        fn calculate(&mut self, _snapshot: &MarketSnapshot) -> Option<Signal> {
+        fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
             self.call_count += 1;
             if self.call_count % 2 == 0 {
                 Some(Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000))

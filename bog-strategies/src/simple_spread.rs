@@ -121,7 +121,6 @@ use bog_core::config::{MAX_POSITION, INVENTORY_IMPACT_BPS, VOLATILITY_SPIKE_THRE
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
-use crate::volatility::RollingVolatility;
 use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
