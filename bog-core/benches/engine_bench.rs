@@ -202,9 +202,16 @@ fn bench_varying_order_sizes(c: &mut Criterion) {
                 size,
             );
             let mut executor = SimulatedExecutor::new_default();
+            let mut iteration = 0;
 
             b.iter(|| {
                 black_box(executor.execute(black_box(signal), black_box(&position)).unwrap());
+
+                // Drain fills every 100 iterations
+                iteration += 1;
+                if iteration % 100 == 0 {
+                    let _ = executor.get_fills();
+                }
             });
         });
     }
