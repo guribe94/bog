@@ -33,8 +33,8 @@ use crate::data::MarketSnapshot;
 use crate::orderbook::depth;
 use rust_decimal::Decimal;
 
-/// Number of price levels stored
-pub const DEPTH_LEVELS: usize = 10;
+/// Number of price levels stored (from Huginn's configurable depth)
+pub const DEPTH_LEVELS: usize = huginn::shm::ORDERBOOK_DEPTH;
 
 /// L2 Orderbook - stores full market depth from Huginn
 ///
@@ -465,7 +465,7 @@ mod tests {
         snapshot.best_ask_size = 1_500_000_000;       // 1.5 BTC
 
         // Fill in depth levels (bids descending, asks ascending)
-        for i in 0..10 {
+        for i in 0..DEPTH_LEVELS {
             snapshot.bid_prices[i] = 50_000_000_000_000 - (i as u64 * 10_000_000_000); // -$10 per level
             snapshot.bid_sizes[i] = 1_000_000_000 + (i as u64 * 100_000_000); // +0.1 BTC per level
 
@@ -519,7 +519,7 @@ mod tests {
         book.sync_from_snapshot(&snapshot);
 
         // Verify all 10 levels were copied
-        for i in 0..10 {
+        for i in 0..DEPTH_LEVELS {
             assert_eq!(book.bid_prices[i], snapshot.bid_prices[i]);
             assert_eq!(book.bid_sizes[i], snapshot.bid_sizes[i]);
             assert_eq!(book.ask_prices[i], snapshot.ask_prices[i]);
@@ -736,7 +736,7 @@ mod tests {
         // Change prices dramatically
         snapshot_b.best_bid_price = 51_000_000_000_000; // $51,000
         snapshot_b.best_ask_price = 51_010_000_000_000; // $51,010
-        for i in 0..10 {
+        for i in 0..DEPTH_LEVELS {
             snapshot_b.bid_prices[i] = 51_000_000_000_000 - (i as u64 * 10_000_000_000);
             snapshot_b.ask_prices[i] = 51_010_000_000_000 + (i as u64 * 10_000_000_000);
         }
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(book.best_ask_price(), 51_010_000_000_000);
         assert_eq!(book.last_sequence, 101);
         // Verify all 10 levels match B (not A)
-        for i in 0..10 {
+        for i in 0..DEPTH_LEVELS {
             assert_eq!(book.bid_prices[i], snapshot_b.bid_prices[i]);
             assert_eq!(book.ask_prices[i], snapshot_b.ask_prices[i]);
         }
@@ -801,7 +801,7 @@ mod tests {
 
         // Verify full rebuild was performed (all levels updated)
         assert_eq!(book.last_sequence, 50);
-        for i in 0..10 {
+        for i in 0..DEPTH_LEVELS {
             assert_eq!(book.bid_prices[i], snapshot.bid_prices[i]);
             assert_eq!(book.ask_prices[i], snapshot.ask_prices[i]);
         }

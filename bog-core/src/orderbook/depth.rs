@@ -5,7 +5,7 @@
 ///
 /// **Performance target:** <10ns per calculation
 
-use huginn::shm::MarketSnapshot;
+use huginn::shm::{MarketSnapshot, ORDERBOOK_DEPTH};
 
 /// Calculate Volume-Weighted Average Price (VWAP) across depth levels
 ///
@@ -35,7 +35,7 @@ pub fn calculate_vwap(
     is_bid: bool,
     max_levels: usize,
 ) -> Option<u64> {
-    let max_levels = max_levels.min(10); // Clamp to valid range
+    let max_levels = max_levels.min(ORDERBOOK_DEPTH); // Clamp to valid range
 
     let (prices, sizes) = if is_bid {
         (&snapshot.bid_prices, &snapshot.bid_sizes)
@@ -107,7 +107,7 @@ pub fn calculate_imbalance(
     snapshot: &MarketSnapshot,
     max_levels: usize,
 ) -> i64 {
-    let max_levels = max_levels.min(10);
+    let max_levels = max_levels.min(ORDERBOOK_DEPTH);
 
     let mut bid_volume: u128 = 0;
     let mut ask_volume: u128 = 0;
@@ -170,7 +170,7 @@ pub fn calculate_liquidity(
     is_bid: bool,
     max_levels: usize,
 ) -> u64 {
-    let max_levels = max_levels.min(10);
+    let max_levels = max_levels.min(ORDERBOOK_DEPTH);
 
     let sizes = if is_bid {
         &snapshot.bid_sizes
