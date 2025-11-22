@@ -672,9 +672,41 @@ Even with network jitter, comfortably under 1μs.
 
 ---
 
-**Benchmarked:** 2025-11-12
-**Runtime:** 4 benchmarks × ~4-5 minutes = ~18 minutes total
-**Sample Size:** 10,000 per benchmark (140,000+ total iterations)
+## BENCHMARK SUITE EXPANSION (2025-11-21)
+
+**New Benchmarks Added:** 7 files, 44 new tests
+**Total Suite:** 13 files, 67 tests, 121 measurements
+**Full Results:** See [BENCHMARK_RESULTS_2025-11-21.txt](BENCHMARK_RESULTS_2025-11-21.txt)
+
+### New Coverage
+
+| Component | Tests | Status |
+|-----------|-------|--------|
+| InventoryBased strategy | 6 | ✅ Complete |
+| Circuit breaker | 6 | ✅ Complete |
+| Multi-tick scenarios | 6 | ✅ Complete |
+| Order FSM transitions | 8 | ✅ Complete |
+| Fill processing | 6 | ✅ Complete |
+| Throughput limits | 4 | ✅ Complete |
+| Position reconciliation | 6 | ✅ Complete |
+| Error paths | 2 | ✅ Complete |
+
+**Key New Findings:**
+- Circuit breaker check: 28.87ns (normal operation overhead)
+- Order FSM transitions: 60-100ns per transition
+- Fill processing: 7.82ns per fill
+- Reconciliation: 4.48ns per check
+- Throughput: 791μs for 1000 orders (1,263 orders/sec)
+- Multi-tick 1000 ticks: ~75μs total
+
+**All benchmarks ran successfully:** No panics, no errors
+
+---
+
+**Original Benchmarking:** 2025-11-12 (6 files, 26 tests)
+**Expanded Suite:** 2025-11-21 (13 files, 67 tests)
+**Runtime:** ~32 minutes for full suite
+**Sample Size:** 670,000+ total iterations
 **Statistical Confidence:** 99%
 
 **No more unverified claims. These are the real numbers.**
