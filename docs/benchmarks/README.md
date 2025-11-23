@@ -1,191 +1,232 @@
-# Benchmark Results
+# Bog Benchmark Results
 
 **Purpose:** Central repository for all benchmark data, tracking performance evolution over time
 **Audience:** Developers, performance engineers, system operators
-**Status:** Current
+**Status:** Current - Consolidated format
 
 ---
 
 ## Overview
 
-This directory contains comprehensive benchmark results for the Bog HFT trading system, organized chronologically to enable performance tracking and regression detection.
+This directory contains comprehensive benchmark results for the Bog HFT trading system. All results are now stored in a consolidated format with one markdown file per run, making it easy to track performance trends and detect regressions.
 
 ## Directory Structure
 
 ```
 benchmarks/
-├── README.md           # This file
-├── INDEX.md            # Chronological manifest of all benchmark runs
-├── LATEST.md           # Quick reference to most recent results
-├── latency-budget.md   # Component-level latency targets and budgets
-└── YYYY-MM/            # Results organized by year-month
-    └── YYYY-MM-DD/     # Individual benchmark run
-        ├── *.txt       # Raw criterion benchmark output
-        ├── REPORT.md   # Analysis with summary tables and system metadata
-        └── comparison.md  # Delta analysis vs previous run
+├── README.md                                    # This file
+├── INDEX.md                                     # Chronological manifest
+├── LATEST.md                                    # Most recent results
+├── latency-budget.md                            # Latency targets
+└── YYYY-MM/                                     # Results by year-month
+    └── YYYY-MM-DD_HHmmss_platform.md           # Consolidated result files
 ```
 
-## Running Benchmarks
+## New Consolidated Format
 
-### Prerequisites
+Each consolidated markdown file contains:
 
-- Release build: `cargo build --release`
-- Stable system state: disable CPU throttling, close background applications
-- Recommended: pin to performance CPU cores (see `bog-core/src/perf/cpu.rs`)
+- Metadata (platform, CPU, RAM, OS, Rust version, git commit)
+- All benchmark results (13 benchmarks for bog)
+- Summary statistics per benchmark
+- Regression Analysis (comparison with previous run)
+- Notes and raw data references
 
-### Standard Benchmark Suite
+Benchmarks not run in a particular session are marked "NOT RUN" to maintain consistent structure across all files.
+
+## Running Benchmarks (Automated)
+
+The benchmark.sh script automates the entire process:
 
 ```bash
-# Full benchmark suite
-cargo bench
+# Quick mode (3 critical benchmarks, ~2-5 minutes)
+./benchmark.sh
 
-# Specific benchmark group
-cargo bench --bench engine_bench
-cargo bench --bench strategy_bench
-cargo bench --bench executor_bench
+# Full mode (all 13 benchmarks, ~10-20 minutes)
+./benchmark.sh --full
+
+# Override platform detection
+./benchmark.sh --platform M1
+
+# Skip cargo clean for faster iteration
+./benchmark.sh --no-clean
+
+# Skip baseline comparison
+./benchmark.sh --no-compare
 ```
 
-### Recording Results
+The script will:
+1. Auto-detect platform (M1, M2, c6in_xlarge, etc.)
+2. Collect system information
+3. Run benchmarks (bog-core/benches/)
+4. Process results into consolidated markdown
+5. Compare with previous run (regression detection >5%)
+6. Save to `docs/benchmarks/YYYY-MM/YYYY-MM-DD_HHmmss_platform.md`
 
-1. Run benchmarks: `cargo bench 2>&1 | tee benchmark_output.txt`
-2. Create dated directory: `docs/benchmarks/YYYY-MM/YYYY-MM-DD/`
-3. Move raw output: `mv benchmark_output.txt docs/benchmarks/YYYY-MM/YYYY-MM-DD/full_suite.txt`
-4. Create `REPORT.md` using the template below
-5. Create `comparison.md` with delta analysis vs previous run
-6. Update `INDEX.md` with entry for this run
-7. Update `LATEST.md` to point to new results
+## Manual Benchmark Processing
 
-## Report Template
+If you have raw Criterion output:
 
-Each benchmark run should include a `REPORT.md` following this structure:
-
-```markdown
-# Benchmark Report: YYYY-MM-DD
-
-## System Context
-
-- **Date:** YYYY-MM-DD HH:MM:SS TZ
-- **CPU:** [model, cores, base/boost frequency]
-- **RAM:** [amount, speed]
-- **OS:** [name, version, kernel]
-- **Rust:** [version]
-- **Compilation:** [profile, features, target-cpu, lto settings]
-
-## Summary Table
-
-| Benchmark | Mean | Std Dev | Throughput | vs Previous |
-|-----------|------|---------|------------|-------------|
-| engine/signal_generation | X.XX ns | ±Y.YY ns | Z.ZZ M/s | +A.A% |
-| ... | ... | ... | ... | ... |
-
-## Key Findings
-
-- Notable performance improvements
-- Identified regressions and root causes
-- Achievement of latency targets
-- Areas requiring optimization
-
-## Full Results
-
-[Complete criterion output from *.txt files]
+```bash
+# Process into consolidated markdown
+python3 benchmarks/process_benchmarks.py \
+  benchmarks/raw/YYYY-MM/YYYY-MM-DD_HHmmss_platform/ \
+  docs/benchmarks/YYYY-MM/YYYY-MM-DD_HHmmss_platform.md \
+  --platform M1 \
+  --compare-with docs/benchmarks/YYYY-MM/previous_run.md
 ```
 
-## Comparison Template
+## Bog Benchmarks
 
-Each `comparison.md` should analyze changes since the previous benchmark run:
+The following 13 benchmarks are tracked:
 
-```markdown
-# Performance Comparison: YYYY-MM-DD vs YYYY-MM-DD
+1. **engine_bench** - Core trading engine performance
+2. **conversion_bench** - Data type conversions
+3. **atomic_bench** - Atomic operations
+4. **fill_processing_bench** - Order fill processing
+5. **inventory_strategy_bench** - Inventory management
+6. **tls_overhead_bench** - Thread-local storage overhead
+7. **multi_tick_bench** - Multi-tick processing
+8. **circuit_breaker_bench** - Circuit breaker logic
+9. **depth_bench** - Order book depth operations
+10. **throughput_bench** - Overall system throughput
+11. **order_fsm_bench** - Order state machine
+12. **reconciliation_bench** - Position reconciliation
+13. **resilience_bench** - Error recovery and resilience
 
-## Summary
-
-- **Total benchmarks:** N
-- **Improved:** X (list)
-- **Regressed:** Y (list)
-- **Unchanged:** Z (within statistical noise)
-
-## Detailed Analysis
-
-### Improvements
-
-| Benchmark | Previous | Current | Delta | Reason |
-|-----------|----------|---------|-------|--------|
-| ... | ... | ... | +X.X% | [code change/optimization] |
-
-### Regressions
-
-| Benchmark | Previous | Current | Delta | Reason |
-|-----------|----------|---------|-------|--------|
-| ... | ... | ... | -X.X% | [code change/tradeoff] |
-
-## Root Cause Analysis
-
-[Detailed investigation of significant changes]
-
-## Recommendations
-
-[Actions to address regressions or further optimize improvements]
-```
-
-## Interpreting Results
-
-### Criterion Metrics
-
-- **Mean:** Average execution time
-- **Std Dev:** Standard deviation, indicates consistency
-- **Median:** 50th percentile, robust to outliers
-- **MAD:** Median Absolute Deviation
-- **Throughput:** Operations per second
-
-### Statistical Significance
-
-Criterion reports changes as:
-- **No change:** Difference within noise threshold
-- **Improved:** Statistically significant speedup
-- **Regressed:** Statistically significant slowdown
-
-Changes under 1-2% may not be statistically significant.
-
-### Latency Targets
+## Latency Targets
 
 Refer to `latency-budget.md` for component-level targets. Key objectives:
 
-- Total tick-to-trade: <1 microsecond
-- Signal generation: <100 nanoseconds
-- Order creation: <50 nanoseconds
-- Engine overhead: <50 nanoseconds
+- **Total tick-to-trade**: <1 microsecond
+- **Signal generation**: <100 nanoseconds
+- **Order creation**: <50 nanoseconds
+- **Engine overhead**: <50 nanoseconds
 
 ## Regression Detection
 
-Compare new results against previous runs in `INDEX.md`:
+Automatically compares with the most recent run on the same platform:
 
-1. Identify benchmarks with >5% regression
-2. Investigate recent code changes
-3. Profile with `perf` or `flamegraph` if needed
-4. Document findings in `comparison.md`
+- **Regressions**: >5% slower (highlighted in report)
+- **Improvements**: >5% faster (highlighted in report)
+- **No change**: Within ±5% threshold
+
+Changes under 1-2% may not be statistically significant.
+
+## File Locations
+
+### Raw Data
+```
+benchmarks/raw/YYYY-MM/YYYY-MM-DD_HHmmss_platform/
+├── engine_bench.txt                # Raw Criterion output
+├── conversion_bench.txt
+├── ...
+└── system_info.env                 # Platform metadata
+```
+
+### Consolidated Reports
+```
+docs/benchmarks/YYYY-MM/
+└── YYYY-MM-DD_HHmmss_platform.md   # Single consolidated file
+```
+
+## Migrating Historical Data
+
+To migrate old benchmark files to the new format:
+
+```bash
+# Dry run (see what would happen)
+python3 benchmarks/migrate_historical_data.py --dry-run
+
+# Run migration
+python3 benchmarks/migrate_historical_data.py
+```
+
+This preserves original REPORT.md files while creating new consolidated versions.
+
+## Prerequisites for Benchmarking
+
+- **Release build**: `cargo build --release`
+- **Stable system state**: Disable CPU throttling, close background applications
+- **Recommended**: Pin to performance CPU cores (see `bog-core/src/perf/cpu.rs`)
+
+## Platform-Specific Guidelines
+
+### M1/M2/M3 Mac (ARM64)
+- **Platform name**: Auto-detected as "M1", "M2", or "M3"
+- **Clock speeds**: Typically 3.2 GHz
+- **Memory**: Unified memory architecture
+- **Note**: Results differ significantly from x86-64
+
+### x86-64 Linux (Production)
+- **Platform name**: Detected as "x86_64_intel", "x86_64_amd", or "linux"
+- **Clock speeds**: Varies (2.5-4.0 GHz typical)
+- **Memory**: Traditional RAM architecture
+- **Primary target**: Production deployment platform
+
+### AWS EC2
+- **Instance types**: Auto-detected (c6in_xlarge, c7g_xlarge, etc.)
+- **Override detection**: Use `--platform` flag if needed
+- **Variability**: May have higher variance due to virtualization
+
+## Interpreting Results
+
+### Consolidated File Sections
+
+1. **Metadata**: Platform specs, date, versions, git info
+2. **Benchmark Results**: All 13 benchmarks with summary stats
+3. **Regression Analysis**: Comparison with previous run
+
+### What to Look For
+
+**Good signs**:
+- Low outlier percentage (<10%)
+- Consistent latencies across runs
+- Meeting latency budget targets
+- No unexpected regressions
+
+**Red flags**:
+- >20% outliers
+- Regressions vs previous run
+- Exceeding latency budgets
+- High variance between runs
+
+## Statistical Quality
+
+Criterion provides:
+- **Mean**: Average execution time
+- **Std Dev**: Standard deviation (consistency indicator)
+- **Median**: 50th percentile (robust to outliers)
+- **MAD**: Median Absolute Deviation
+- **Confidence intervals**: 95% confidence by default
 
 ## Adding New Benchmarks
 
 When adding new benchmark code:
 
-1. Place in `bog-core/benches/` or appropriate crate
+1. Place in `bog-core/benches/component_bench.rs`
 2. Follow naming convention: `component_bench.rs`
 3. Use criterion groups for organization
 4. Document benchmark purpose and methodology
-5. Update this README if needed
+5. Update `ALL_BENCHMARKS` list in `benchmarks/process_benchmarks.py`
+6. Update this README if needed
 
-## Historical Data
+## References
 
-All benchmark runs are preserved in their original dated directories. To track performance trends:
+- **Benchmark Script**: [../../benchmark.sh](../../benchmark.sh)
+- **Processing Script**: [../../benchmarks/process_benchmarks.py](../../benchmarks/process_benchmarks.py)
+- **Migration Script**: [../../benchmarks/migrate_historical_data.py](../../benchmarks/migrate_historical_data.py)
+- **Latency Budget**: [latency-budget.md](latency-budget.md)
+- **Index**: [INDEX.md](INDEX.md)
+- **Latest Results**: [LATEST.md](LATEST.md)
 
-1. Consult `INDEX.md` for run history
-2. Compare `REPORT.md` summary tables across dates
-3. Review `comparison.md` files for cumulative changes
+## Questions?
 
-## Notes
+If you're unsure about:
+- How to run benchmarks → Run `./benchmark.sh --help`
+- How to interpret results → See consolidated markdown file sections
+- What changed from previous run → Check "Regression Analysis" section
+- Latency targets → See latency-budget.md
+- Historical context → See INDEX.md
 
-- Benchmark results are system-dependent
-- Run on consistent hardware for valid comparisons
-- Kernel scheduler, CPU governor, and background processes affect results
-- Use multiple runs to establish confidence intervals
-- Warm-up iterations reduce cold-start effects
+**Last Updated**: 2025-11-23
