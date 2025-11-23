@@ -96,7 +96,7 @@ mid = bid/2 + ask/2 + (bid%2 + ask%2)/2
 **Check 1: Spread in valid range** (1-50 bps)
 ```
 spread_bps = ((ask - bid) / bid) * 10,000
-spread_bps = (5 / 50,000) * 10,000 = 1 bps ✅
+spread_bps = (5 / 50,000) * 10,000 = 1 bps 
 ```
 
 **Why**:
@@ -105,15 +105,15 @@ spread_bps = (5 / 50,000) * 10,000 = 1 bps ✅
 
 **Check 2: Sufficient liquidity** (>= 0.001 BTC each side)
 ```
-bid_size = 2.5 BTC ✅
-ask_size = 3.0 BTC ✅
+bid_size = 2.5 BTC 
+ask_size = 3.0 BTC 
 ```
 
 **Why**: Thin books mean low fill probability
 
 **Check 3: Prices in sane range** ($1 to $1,000,000)
 ```
-$50,000 ✅ (catches corrupted data)
+$50,000  (catches corrupted data)
 ```
 
 #### Step 3: Calculate Our Quotes
@@ -225,7 +225,7 @@ As bps: $1.50 / $5,000 ≈ 3 bps (after round-trip)
    Net revenue: $5,001.50
 
 3. Profit: $5,001.50 - $4,998.50 = $3.00
-   As bps: $3 / $5,000 = 0.06% = 6 bps ✓
+   As bps: $3 / $5,000 = 0.06% = 6 bps 
 ```
 
 **Breakdown**:
@@ -243,7 +243,7 @@ const _: () = assert!(
 );
 
 MIN_PROFITABLE_SPREAD_BPS = 2 (must cover fees)
-SPREAD_BPS = 10 ✓
+SPREAD_BPS = 10 
 
 → Code literally won't compile if spread too narrow!
 ```
@@ -315,7 +315,7 @@ If market drops $1,000: Loss = 0.3 BTC × $1,000 = $300
 - Fees: 4 bps (2 bps each leg)
 - Net profit: 6 bps
 
-**Why this works**: 6 bps > 0 → profitable ✅
+**Why this works**: 6 bps > 0 → profitable 
 
 **Enforced at compile time**: Can't configure unprofitable spreads
 
@@ -368,7 +368,7 @@ Result: Your quotes stay close to mid, minimal adverse selection
 
 ### vs Random Trading
 - **Random**: Buy/sell randomly → Expected return: -fees (you lose)
-- **SimpleSpread**: Quote both sides → Expected return: +spread - fees ✅
+- **SimpleSpread**: Quote both sides → Expected return: +spread - fees 
 
 ### vs Directional Trading
 - **Directional**: Predict up/down → Win rate ~50%, large gains/losses
@@ -443,12 +443,12 @@ cargo build --release --features spread-5bps,size-large,aggressive
 ### Runtime Safety Checks
 
 Even with compile-time config, runtime checks enforce:
-1. ✅ Position limits (max 1.0 BTC)
-2. ✅ Daily loss limits (max $1,000)
-3. ✅ Circuit breaker (>10% move halts)
-4. ✅ Rate limiter (10 orders/sec default)
-5. ✅ Pre-trade validation (6 checks)
-6. ✅ Kill switch (SIGUSR1 emergency stop)
+1.  Position limits (max 1.0 BTC)
+2.  Daily loss limits (max $1,000)
+3.  Circuit breaker (>10% move halts)
+4.  Rate limiter (10 orders/sec default)
+5.  Pre-trade validation (6 checks)
+6.  Kill switch (SIGUSR1 emergency stop)
 
 ---
 
@@ -493,28 +493,28 @@ bog_performance_tick_to_trade  # Should be <1μs
 ## Part 11: Why This Strategy is Production-Grade
 
 ### Safety First
-✅ Compile-time profitability guarantee (code won't compile if spread too narrow)
-✅ Multiple validation layers (market data, risk, pre-trade)
-✅ Position limits enforced
-✅ Circuit breakers for extreme moves
-✅ All errors halt trading (no silent failures)
+ Compile-time profitability guarantee (code won't compile if spread too narrow)
+ Multiple validation layers (market data, risk, pre-trade)
+ Position limits enforced
+ Circuit breakers for extreme moves
+ All errors halt trading (no silent failures)
 
 ### Performance Optimized
-✅ Zero-sized type (0 bytes)
-✅ Const generic configuration (0ns runtime cost)
-✅ Fixed-point arithmetic (no heap allocations)
-✅ Sub-microsecond latency (70ns measured)
+ Zero-sized type (0 bytes)
+ Const generic configuration (0ns runtime cost)
+ Fixed-point arithmetic (no heap allocations)
+ Sub-microsecond latency (70ns measured)
 
 ### Mathematically Sound
-✅ Overflow-safe arithmetic
-✅ Precision-preserving (9 decimal fixed-point)
-✅ Fee-aware from design
+ Overflow-safe arithmetic
+ Precision-preserving (9 decimal fixed-point)
+ Fee-aware from design
 
 ### Well-Tested
-✅ 13 unit tests for strategy logic
-✅ 33 safety tests for execution
-✅ Property tests for arithmetic
-✅ Fuzz tests for edge cases
+ 13 unit tests for strategy logic
+ 33 safety tests for execution
+ Property tests for arithmetic
+ Fuzz tests for edge cases
 
 ---
 
@@ -555,5 +555,5 @@ bog_performance_tick_to_trade  # Should be <1μs
 ---
 
 **Last Updated**: 2025-11-21
-**Status**: ✅ Current
+**Status**:  Current
 **Maintained by**: Bog Team

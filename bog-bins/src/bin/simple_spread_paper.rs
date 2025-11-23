@@ -68,7 +68,8 @@ fn main() -> Result<()> {
     info!("Connected successfully. Waiting for initial market snapshot...");
 
     // Wait for initial snapshot to ensure we have valid data before trading
-    let initial_snapshot = match feed.wait_for_initial_snapshot(100, Duration::from_millis(100)) {
+    // Increased to 300 retries × 500ms = 150s total to handle Huginn WebSocket connection delays
+    let initial_snapshot = match feed.wait_for_initial_snapshot(300, Duration::from_millis(500)) {
         Ok(snapshot) => {
             info!(
                 "Received initial snapshot: seq={}, bid={}, ask={}, spread={}bps",

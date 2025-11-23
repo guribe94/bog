@@ -3,7 +3,7 @@
 **Purpose**: Guide for running, interpreting, and contributing to bog's benchmark suite
 **Audience**: Developers, performance engineers
 **Prerequisites**: Rust 1.90+, Criterion.rs knowledge helpful
-**Related**: [Performance Docs](../performance/) | [BASELINE.md](../../bog-core/benches/BASELINE.md)
+**Related**: [Benchmark Results](../benchmarks/LATEST.md) | [Latency Budget](../benchmarks/latency-budget.md) | [BASELINE.md](../../bog-core/benches/BASELINE.md)
 
 ---
 
@@ -64,8 +64,28 @@ cargo bench --package bog-core -- --quick
 
 ### Save Results
 ```bash
-cargo bench --package bog-core 2>&1 | tee benchmark_results_$(date +%Y%m%d).txt
+cargo bench --package bog-core 2>&1 | tee benchmark_results_$(date +%Y-%m-%d).txt
 ```
+
+**Recording in docs/benchmarks/:**
+
+After running benchmarks, organize results for tracking:
+
+```bash
+# 1. Create dated directory
+mkdir -p docs/benchmarks/$(date +%Y-%m)/$(date +%Y-%m-%d)
+
+# 2. Move raw output
+mv benchmark_results_*.txt docs/benchmarks/$(date +%Y-%m)/$(date +%Y-%m-%d)/full_suite.txt
+
+# 3. Create REPORT.md with analysis (see docs/benchmarks/README.md for template)
+
+# 4. Update docs/benchmarks/INDEX.md with new entry
+
+# 5. Update docs/benchmarks/LATEST.md to point to new results
+```
+
+See [docs/benchmarks/README.md](../benchmarks/README.md) for complete guide on organizing benchmark results.
 
 ### Specific Test
 ```bash
@@ -89,8 +109,8 @@ cargo bench --package bog-core -- --baseline main
 
 ```
 time:   [70.49 ns 70.79 ns 71.09 ns]
-        └─────┬─────┘  │  └─────┬─────┘
-              │        │        │
+            
+                              
         Lower bound  Mean  Upper bound
         (95% CI)           (95% CI)
 ```
@@ -104,9 +124,9 @@ time:   [70.49 ns 70.79 ns 71.09 ns]
 
 | Result | Interpretation | Action |
 |--------|----------------|--------|
-| ✅ < Target | Good! Under budget | No action |
-| ⚠️ Near Target | Acceptable but watch | Monitor for regressions |
-| ❌ > Target | Over budget | Optimize or revise target |
+|  < Target | Good! Under budget | No action |
+|  Near Target | Acceptable but watch | Monitor for regressions |
+|  > Target | Over budget | Optimize or revise target |
 
 ### Regression Detection
 
@@ -401,9 +421,11 @@ tick_to_trade_pipeline/complete_pipeline
 **Internal**:
 - [Benchmark README](../../bog-core/benches/README.md) - Suite overview
 - [BASELINE.md](../../bog-core/benches/BASELINE.md) - Reference numbers
-- [Measured Performance](../performance/MEASURED_PERFORMANCE_COMPLETE.md) - Analysis
+- [Latest Results](../benchmarks/LATEST.md) - Most recent benchmark data
+- [All Results](../benchmarks/INDEX.md) - Historical benchmark tracking
+- [Latency Budget](../benchmarks/latency-budget.md) - Component targets
 
 ---
 
 **Last Updated**: 2025-11-21
-**Status**: ✅ Current
+**Status**:  Current

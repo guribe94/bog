@@ -134,7 +134,7 @@ time:   [70.49 ns 70.79 ns 71.09 ns]
 - Mean: 70.79ns
 - Lower bound: 70.49ns (95% CI)
 - Upper bound: 71.09ns (95% CI)
-- **Status**: ✅ Well under 1μs target (14x faster)
+- **Status**:  Well under 1μs target (14x faster)
 
 ### Performance Regression
 ```
@@ -159,13 +159,13 @@ Found 96 outliers among 10000 measurements (0.96%)
 
 | Component | Target | Measured | Status |
 |-----------|--------|----------|--------|
-| Tick-to-trade | <1000ns | 70.79ns | ✅ 14.1x under |
-| Strategy calc | <50ns | 15.66ns | ✅ 3.2x under |
-| Risk validation | <50ns | 2.12ns | ✅ 23.6x under |
-| Executor | <200ns | ~86ns | ✅ 2.3x under |
-| Orderbook VWAP | <50ns | ~30ns | ✅ 1.7x under |
-| Position read | <5ns | ~2ns | ✅ 2.5x under |
-| Gap detection | <10ns | <10ns | ✅ At target |
+| Tick-to-trade | <1000ns | 70.79ns |  14.1x under |
+| Strategy calc | <50ns | 15.66ns |  3.2x under |
+| Risk validation | <50ns | 2.12ns |  23.6x under |
+| Executor | <200ns | ~86ns |  2.3x under |
+| Orderbook VWAP | <50ns | ~30ns |  1.7x under |
+| Position read | <5ns | ~2ns |  2.5x under |
+| Gap detection | <10ns | <10ns |  At target |
 
 ### Enhanced Benchmarks (New - Added 2025-11-21)
 
@@ -208,20 +208,20 @@ Found 96 outliers among 10000 measurements (0.96%)
 
 | Component | Benchmarked | Coverage | Status |
 |-----------|-------------|----------|--------|
-| Engine | ✅ Yes | Core + error paths | Complete |
-| SimpleSpread | ✅ Yes | Full calculation | Complete |
-| **InventoryBased** | ✅ Yes | **6 scenarios** | **NEW** |
-| SimulatedExecutor | ✅ Yes | Basic execution | Complete |
-| LighterExecutor | ❌ No | Stubbed | N/A |
-| **Order FSM** | ✅ Yes | **All transitions** | **NEW** |
-| **Circuit Breaker** | ✅ Yes | **Check + trip** | **NEW** |
-| Position | ✅ Yes | Reads + updates + reconciliation | Enhanced |
-| Orderbook | ✅ Yes | Depth calculations | Complete |
-| Conversions | ✅ Yes | All types | Complete |
-| Resilience | ✅ Yes | Gap + stale detection | Complete |
-| **Fill Processing** | ✅ Yes | **Single + batch** | **NEW** |
-| **Multi-tick** | ✅ Yes | **Realistic sequences** | **NEW** |
-| **Throughput** | ✅ Yes | **System limits** | **NEW** |
+| Engine |  Yes | Core + error paths | Complete |
+| SimpleSpread |  Yes | Full calculation | Complete |
+| **InventoryBased** |  Yes | **6 scenarios** | **NEW** |
+| SimulatedExecutor |  Yes | Basic execution | Complete |
+| LighterExecutor |  No | Stubbed | N/A |
+| **Order FSM** |  Yes | **All transitions** | **NEW** |
+| **Circuit Breaker** |  Yes | **Check + trip** | **NEW** |
+| Position |  Yes | Reads + updates + reconciliation | Enhanced |
+| Orderbook |  Yes | Depth calculations | Complete |
+| Conversions |  Yes | All types | Complete |
+| Resilience |  Yes | Gap + stale detection | Complete |
+| **Fill Processing** |  Yes | **Single + batch** | **NEW** |
+| **Multi-tick** |  Yes | **Realistic sequences** | **NEW** |
+| **Throughput** |  Yes | **System limits** | **NEW** |
 
 ## Summary Statistics
 
@@ -231,14 +231,14 @@ Found 96 outliers among 10000 measurements (0.96%)
 **Last Expansion**: 2025-11-21
 
 **New Additions**:
-✅ InventoryBased strategy (6 tests)
-✅ Circuit breaker operations (6 tests)
-✅ Multi-tick scenarios (6 tests)
-✅ Order FSM transitions (8 tests)
-✅ Fill processing (6 tests)
-✅ Error path overhead (2 tests)
-✅ Throughput limits (4 tests)
-✅ Position reconciliation (6 tests)
+ InventoryBased strategy (6 tests)
+ Circuit breaker operations (6 tests)
+ Multi-tick scenarios (6 tests)
+ Order FSM transitions (8 tests)
+ Fill processing (6 tests)
+ Error path overhead (2 tests)
+ Throughput limits (4 tests)
+ Position reconciliation (6 tests)
 
 **Total new tests**: 44 added (including 2 error paths in engine_bench)
 

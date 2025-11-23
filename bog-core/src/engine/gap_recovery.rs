@@ -38,9 +38,9 @@ impl Default for GapRecoveryConfig {
         Self {
             auto_recover: true,
             max_recoverable_gap: 10000,  // Up to 10k messages
-            snapshot_timeout: Duration::from_secs(5),
-            max_recovery_attempts: 3,
-            recovery_retry_delay: Duration::from_millis(500),
+            snapshot_timeout: Duration::from_secs(30),  // Increased from 5s to handle Huginn reconnects
+            max_recovery_attempts: 10,  // Increased from 3 for more resilience
+            recovery_retry_delay: Duration::from_secs(2),  // Increased from 500ms to wait for reconnect
             pause_trading_during_recovery: true,
             alert_on_gap: true,
         }

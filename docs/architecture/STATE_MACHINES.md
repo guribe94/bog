@@ -2,7 +2,7 @@
 
 **Version:** 2.0 (Post-Refactor)
 **Date:** 2025-11-11
-**Status:** ✅ Production Ready
+**Status:**  Production Ready
 
 ## Overview
 
@@ -18,7 +18,7 @@ This eliminates entire classes of bugs that could lead to:
 
 ## State Machines Implemented
 
-### 1. Order Lifecycle State Machine ⭐ (CRITICAL)
+### 1. Order Lifecycle State Machine  (CRITICAL)
 
 **File:** `bog-core/src/core/order_fsm.rs`
 **Pattern:** Typestate (zero-cost, compile-time verified)
@@ -52,16 +52,16 @@ OrderPending → OrderOpen → OrderPartiallyFilled → OrderFilled
 #### Invalid Transitions (Won't Compile!)
 
 ```rust
-// ❌ Cannot fill a pending order
+//  Cannot fill a pending order
 let order = OrderPending::new(...);
 order.fill(100, 50000); // COMPILE ERROR
 
-// ❌ Cannot transition from terminal states
+//  Cannot transition from terminal states
 let filled = create_filled_order();
 filled.cancel(); // COMPILE ERROR
 filled.fill(100, 50000); // COMPILE ERROR
 
-// ❌ Cannot acknowledge an already-open order
+//  Cannot acknowledge an already-open order
 let order = pending.acknowledge();
 order.acknowledge(); // COMPILE ERROR
 ```
@@ -117,11 +117,11 @@ match order.fill(500_000_000, 50_000_000_000_000) {
 #### States
 
 ```
-BinaryNormal ←────────→ BinaryHalted
-      │       trip()         │
-      │     ←──────────      │
-      │       reset()        │
-      └─────────────────────── ┘
+BinaryNormal ←→ BinaryHalted
+             trip()         
+           ←      
+             reset()        
+       
 ```
 
 #### Transitions
@@ -154,7 +154,7 @@ let reason = HaltReason::ExcessiveSpread {
 let breaker = breaker.trip(reason);
 // Now in Halted state - CANNOT trade!
 
-// breaker.trip(...); // ❌ COMPILE ERROR - Halted has no trip()
+// breaker.trip(...); //  COMPILE ERROR - Halted has no trip()
 
 // After investigation, reset
 let breaker = breaker.reset(); // Back to Normal
@@ -178,13 +178,13 @@ let breaker = breaker.reset(); // Back to Normal
 #### States
 
 ```
-ThreeStateClosed ──fail(N)──→ ThreeStateOpen ──timeout──→ ThreeStateHalfOpen
-      ▲                                                          │
-      │                     success(M)                           │
-      └──────────────────────────────────────────────────────────┘
-                                       │
+ThreeStateClosed fail(N)→ ThreeStateOpen timeout→ ThreeStateHalfOpen
+                                                                
+                           success(M)                           
+      
+                                       
                                       fail
-                                       ▼
+                                       
                                 ThreeStateOpen
 ```
 
@@ -262,12 +262,12 @@ let breaker = match breaker.record_failure() {
 #### States
 
 ```
-StrategyInitializing ──start()──→ StrategyActive ←──resume()──→ StrategyPaused
-         │                            │                              │
+StrategyInitializing start()→ StrategyActive ←resume()→ StrategyPaused
+                                                                   
       stop()                       stop()                         stop()
-         │                            │                              │
-         └────────────────────────────┴──────────────────────────────┘
-                                      ▼
+                                                                   
+         
+                                      
                               StrategyStopped
                                (terminal)
 ```
@@ -286,15 +286,15 @@ StrategyInitializing ──start()──→ StrategyActive ←──resume()─�
 #### Invalid Transitions (Won't Compile!)
 
 ```rust
-// ❌ Cannot resume from Stopped
+//  Cannot resume from Stopped
 let strategy = strategy.stop();
 strategy.resume(); // COMPILE ERROR
 
-// ❌ Cannot pause if not Active
+//  Cannot pause if not Active
 let strategy = StrategyInitializing::new("Test");
 strategy.pause(); // COMPILE ERROR
 
-// ❌ Cannot start if already Active
+//  Cannot start if already Active
 let strategy = strategy.start();
 strategy.start(); // COMPILE ERROR
 ```
@@ -317,28 +317,28 @@ strategy.start(); // COMPILE ERROR
 
 ```
 ConnectionDisconnected
-         │
+         
      connect()
-         ▼
-ConnectionConnected ──disconnect()──→ ConnectionDisconnected
-         │                                     │
+         
+ConnectionConnected disconnect()→ ConnectionDisconnected
+                                              
     disconnect()                           retry(N)
-         │                                     │
-         ▼                                     ▼
-ConnectionReconnecting ←────────────────────────┘
-         │          │
+                                              
+                                              
+ConnectionReconnecting ←
+                   
     succeeded()  failed()
-         │          │
-         ▼          ▼
+                   
+                   
    Connected   Reconnecting (try again)
-                    │
+                    
                 max retries
-                    ▼
+                    
               ConnectionFailed
-                    │
+                    
               manual_retry()
-                    │
-                    ▼
+                    
+                    
            Reconnecting
 ```
 
@@ -359,10 +359,10 @@ All state machines compile to **the same assembly** as direct field manipulation
 
 ```rust
 // Before (direct field access)
-order.status = OrderStatus::Filled; // ❌ No validation
+order.status = OrderStatus::Filled; //  No validation
 
 // After (state machine)
-let order = order.fill(qty, price); // ✅ Type-checked
+let order = order.fill(qty, price); //  Type-checked
 // Compiles to identical assembly! Zero overhead!
 ```
 
@@ -392,31 +392,31 @@ let order = order.fill(qty, price); // ✅ Type-checked
 ## Testing Coverage
 
 ### Order FSM
-- ✅ 30+ tests
-- ✅ All valid transitions
-- ✅ Fill overflow protection
-- ✅ State invariants
-- ✅ 100-fill stress test
-- ✅ Concurrent safety
+-  30+ tests
+-  All valid transitions
+-  Fill overflow protection
+-  State invariants
+-  100-fill stress test
+-  Concurrent safety
 
 ### Circuit Breaker FSM
-- ✅ Binary: Normal ↔ Halted transitions
-- ✅ Three-state: All 5 state transitions
-- ✅ Timeout logic
-- ✅ Threshold counting
-- ✅ Concurrent access (Mutex-wrapped)
+-  Binary: Normal ↔ Halted transitions
+-  Three-state: All 5 state transitions
+-  Timeout logic
+-  Threshold counting
+-  Concurrent access (Mutex-wrapped)
 
 ### Strategy FSM
-- ✅ All lifecycle transitions
-- ✅ Runtime tracking
-- ✅ Pause/resume cycles
-- ✅ Terminal state enforcement
+-  All lifecycle transitions
+-  Runtime tracking
+-  Pause/resume cycles
+-  Terminal state enforcement
 
 ### Connection FSM
-- ✅ Retry logic with max attempts
-- ✅ Manual retry from failed state
-- ✅ Attempt counting
-- ✅ Statistics tracking
+-  Retry logic with max attempts
+-  Manual retry from failed state
+-  Attempt counting
+-  Statistics tracking
 
 ---
 
@@ -454,9 +454,9 @@ let legacy_order = wrapper.to_legacy();
 
 ### Executors (Already Migrated!)
 
-- ✅ **SimulatedExecutor**: Uses `OrderStateWrapper` internally
-- ✅ **LighterExecutor**: Uses `OrderStateWrapper` internally
-- ⚠️ **ProductionExecutor**: Not migrated yet (use pattern from Simulated)
+-  **SimulatedExecutor**: Uses `OrderStateWrapper` internally
+-  **LighterExecutor**: Uses `OrderStateWrapper` internally
+-  **ProductionExecutor**: Not migrated yet (use pattern from Simulated)
 
 ---
 
@@ -464,18 +464,18 @@ let legacy_order = wrapper.to_legacy();
 
 ### What's Enforced at Compile Time
 
-✅ **Cannot fill a pending order**
-✅ **Cannot cancel a filled order**
-✅ **Cannot acknowledge an open order**
-✅ **Cannot resume a stopped strategy**
-✅ **Cannot manually reset a normal circuit breaker**
-✅ **Cannot connect when already connected**
+ **Cannot fill a pending order**
+ **Cannot cancel a filled order**
+ **Cannot acknowledge an open order**
+ **Cannot resume a stopped strategy**
+ **Cannot manually reset a normal circuit breaker**
+ **Cannot connect when already connected**
 
 ### What's Still Runtime
 
-⚠️ **Fill quantity overflow** (checked, saturates at order size)
-⚠️ **Timestamp validity** (edge cases handled gracefully)
-⚠️ **Concurrent access** (handled with Mutex where needed)
+ **Fill quantity overflow** (checked, saturates at order size)
+ **Timestamp validity** (edge cases handled gracefully)
+ **Concurrent access** (handled with Mutex where needed)
 
 ---
 
@@ -486,7 +486,7 @@ let legacy_order = wrapper.to_legacy();
 ```rust
 // Direct field mutation - NO VALIDATION
 order.status = OrderStatus::Filled;
-order.status = OrderStatus::Open; // ❌ Invalid! But compiles!
+order.status = OrderStatus::Open; //  Invalid! But compiles!
 
 // State logic scattered across 5 files
 // Easy to make mistakes
@@ -496,8 +496,8 @@ order.status = OrderStatus::Open; // ❌ Invalid! But compiles!
 
 ```rust
 // Type-safe transitions - COMPILE-TIME VALIDATED
-let order = order.acknowledge(); // ✅ Type-checked
-let order = order.fill(qty, price); // ✅ Only valid transitions exist
+let order = order.acknowledge(); //  Type-checked
+let order = order.fill(qty, price); //  Only valid transitions exist
 
 // Cannot make mistakes - compiler prevents them!
 ```
@@ -506,10 +506,10 @@ let order = order.fill(qty, price); // ✅ Only valid transitions exist
 
 | Risk | Before | After |
 |------|--------|-------|
-| Invalid order state | ❌ Possible | ✅ Impossible |
-| Double-fill order | ❌ Possible | ✅ Impossible |
-| Resume stopped strategy | ❌ Possible | ✅ Impossible |
-| Trade while halted | ❌ Possible | ✅ Impossible |
+| Invalid order state |  Possible |  Impossible |
+| Double-fill order |  Possible |  Impossible |
+| Resume stopped strategy |  Possible |  Impossible |
+| Trade while halted |  Possible |  Impossible |
 
 ---
 

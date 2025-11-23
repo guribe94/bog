@@ -9,45 +9,45 @@ Bog integrates with Huginn v0.4.0+ for ultra-low-latency market data delivery vi
 ### Market Data Pipeline
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Huginn (Market Feed)                                             │
-│ ┌──────────────────────────────────────────────────────────────┐│
-│ │ Lock-free SPSC Ring Buffer (shared memory)                   ││
-│ │ - Tick-by-tick updates (10 levels + top-of-book)             ││
-│ │ - Sequence numbers (wraparound-safe u64)                     ││
-│ │ - IS_FULL_SNAPSHOT flag for fast recovery                    ││
-│ └──────────────────────────────────────────────────────────────┘│
-└──────────────────────┬──────────────────────────────────────────┘
-                       │ mmap() shared memory
-                       │ /dev/shm/hg_m<dex_id>_<market_id>
+
+ Huginn (Market Feed)                                             
+ 
+  Lock-free SPSC Ring Buffer (shared memory)                   
+  - Tick-by-tick updates (10 levels + top-of-book)             
+  - Sequence numbers (wraparound-safe u64)                     
+  - IS_FULL_SNAPSHOT flag for fast recovery                    
+ 
+
+                        mmap() shared memory
+                        /dev/shm/hg_m<dex_id>_<market_id>
                        ↓
-┌─────────────────────────────────────────────────────────────────┐
-│ Bog (Trading Engine)                                             │
-│ ┌──────────────────────────────────────────────────────────────┐│
-│ │ MarketFeed (Resilience Wrapper)                              ││
-│ │ ├─ try_recv() - Non-blocking snapshot pull                   ││
-│ │ ├─ GapDetector - Detects missing messages                    ││
-│ │ ├─ StaleDataBreaker - Prevents stale trading                 ││
-│ │ └─ FeedHealth - Monitors initialization & readiness          ││
-│ └──────────────────────────────────────────────────────────────┘│
-│                       │                                          │
-│                       ↓                                          │
-│ ┌──────────────────────────────────────────────────────────────┐│
-│ │ L2OrderBook (Full vs Incremental Sync)                       ││
-│ │ ├─ full_rebuild() - 10 levels, ~50ns (IS_FULL_SNAPSHOT=1)   ││
-│ │ └─ incremental_update() - TOB only, ~20ns (IS_FULL_SNAPSHOT=0)││
-│ └──────────────────────────────────────────────────────────────┘│
-│                       │                                          │
-│                       ↓                                          │
-│ ┌──────────────────────────────────────────────────────────────┐│
-│ │ Engine<Strategy, Executor> (Zero-copy monomorphization)      ││
-│ │ ├─ Market changed? (~2ns detection)                          ││
-│ │ ├─ Data fresh? (~5ns stale check)                            ││
-│ │ ├─ Calculate signal (~17ns)                                  ││
-│ │ └─ Execute (~86ns)                                           ││
-│ │ Total: ~71ns (14x under 1μs target)                          ││
-│ └──────────────────────────────────────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+
+ Bog (Trading Engine)                                             
+ 
+  MarketFeed (Resilience Wrapper)                              
+   try_recv() - Non-blocking snapshot pull                   
+   GapDetector - Detects missing messages                    
+   StaleDataBreaker - Prevents stale trading                 
+   FeedHealth - Monitors initialization & readiness          
+ 
+                                                                 
+                       ↓                                          
+ 
+  L2OrderBook (Full vs Incremental Sync)                       
+   full_rebuild() - 10 levels, ~50ns (IS_FULL_SNAPSHOT=1)   
+   incremental_update() - TOB only, ~20ns (IS_FULL_SNAPSHOT=0)
+ 
+                                                                 
+                       ↓                                          
+ 
+  Engine<Strategy, Executor> (Zero-copy monomorphization)      
+   Market changed? (~2ns detection)                          
+   Data fresh? (~5ns stale check)                            
+   Calculate signal (~17ns)                                  
+   Execute (~86ns)                                           
+  Total: ~71ns (14x under 1μs target)                          
+ 
+
 
 Performance Characteristics:
 - Tick-to-trade latency: <500ns (measured 71ns)
@@ -317,15 +317,15 @@ curl http://localhost:9090/metrics | grep bog_feed
 
 | Component | Target | Measured | Status |
 |-----------|--------|----------|--------|
-| Gap detection | <10ns | <10ns | ✅ |
-| Stale data check | <5ns | <5ns | ✅ |
-| Market changed? | <2ns | ~2ns | ✅ |
-| Signal calculation | <100ns | ~17ns | ✅ |
-| Executor execute | <200ns | ~86ns | ✅ |
-| **Total tick-to-trade** | **<500ns** | **~71ns** | **✅ 7x under target** |
-| Cold start init | <1s | ~200ms | ✅ |
-| Full rebuild (10 lvls) | <50ns | ~50ns | ✅ |
-| Incremental update | <20ns | ~20ns | ✅ |
+| Gap detection | <10ns | <10ns |  |
+| Stale data check | <5ns | <5ns |  |
+| Market changed? | <2ns | ~2ns |  |
+| Signal calculation | <100ns | ~17ns |  |
+| Executor execute | <200ns | ~86ns |  |
+| **Total tick-to-trade** | **<500ns** | **~71ns** | ** 7x under target** |
+| Cold start init | <1s | ~200ms |  |
+| Full rebuild (10 lvls) | <50ns | ~50ns |  |
+| Incremental update | <20ns | ~20ns |  |
 
 ## Advanced Topics
 
@@ -356,7 +356,7 @@ let mut detector = GapDetector::new();
 detector.check(u64::MAX - 2);
 detector.check(u64::MAX - 1);
 detector.check(u64::MAX);
-detector.check(0);  // No false gap detected ✅
+detector.check(0);  // No false gap detected 
 detector.check(1);
 ```
 

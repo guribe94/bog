@@ -17,10 +17,10 @@ Every abstraction in bog compiles down to optimal machine code:
 - Const generics → Compile-time evaluation
 
 **Anti-patterns avoided**:
-- ❌ `Box<dyn Trait>` - Virtual dispatch adds 50-200ns per call
-- ❌ `Arc<Mutex<T>>` - Lock contention adds microseconds
-- ❌ Heap allocations - malloc/free adds hundreds of nanoseconds
-- ❌ Runtime configuration - TOML parsing adds milliseconds
+-  `Box<dyn Trait>` - Virtual dispatch adds 50-200ns per call
+-  `Arc<Mutex<T>>` - Lock contention adds microseconds
+-  Heap allocations - malloc/free adds hundreds of nanoseconds
+-  Runtime configuration - TOML parsing adds milliseconds
 
 ### 2. Compile-Time Configuration
 
@@ -28,7 +28,7 @@ Every abstraction in bog compiles down to optimal machine code:
 
 ```
 Runtime Config (OLD)              Compile-Time Config (NEW)
-─────────────────────              ────────────────────────
+              
 spread = 10bps (TOML)              cargo build --features spread-10bps
 → Parse TOML (1ms)                 → Const evaluation (0ns)
 → Validate (100μs)                 → Type checking at build time
@@ -60,53 +60,53 @@ RAM:       32GB+, 200 cycles  (~50ns)
 ### High-Level Flow
 
 ```
-┌──────────────┐
-│   Huginn     │  Market data producer
-│ (Shared Mem) │  /dev/shm/hg_m{market_id}
-└──────┬───────┘
-       │ POSIX shared memory (IPC)
+
+   Huginn       Market data producer
+ (Shared Mem)   /dev/shm/hg_m{market_id}
+
+        POSIX shared memory (IPC)
        ↓
-┌──────────────────────────────────────────┐
-│         Engine<S, E>                      │
-│  ┌────────────────────────────────────┐  │
-│  │ 1. Read market tick (Huginn SHM)  │  │ <-- ~5ns
-│  │ 2. Generate signal (Strategy S)   │  │ <-- ~10ns
-│  │ 3. Execute order (Executor E)     │  │ <-- ~10ns
-│  │ 4. Update position (Position)     │  │ <-- ~2ns
-│  └────────────────────────────────────┘  │
-│                                           │
-│  Hot data (64 bytes, 1 cache line):      │
-│  ├─ position: Position                   │
-│  ├─ last_market: MarketState             │
-│  ├─ tick_count: u64                      │
-│  └─ signal_count: u64                    │
-└───────────────────────────────────────────┘
-       │
+
+         Engine<S, E>                      
+    
+   1. Read market tick (Huginn SHM)     <-- ~5ns
+   2. Generate signal (Strategy S)      <-- ~10ns
+   3. Execute order (Executor E)        <-- ~10ns
+   4. Update position (Position)        <-- ~2ns
+    
+                                           
+  Hot data (64 bytes, 1 cache line):      
+   position: Position                   
+   last_market: MarketState             
+   tick_count: u64                      
+   signal_count: u64                    
+
+       
        ↓
-┌──────────────┐
-│  Fills       │  Trade confirmations
-│ (ArrayQueue) │  Lock-free bounded queue
-└──────────────┘
+
+  Fills         Trade confirmations
+ (ArrayQueue)   Lock-free bounded queue
+
 ```
 
 ### Component Architecture
 
 ```
 bog workspace
-├── bog-core          Core zero-overhead types
-│   ├── types.rs      Position, OrderId, Signal (cache-aligned)
-│   ├── fixed_point.rs   u64 fixed-point arithmetic (9 decimals)
-│   ├── huginn_shm.rs    POSIX shared memory reader
-│   └── engine/
-│       └── generic.rs   Engine<S: Strategy, E: Executor>
-│
-├── bog-strategies    Zero-sized strategy implementations
-│   ├── simple_spread.rs    SimpleSpread (0 bytes)
-│   └── inventory_based.rs  InventoryBased (0 bytes, stub)
-│
-└── bog-bins          Binary combinations
-    ├── simple-spread-simulated.rs
-    └── simple-spread-production.rs
+ bog-core          Core zero-overhead types
+    types.rs      Position, OrderId, Signal (cache-aligned)
+    fixed_point.rs   u64 fixed-point arithmetic (9 decimals)
+    huginn_shm.rs    POSIX shared memory reader
+    engine/
+        generic.rs   Engine<S: Strategy, E: Executor>
+
+ bog-strategies    Zero-sized strategy implementations
+    simple_spread.rs    SimpleSpread (0 bytes)
+    inventory_based.rs  InventoryBased (0 bytes, stub)
+
+ bog-bins          Binary combinations
+     simple-spread-simulated.rs
+     simple-spread-production.rs
 ```
 
 ## Zero-Overhead Type System
@@ -146,7 +146,7 @@ impl Strategy for SimpleSpread {
 **Size verification**:
 ```rust
 assert_eq!(std::mem::size_of::<SimpleSpread>(), 0);
-// ✅ Passes: 0 bytes
+//  Passes: 0 bytes
 ```
 
 **Optimization**: LLVM inlines the entire function and const-folds the spread/size constants.
@@ -229,38 +229,38 @@ fn main() {
 
 ```
 Producer: Huginn (market data aggregator)
-├─ Writes to POSIX shared memory
-├─ Path: /dev/shm/hg_m{market_id}
-├─ Size: 4KB (single page)
-└─ Update rate: ~1000 Hz (every 1ms)
+ Writes to POSIX shared memory
+ Path: /dev/shm/hg_m{market_id}
+ Size: 4KB (single page)
+ Update rate: ~1000 Hz (every 1ms)
 
 Consumer: bog Engine
-├─ Memory-maps SHM region
-├─ Reads MarketState struct (lockless)
-├─ No system calls (zero-copy)
-└─ Latency: ~5ns (memory read)
+ Memory-maps SHM region
+ Reads MarketState struct (lockless)
+ No system calls (zero-copy)
+ Latency: ~5ns (memory read)
 ```
 
 ### Memory Layout
 
 ```
 /dev/shm/hg_m1 (4096 bytes)
-┌─────────────────────────────────────────┐
-│ MarketSnapshot (512 bytes)              │
-│ ├─ market_id: u64                      │
-│ ├─ sequence: u64                       │
-│ ├─ exchange_timestamp_ns: u64          │
-│ ├─ best_bid_price: u64 (fixed-point)  │
-│ ├─ best_bid_size: u64                  │
-│ ├─ best_ask_price: u64                 │
-│ ├─ best_ask_size: u64                  │
-│ ├─ bid_prices: [u64; 10] (depth)      │
-│ ├─ bid_sizes: [u64; 10]               │
-│ ├─ ask_prices: [u64; 10]              │
-│ └─ ask_sizes: [u64; 10]               │
-├─────────────────────────────────────────┤
-│ Padding (3584 bytes)                    │
-└─────────────────────────────────────────┘
+
+ MarketSnapshot (512 bytes)              
+  market_id: u64                      
+  sequence: u64                       
+  exchange_timestamp_ns: u64          
+  best_bid_price: u64 (fixed-point)  
+  best_bid_size: u64                  
+  best_ask_price: u64                 
+  best_ask_size: u64                  
+  bid_prices: [u64; 10] (depth)      
+  bid_sizes: [u64; 10]               
+  ask_prices: [u64; 10]              
+  ask_sizes: [u64; 10]               
+
+ Padding (3584 bytes)                    
+
 ```
 
 **Synchronization**: Lock-free reads via atomic sequence number protocol:
@@ -329,13 +329,13 @@ assert_eq!(std::mem::align_of::<Position>(), 64);
 
 ```
 BAD: Two threads updating adjacent fields
-┌────────────────────────────────────┐
-│ Cache Line (64 bytes)              │
-│ ┌──────────┬──────────┐            │
-│ │Thread A  │Thread B  │            │
-│ │position_a│position_b│            │
-│ └──────────┴──────────┘            │
-└────────────────────────────────────┘
+
+ Cache Line (64 bytes)              
+             
+ Thread A  Thread B              
+ position_aposition_b            
+             
+
      ↓            ↓
   Store A      Store B
      → Cache line invalidation (50ns penalty)
@@ -343,21 +343,21 @@ BAD: Two threads updating adjacent fields
 
 ```
 GOOD: Separate cache lines
-┌────────────────────────────────────┐
-│ Cache Line 0                       │
-│ ┌──────────┐                       │
-│ │Thread A  │                       │
-│ │position_a│                       │
-│ └──────────┘                       │
-└────────────────────────────────────┘
 
-┌────────────────────────────────────┐
-│ Cache Line 1                       │
-│ ┌──────────┐                       │
-│ │Thread B  │                       │
-│ │position_b│                       │
-│ └──────────┘                       │
-└────────────────────────────────────┘
+ Cache Line 0                       
+                        
+ Thread A                         
+ position_a                       
+                        
+
+
+
+ Cache Line 1                       
+                        
+ Thread B                         
+ position_b                       
+                        
+
      ↓            ↓
   Store A      Store B
      → No invalidation (independent lines)
@@ -419,13 +419,13 @@ pub mod fixed_point {
 **Precision**:
 ```
 9 decimal places
-├─ 0.000000001 (smallest unit)
-├─ Range: ±9.2 billion (i64::MIN to i64::MAX)
-│
+ 0.000000001 (smallest unit)
+ Range: ±9.2 billion (i64::MIN to i64::MAX)
+
 Examples:
-├─ Price: $50,123.456789123 → 50123456789123 (exact)
-├─ Size:  0.123456789 BTC   → 123456789      (exact)
-└─ PnL:   $-1,234.567890    → -1234567890000 (exact)
+ Price: $50,123.456789123 → 50123456789123 (exact)
+ Size:  0.123456789 BTC   → 123456789      (exact)
+ PnL:   $-1,234.567890    → -1234567890000 (exact)
 ```
 
 ### Arithmetic Operations
@@ -539,12 +539,12 @@ Target: <1μs (1000ns) tick-to-trade
 
 | Component | Budget | Measured | Status |
 |-----------|--------|----------|--------|
-| Huginn SHM read | 10ns | ~5ns | ✅ 50% under |
-| Signal generation | 100ns | ~17.28ns | ✅ 83% under |
-| Order execution | 500ns | ~10ns | ✅ 98% under |
-| Position update | 20ns | ~2ns | ✅ 90% under |
-| Overflow checks | 10ns | ~2ns | ✅ 80% under |
-| **Total hot path** | **640ns** | **~70.79ns** | ✅ **89% under** |
+| Huginn SHM read | 10ns | ~5ns |  50% under |
+| Signal generation | 100ns | ~17.28ns |  83% under |
+| Order execution | 500ns | ~10ns |  98% under |
+| Position update | 20ns | ~2ns |  90% under |
+| Overflow checks | 10ns | ~2ns |  80% under |
+| **Total hot path** | **640ns** | **~70.79ns** |  **89% under** |
 
 **Slack**: 973ns remaining for:
 - Exchange network latency (~100μs)
@@ -579,10 +579,10 @@ position/update         time: [1.789 ns  1.823 ns  1.901 ns]
 
 ```
 CPU Pinning
-├─ Market 1 (BTC-USD)  → Core 0
-├─ Market 2 (ETH-USD)  → Core 1
-├─ Market 3 (SOL-USD)  → Core 2
-└─ Metrics server      → Core 3
+ Market 1 (BTC-USD)  → Core 0
+ Market 2 (ETH-USD)  → Core 1
+ Market 3 (SOL-USD)  → Core 2
+ Metrics server      → Core 3
 ```
 
 **Why not multi-threaded?**
@@ -594,26 +594,26 @@ CPU Pinning
 ### Horizontal Scaling
 
 ```
-                     ┌─────────────┐
-                     │   Huginn    │
-                     │ (market data)│
-                     └──────┬──────┘
-                            │
-           ┌────────────────┼────────────────┐
-           │                │                │
+                     
+                        Huginn    
+                      (market data)
+                     
+                            
+           
+                                           
            ↓                ↓                ↓
-    ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-    │   bog-1      │ │   bog-2      │ │   bog-3      │
-    │  BTC-USD     │ │  ETH-USD     │ │  SOL-USD     │
-    │  (Core 0)    │ │  (Core 1)    │ │  (Core 2)    │
-    └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-           │                │                │
-           └────────────────┼────────────────┘
+      
+       bog-1          bog-2          bog-3      
+      BTC-USD        ETH-USD        SOL-USD     
+      (Core 0)       (Core 1)       (Core 2)    
+      
+                                           
+           
                             ↓
-                    ┌─────────────┐
-                    │  Aggregator │
-                    │  (positions) │
-                    └─────────────┘
+                    
+                      Aggregator 
+                      (positions) 
+                    
 ```
 
 **Capacity**: Scales linearly with CPU cores (e.g., 64-core Threadripper can run 60+ markets).
@@ -663,13 +663,13 @@ groups:
 
 ```
 bog-bins/
-├── simple-spread-simulated     # Backtesting
-│   ├── Strategy: SimpleSpread
-│   └── Executor: SimulatedExecutor
-│
-└── simple-spread-production    # Live trading
-    ├── Strategy: SimpleSpread
-    └── Executor: ProductionExecutor
+ simple-spread-simulated     # Backtesting
+    Strategy: SimpleSpread
+    Executor: SimulatedExecutor
+
+ simple-spread-production    # Live trading
+     Strategy: SimpleSpread
+     Executor: ProductionExecutor
 ```
 
 ### Build Profiles

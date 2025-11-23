@@ -8,7 +8,7 @@ This document provides a component-by-component breakdown of bog's latency chara
 
 | Target | Measured | Slack | Status |
 |--------|----------|-------|--------|
-| **<1000ns** | **~27ns** | **973ns** | ✅ **97.3% under budget** |
+| **<1000ns** | **~27ns** | **973ns** |  **97.3% under budget** |
 
 **Note**: The 973ns slack is intentionally reserved for:
 - Network latency to exchange (~100μs)
@@ -23,7 +23,7 @@ The **27ns internal processing latency** is the critical metric for HFT competit
 
 **Budget**: 10ns
 **Measured**: ~5ns
-**Status**: ✅ 50% under budget
+**Status**:  50% under budget
 
 #### What Happens
 
@@ -95,7 +95,7 @@ let elapsed = start.elapsed().as_nanos();
 
 **Budget**: 100ns
 **Measured**: ~10ns
-**Status**: ✅ 90% under budget
+**Status**:  90% under budget
 
 #### What Happens
 
@@ -227,7 +227,7 @@ fn bench_signal_generation(c: &mut Criterion) {
 
 **Budget**: 500ns
 **Measured**: ~10ns (simulated), ~100μs (production)
-**Status**: ✅ 98% under budget (simulated), ⚠️ Network-bound (production)
+**Status**:  98% under budget (simulated),  Network-bound (production)
 
 #### Simulated Executor (Backtesting)
 
@@ -365,7 +365,7 @@ Order submission → Ack received: 87.3μs (p50), 124.8μs (p99)
 
 **Budget**: 20ns
 **Measured**: ~2ns
-**Status**: ✅ 90% under budget
+**Status**:  90% under budget
 
 #### What Happens
 
@@ -456,10 +456,10 @@ fn bench_position_update(c: &mut Criterion) {
 
 | Method | Latency | Safety |
 |--------|---------|--------|
-| Atomic load/store (ours) | **~2ns** | ✅ Overflow checked |
-| Wrapping add | ~1ns | ❌ Silent overflow |
-| Mutex-protected | ~20ns | ✅ Safe, but 10x slower |
-| CAS loop | ~5ns | ✅ Safe, unnecessary |
+| Atomic load/store (ours) | **~2ns** |  Overflow checked |
+| Wrapping add | ~1ns |  Silent overflow |
+| Mutex-protected | ~20ns |  Safe, but 10x slower |
+| CAS loop | ~5ns |  Safe, unnecessary |
 
 ---
 
@@ -467,7 +467,7 @@ fn bench_position_update(c: &mut Criterion) {
 
 **Budget**: 10ns
 **Measured**: ~2ns
-**Status**: ✅ 80% under budget
+**Status**:  80% under budget
 
 #### What Happens
 
@@ -532,10 +532,10 @@ fn bench_overflow_methods(c: &mut Criterion) {
 
 | Method | Overhead | Safety |
 |--------|----------|--------|
-| Hardware overflow check | **~1ns** | ✅ Immediate detection |
-| Manual range check | ~3ns | ✅ Works, but slower |
-| Periodic audit | 0ns | ⚠️ Delayed detection |
-| No checks | 0ns | ❌ Silent corruption risk |
+| Hardware overflow check | **~1ns** |  Immediate detection |
+| Manual range check | ~3ns |  Works, but slower |
+| Periodic audit | 0ns |  Delayed detection |
+| No checks | 0ns |  Silent corruption risk |
 
 ---
 
@@ -595,7 +595,7 @@ From 10M iterations of full tick-to-trade loop:
 | max | 2.3ms | Kernel timer interrupt |
 
 **Interpretation**:
-- 99% of ticks process in <45ns ✅
+- 99% of ticks process in <45ns 
 - 0.1% see microsecond-scale delays (OS jitter)
 - Max spikes from unavoidable kernel activity
 
@@ -674,10 +674,10 @@ engine/tick_processing  time: [26.234 ns 26.891 ns 27.012 ns]
 ```
 
 **What to trust**:
-- ✅ Median (p50): Typical case
-- ✅ p25-p75 range: Expected variance
-- ⚠️ Mean: Skewed by outliers, less useful
-- ❌ Max: Often includes measurement overhead
+-  Median (p50): Typical case
+-  p25-p75 range: Expected variance
+-  Mean: Skewed by outliers, less useful
+-  Max: Often includes measurement overhead
 
 ---
 
@@ -738,7 +738,7 @@ CI runs benchmarks on every commit:
 
 ### Common Pitfalls
 
-❌ **Micro-optimizing cold paths**
+ **Micro-optimizing cold paths**
 ```rust
 // Bad: Optimizing error path that's never taken
 let result = expensive_validation();  // Runs 0.01% of time
@@ -747,14 +747,14 @@ if result.is_err() {
 }
 ```
 
-❌ **Sacrificing readability for <1ns gain**
+ **Sacrificing readability for <1ns gain**
 ```rust
 // Bad: Obscure bit manipulation to save 0.5ns
 let mid = (bid + ask) >> 1;  // Clear
 let mid = (bid & ask) + ((bid ^ ask) >> 1);  // Obscure, same speed
 ```
 
-✅ **Optimizing hot path with measurements**
+ **Optimizing hot path with measurements**
 ```rust
 // Good: Inlining function called 1M times/sec
 #[inline(always)]  // Measured 10ns improvement
@@ -788,9 +788,9 @@ fn calculate_mid(bid: i64, ask: i64) -> i64 {
 
 These won't be pursued (cost > benefit):
 
-- ❌ Hand-written assembly (compiler is better)
-- ❌ GPU acceleration (latency too high for HFT)
-- ❌ FPGA offload (flexibility loss, diminishing returns)
+-  Hand-written assembly (compiler is better)
+-  GPU acceleration (latency too high for HFT)
+-  FPGA offload (flexibility loss, diminishing returns)
 
 ---
 

@@ -2,11 +2,11 @@
 
 > Sub-microsecond HFT trading engine with zero-overhead abstractions
 
-**Quick Links**: [📋 Complete Index](INDEX.md) | [🚀 Quick Start](../README.md) | [📊 Benchmarks](performance/MEASURED_PERFORMANCE_COMPLETE.md)
+**Quick Links**: [Complete Index](INDEX.md) | [Quick Start](../README.md) | [Benchmarks](benchmarks/LATEST.md)
 
 ---
 
-## 🎯 Start Here
+##  Start Here
 
 **New to Bog?**
 1. [Quick Start (../README.md)](../README.md) - Build and run in 5 minutes
@@ -25,38 +25,40 @@
 
 ---
 
-## 📂 Documentation Structure
+##  Documentation Structure
 
 ```
 docs/
-├── INDEX.md                     ← Complete navigation
-├── README.md                    ← You are here
-├── PROJECT_ROADMAP.md           ← Development phases
-├── HUGINN_INTEGRATION_GUIDE.md  ← Market data IPC
-├── architecture/                ← Core design
-│   ├── system-design.md         ← Start here for architecture
-│   ├── STATE_MACHINES.md        ← Typestate FSMs
-│   ├── overflow-handling.md     ← Safety architecture
-│   └── fill-processing-trace.md ← Order lifecycle
-├── performance/                 ← Benchmarks & analysis
-│   ├── latency-budget.md        ← Component breakdown
-│   └── MEASURED_PERFORMANCE_COMPLETE.md ← Verified results
-├── deployment/                  ← Operations
-│   ├── PRODUCTION_READINESS.md  ← Complete ops manual
-│   ├── failure-modes.md         ← Troubleshooting (1116 lines!)
-│   ├── 24H_DEPLOYMENT_GUIDE.md  ← Quick deploy
-│   └── PAPER_TRADING_REALISM.md ← Testing
-├── guides/                      ← User guides
-│   ├── market-making-guide.md   ← Strategy deep dive
-│   ├── command-reference.md     ← CLI commands
-│   └── market-selection.md      ← Market config
-└── design/                      ← Historical
-    └── PHASE4_REALISTIC_FILLS.md
+ INDEX.md                     ← Complete navigation
+ README.md                    ← You are here
+ PROJECT_ROADMAP.md           ← Development phases
+ HUGINN_INTEGRATION_GUIDE.md  ← Market data IPC
+ architecture/                ← Core design
+    system-design.md         ← Start here for architecture
+    STATE_MACHINES.md        ← Typestate FSMs
+    overflow-handling.md     ← Safety architecture
+    fill-processing-trace.md ← Order lifecycle
+ benchmarks/                  ← Performance data & analysis
+    LATEST.md                ← Most recent results
+    INDEX.md                 ← All benchmark runs
+    latency-budget.md        ← Component targets
+    2025-11/                 ← Historical results by date
+ deployment/                  ← Operations
+    PRODUCTION_READINESS.md  ← Complete ops manual
+    failure-modes.md         ← Troubleshooting (1116 lines!)
+    24H_DEPLOYMENT_GUIDE.md  ← Quick deploy
+    PAPER_TRADING_REALISM.md ← Testing
+ guides/                      ← User guides
+    market-making-guide.md   ← Strategy deep dive
+    command-reference.md     ← CLI commands
+    market-selection.md      ← Market config
+ design/                      ← Historical
+     PHASE4_REALISTIC_FILLS.md
 ```
 
 ---
 
-## 🗂️ By Topic
+##  By Topic
 
 ### Architecture & Design
 
@@ -69,10 +71,10 @@ docs/
    - Shared memory IPC with Huginn
    - Strategy and Executor patterns
 
-2. **[Latency Budget](performance/latency-budget.md)** - Understand performance characteristics
-   - 27ns internal processing latency
-   - Component-by-component breakdown
-   - Optimization decisions and trade-offs
+2. **[Benchmark Results](benchmarks/LATEST.md)** - Verified performance data
+   - 70.79ns tick-to-trade latency measured
+   - Comprehensive component benchmarks
+   - See [latency-budget.md](benchmarks/latency-budget.md) for targets
 
 3. **[Failure Modes](deployment/failure-modes.md)** - Learn operational considerations
    - 10 major failure scenarios
@@ -175,20 +177,20 @@ pub struct Position {
 
 ---
 
-## ⚡ Performance at a Glance
+##  Performance at a Glance
 
 | Metric | Target | Measured | Status |
 |--------|--------|----------|--------|
-| **Tick-to-trade** | <1μs | **70.79ns** | ✅ **14x under budget** |
-| Strategy calc | <100ns | 17.28ns | ✅ 5.8x under |
-| Risk validation | <50ns | 2.37ns | ✅ 21x under |
-| Orderbook sync | <50ns | ~20ns | ✅ 2.5x under |
+| **Tick-to-trade** | <1μs | **70.79ns** |  **14x under budget** |
+| Strategy calc | <100ns | 17.28ns |  5.8x under |
+| Risk validation | <50ns | 2.37ns |  21x under |
+| Orderbook sync | <50ns | ~20ns |  2.5x under |
 
 → See [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) for full benchmarks
 
 ---
 
-## 📖 Document Summaries
+##  Document Summaries
 
 ### Architecture
 
@@ -226,7 +228,7 @@ pub struct Position {
 
 ---
 
-## 🎓 Learning Paths
+##  Learning Paths
 
 ### Path 1: "I Want to Run It" (30 minutes)
 1. [Quick Start](../README.md) - 5 min
@@ -259,7 +261,7 @@ pub struct Position {
 
 ---
 
-## 🔧 Quick Operations
+##  Quick Operations
 
 ### Common Tasks
 
@@ -287,11 +289,11 @@ cargo bench
 
 ---
 
-## 📊 System Status
+##  System Status
 
 ### Production Readiness: 95%
 
-✅ **Complete**:
+ **Complete**:
 - Market making strategy
 - Data ingestion (Huginn)
 - Risk management
@@ -300,13 +302,13 @@ cargo bench
 - Visualization tools
 - Safety infrastructure
 
-⚠️ **Pending**:
+ **Pending**:
 - Lighter SDK integration (execution stubbed)
 - Live trading deployment
 
 ---
 
-## 🔗 External Resources
+##  External Resources
 
 - **Huginn Repository**: `../../huginn/` (sibling repo)
 - **Lighter DEX API**: https://docs.lighter.xyz
@@ -314,24 +316,24 @@ cargo bench
 
 ---
 
-## 📝 Contributing
+##  Contributing
 
 When updating documentation:
 1. Add header block: Purpose, Audience, Prerequisites, Related
 2. Add TL;DR section for LLM quick reference
 3. Update [INDEX.md](INDEX.md) with new document
 4. Fix all cross-references (use relative paths)
-5. Add status badge (✅ Current | ⚠️ Needs Update | 🚧 WIP | 📜 Historical)
+5. Add status badge ( Current |  Needs Update |  WIP |  Historical)
 
 ### Quality Standards
-- ✅ All code examples must compile
-- ✅ All benchmarks must be verified
-- ✅ All broken links must be fixed
-- ✅ All outdated info must be marked or updated
+-  All code examples must compile
+-  All benchmarks must be verified
+-  All broken links must be fixed
+-  All outdated info must be marked or updated
 
 ---
 
-## 🎓 Complete Navigation
+##  Complete Navigation
 
 Need something specific? Use the [Complete Index](INDEX.md) for:
 - By role (users, developers, operators)
@@ -342,33 +344,33 @@ Need something specific? Use the [Complete Index](INDEX.md) for:
 
 ---
 
-## 📋 Quick Reference Cards
+##  Quick Reference Cards
 
 ### Performance Targets
 
 | Component | Budget | Measured | Status |
 |-----------|--------|----------|--------|
-| SHM read | 10ns | ~5ns | ✅ 50% under |
-| Signal gen | 100ns | ~10ns | ✅ 90% under |
-| Order exec | 500ns | ~10ns | ✅ 98% under |
-| Position update | 20ns | ~2ns | ✅ 90% under |
-| Overflow checks | 10ns | ~2ns | ✅ 80% under |
-| **Total** | **640ns** | **~27ns** | ✅ **96% under** |
+| SHM read | 10ns | ~5ns |  50% under |
+| Signal gen | 100ns | ~10ns |  90% under |
+| Order exec | 500ns | ~10ns |  98% under |
+| Position update | 20ns | ~2ns |  90% under |
+| Overflow checks | 10ns | ~2ns |  80% under |
+| **Total** | **640ns** | **~27ns** |  **96% under** |
 
 ### Failure Mode Summary
 
 | Failure | Severity | Probability | Status |
 |---------|----------|-------------|--------|
-| Position overflow | Critical | Near zero | ✅ Protected |
-| Conversion errors | High | Low | ✅ Protected |
-| Fill queue overflow | High | Medium | ✅ Protected |
-| Flash crash | High | Medium | ⚠️ Partial |
-| Clock desync | Medium | Low | ✅ Protected |
-| Memory exhaustion | Critical | Near zero | ✅ Protected |
-| Network failures | High | Medium | ⚠️ Partial |
-| Race conditions | Critical | Zero | ✅ Protected |
-| Strategy errors | High | Low | ✅ Protected |
-| Dependency failures | Varies | Medium | ⚠️ Partial |
+| Position overflow | Critical | Near zero |  Protected |
+| Conversion errors | High | Low |  Protected |
+| Fill queue overflow | High | Medium |  Protected |
+| Flash crash | High | Medium |  Partial |
+| Clock desync | Medium | Low |  Protected |
+| Memory exhaustion | Critical | Near zero |  Protected |
+| Network failures | High | Medium |  Partial |
+| Race conditions | Critical | Zero |  Protected |
+| Strategy errors | High | Low |  Protected |
+| Dependency failures | Varies | Medium |  Partial |
 
 ### Key Metrics
 
@@ -396,19 +398,19 @@ rate(bog_dropped_fills_total[5m]) > 0  # Alert: CRITICAL
 
 ---
 
-## 🎉 You're Ready!
+##  You're Ready!
 
 **For detailed information on any topic**, see:
-- [📋 Complete Index](INDEX.md) - Master navigation
-- [🏗️ Architecture docs](architecture/) - System design
-- [⚡ Performance docs](performance/) - Benchmarks
-- [🚀 Deployment docs](deployment/) - Operations
-- [📚 User guides](guides/) - Tutorials
+- [ Complete Index](INDEX.md) - Master navigation
+- [ Architecture docs](architecture/) - System design
+- [ Performance docs](performance/) - Benchmarks
+- [ Deployment docs](deployment/) - Operations
+- [ User guides](guides/) - Tutorials
 
 **Need help?** Start with the [Complete Index](INDEX.md) which organizes everything by role, topic, and use case.
 
 ---
 
 **Last Updated**: 2025-11-21
-**Status**: ✅ Current
+**Status**:  Current
 **Maintained by**: Bog Team
