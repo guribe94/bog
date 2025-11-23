@@ -8,41 +8,38 @@
 //! This affects orderbook state machine behavior.
 
 use anyhow::Result;
-use bog_core::data::MarketSnapshot;
+use bog_core::data::{MarketSnapshot, SnapshotBuilder, ORDERBOOK_DEPTH};
 use bog_core::orderbook::L2OrderBook;
 
 /// Helper to create a test snapshot with specific parameters
+///
+/// Uses SnapshotBuilder to ensure proper depth array sizing (no hardcoded values).
 fn create_test_snapshot(sequence: u64, is_full: bool) -> MarketSnapshot {
-    let mut snapshot = MarketSnapshot {
-        market_id: 1,
-        sequence,
-        exchange_timestamp_ns: 1_000_000_000_000,
-        local_recv_ns: 1_000_000_000_000,
-        local_publish_ns: 1_000_000_000_000,
-        best_bid_price: 50_000_000_000_000,  // $50,000
-        best_bid_size: 1_000_000_000,        // 1.0 BTC
-        best_ask_price: 50_010_000_000_000,  // $50,010
-        best_ask_size: 1_000_000_000,        // 1.0 BTC
-        bid_prices: [0; 10],
-        bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-        ask_sizes: [0; 10],
-        snapshot_flags: if is_full { 0x01 } else { 0x00 },  // IS_FULL_SNAPSHOT flag
-        dex_type: 1,
-        _padding: [0; 110],
-    };
+    let mut builder = SnapshotBuilder::new()
+        .market_id(1)
+        .sequence(sequence)
+        .timestamp(1_000_000_000_000)
+        .best_bid(50_000_000_000_000, 1_000_000_000)  // $50,000, 1.0 BTC
+        .best_ask(50_010_000_000_000, 1_000_000_000); // $50,010, 1.0 BTC
 
-    // If full snapshot, populate all 10 levels
     if is_full {
-        for i in 0..10 {
-            snapshot.bid_prices[i] = 50_000_000_000_000 - (i as u64 + 1) * 10_000_000_000;  // $10 decrements
-            snapshot.bid_sizes[i] = (1_000_000_000 * (10 - i as u64)) / 10;  // Decreasing sizes
-            snapshot.ask_prices[i] = 50_010_000_000_000 + (i as u64) * 10_000_000_000;  // $10 increments
-            snapshot.ask_sizes[i] = (1_000_000_000 * (10 - i as u64)) / 10;  // Decreasing sizes
-        }
-    }
+        // Populate all ORDERBOOK_DEPTH levels
+        let mut bid_prices = Vec::with_capacity(ORDERBOOK_DEPTH);
+        let mut bid_sizes = Vec::with_capacity(ORDERBOOK_DEPTH);
+        let mut ask_prices = Vec::with_capacity(ORDERBOOK_DEPTH);
+        let mut ask_sizes = Vec::with_capacity(ORDERBOOK_DEPTH);
 
-    snapshot
+        for i in 0..ORDERBOOK_DEPTH {
+            bid_prices.push(50_000_000_000_000 - (i as u64 + 1) * 10_000_000_000);  // $10 decrements
+            bid_sizes.push((1_000_000_000 * (ORDERBOOK_DEPTH - i) as u64) / ORDERBOOK_DEPTH as u64);
+            ask_prices.push(50_010_000_000_000 + (i as u64) * 10_000_000_000);  // $10 increments
+            ask_sizes.push((1_000_000_000 * (ORDERBOOK_DEPTH - i) as u64) / ORDERBOOK_DEPTH as u64);
+        }
+
+        builder.with_depth(&bid_prices, &bid_sizes, &ask_prices, &ask_sizes)
+    } else {
+        builder.incremental_snapshot().build()
+    }
 }
 
 /// Test: snapshot_flag_full_set
@@ -475,24 +472,14 @@ fn test_all_zero_snapshot() {
     orderbook.sync_from_snapshot(&valid_snapshot);
 
     // Create all-zero snapshot (invalid but shouldn't crash)
-    let zero_snapshot = MarketSnapshot {
-        market_id: 1,
-        sequence: 101,
-        exchange_timestamp_ns: 0,
-        local_recv_ns: 0,
-        local_publish_ns: 0,
-        best_bid_price: 0,
-        best_bid_size: 0,
-        best_ask_price: 0,
-        best_ask_size: 0,
-        bid_prices: [0; 10],
-        bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-        ask_sizes: [0; 10],
-        snapshot_flags: 0x01,  // Claims to be full snapshot
-        dex_type: 1,
-        _padding: [0; 110],
-    };
+    let zero_snapshot = SnapshotBuilder::new()
+        .market_id(1)
+        .sequence(101)
+        .timestamp(0)
+        .best_bid(0, 0)
+        .best_ask(0, 0)
+        .full_snapshot()
+        .build();
 
     // This should be handled gracefully (not crash)
     orderbook.sync_from_snapshot(&zero_snapshot);

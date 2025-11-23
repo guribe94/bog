@@ -1,6 +1,10 @@
+pub mod constants;
+pub mod snapshot_builder;
 pub mod types;
 pub mod validator;
 
+pub use constants::{ORDERBOOK_DEPTH, PADDING_SIZE, SNAPSHOT_SIZE};
+pub use snapshot_builder::{SnapshotBuilder, create_realistic_depth_snapshot};
 pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
 pub use validator::{SnapshotValidator, ValidationConfig, ValidationError};
 
@@ -1062,23 +1066,13 @@ mod tests {
             .unwrap()
             .as_nanos() as u64;
 
-        MarketSnapshot {
-            market_id: 1,
-            sequence: 100,
-            exchange_timestamp_ns: now_ns,
-            local_recv_ns: now_ns,
-            local_publish_ns: now_ns,
-            best_bid_price: 50_000_000_000_000,
-            best_bid_size: 1_000_000_000,
-            best_ask_price: 50_005_000_000_000,
-            best_ask_size: 1_000_000_000,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        }
+        SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(100)
+            .timestamp(now_ns)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build()
     }
 }

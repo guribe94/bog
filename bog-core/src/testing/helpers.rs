@@ -8,12 +8,15 @@
 //! - Metrics collection
 
 use crate::core::{OrderId, Position, Signal, SignalAction, Side};
+use crate::data::SnapshotBuilder;
 use crate::monitoring::MetricsRegistry;
 use huginn::MarketSnapshot;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Create a test market snapshot with specified prices
+///
+/// Uses SnapshotBuilder to ensure proper array sizing (no hardcoded values).
 pub fn create_test_snapshot(
     market_id: u64,
     sequence: u64,
@@ -22,24 +25,14 @@ pub fn create_test_snapshot(
     bid_size: u64,
     ask_size: u64,
 ) -> MarketSnapshot {
-    MarketSnapshot {
-        market_id,
-        sequence,
-        exchange_timestamp_ns: 0,
-        local_recv_ns: 0,
-        local_publish_ns: 0,
-        best_bid_price: bid_price,
-        best_ask_price: ask_price,
-        best_bid_size: bid_size,
-        best_ask_size: ask_size,
-        bid_prices: [0; 10],
-        bid_sizes: [0; 10],
-        ask_prices: [0; 10],
-        ask_sizes: [0; 10],
-        snapshot_flags: 0,
-        dex_type: 1,
-        _padding: [0; 110],
-    }
+    SnapshotBuilder::new()
+        .market_id(market_id)
+        .sequence(sequence)
+        .timestamp(0)
+        .best_bid(bid_price, bid_size)
+        .best_ask(ask_price, ask_size)
+        .incremental_snapshot()
+        .build()
 }
 
 /// Create a simple test snapshot with default BTC-USD prices

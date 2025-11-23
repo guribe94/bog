@@ -3,6 +3,8 @@
 //! Eliminates duplication by providing a single validation point for all snapshots.
 
 use super::types::MarketSnapshot;
+use std::fs::File;
+use std::io::Write;
 
 /// Validation error types
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,8 +195,11 @@ impl SnapshotValidator {
         // 6. Liquidity checks
         self.validate_liquidity(snapshot)?;
 
-        // 7. Depth validation (if enabled)
-        if self.config.validate_depth {
+        // 7. Depth validation (if enabled AND full snapshot)
+        // CRITICAL: Only validate depth on full snapshots!
+        // Incremental snapshots (snapshot_flags & 0x01 == 0) only update best bid/ask,
+        // and depth arrays may contain stale data from previous full snapshot.
+        if self.config.validate_depth && snapshot.is_full_snapshot() {
             self.validate_depth(snapshot)?;
         }
 
@@ -383,6 +388,51 @@ impl SnapshotValidator {
         Ok(())
     }
 
+    /// Capture invalid snapshot to disk for debugging
+    fn capture_invalid_snapshot(&self, snapshot: &MarketSnapshot, error: &ValidationError) {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let filename = format!("/tmp/bog-invalid-snapshot-{}.json", timestamp);
+
+        // Create a detailed debug representation
+        let debug_info = format!(
+            r#"{{
+  "error": "{}",
+  "sequence": {},
+  "market_id": {},
+  "exchange_timestamp_ns": {},
+  "best_bid_price": {},
+  "best_bid_size": {},
+  "best_ask_price": {},
+  "best_ask_size": {},
+  "bid_prices": {:?},
+  "bid_sizes": {:?},
+  "ask_prices": {:?},
+  "ask_sizes": {:?}
+}}"#,
+            error,
+            snapshot.sequence,
+            snapshot.market_id,
+            snapshot.exchange_timestamp_ns,
+            snapshot.best_bid_price,
+            snapshot.best_bid_size,
+            snapshot.best_ask_price,
+            snapshot.best_ask_size,
+            snapshot.bid_prices,
+            snapshot.bid_sizes,
+            snapshot.ask_prices,
+            snapshot.ask_sizes
+        );
+
+        if let Ok(mut file) = File::create(&filename) {
+            let _ = file.write_all(debug_info.as_bytes());
+            eprintln!("📸 Captured invalid snapshot to: {}", filename);
+        }
+    }
+
     /// Depth level validation
     fn validate_depth(&self, snapshot: &MarketSnapshot) -> Result<(), ValidationError> {
         // Validate bid levels
@@ -400,21 +450,25 @@ impl SnapshotValidator {
 
             // Price must be less than previous level (descending)
             if price >= last_bid_price {
-                return Err(ValidationError::InvalidDepthLevel {
+                let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
                     reason: format!(
                         "Bid price {} must be < previous {}",
                         price, last_bid_price
                     ),
-                });
+                };
+                self.capture_invalid_snapshot(snapshot, &error);
+                return Err(error);
             }
 
             // Must have non-zero size
             if size == 0 {
-                return Err(ValidationError::InvalidDepthLevel {
+                let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
                     reason: "Size is zero but price is set".to_string(),
-                });
+                };
+                self.capture_invalid_snapshot(snapshot, &error);
+                return Err(error);
             }
 
             last_bid_price = price;
@@ -435,21 +489,25 @@ impl SnapshotValidator {
 
             // Price must be greater than previous level (ascending)
             if price <= last_ask_price {
-                return Err(ValidationError::InvalidDepthLevel {
+                let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
                     reason: format!(
                         "Ask price {} must be > previous {}",
                         price, last_ask_price
                     ),
-                });
+                };
+                self.capture_invalid_snapshot(snapshot, &error);
+                return Err(error);
             }
 
             // Must have non-zero size
             if size == 0 {
-                return Err(ValidationError::InvalidDepthLevel {
+                let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
                     reason: "Size is zero but price is set".to_string(),
-                });
+                };
+                self.capture_invalid_snapshot(snapshot, &error);
+                return Err(error);
             }
 
             last_ask_price = price;

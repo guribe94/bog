@@ -3,6 +3,7 @@
 //! Provides a programmable mock implementation of huginn::MarketFeed
 //! for integration testing without requiring a real Huginn instance.
 
+use crate::data::SnapshotBuilder;
 use huginn::{ConsumerStats, MarketSnapshot};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -69,24 +70,16 @@ impl MockHuginnFeed {
             self.inject_sequence_gap = false;
         }
 
-        MarketSnapshot {
-            market_id: self.market_id,
-            sequence: self.last_sequence,
-            exchange_timestamp_ns: self.start_time.elapsed().as_nanos() as u64,
-            local_recv_ns: self.start_time.elapsed().as_nanos() as u64,
-            local_publish_ns: self.start_time.elapsed().as_nanos() as u64,
-            best_bid_price: bid_price,
-            best_ask_price: ask_price,
-            best_bid_size: bid_size,
-            best_ask_size: ask_size,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        }
+        let timestamp = self.start_time.elapsed().as_nanos() as u64;
+
+        SnapshotBuilder::new()
+            .market_id(self.market_id)
+            .sequence(self.last_sequence)
+            .timestamp(timestamp)
+            .best_bid(bid_price, bid_size)
+            .best_ask(ask_price, ask_size)
+            .incremental_snapshot()
+            .build()
     }
 
     /// Generate and push a test snapshot

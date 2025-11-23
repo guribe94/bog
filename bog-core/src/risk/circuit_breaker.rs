@@ -82,7 +82,7 @@
 //! }
 //! ```
 
-use crate::data::MarketSnapshot;
+use crate::data::{MarketSnapshot, SnapshotBuilder};
 use crate::core::circuit_breaker_fsm::{BinaryNormal, BinaryBreakerState};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
@@ -392,27 +392,19 @@ mod tests {
     use super::*;
 
     fn create_normal_snapshot() -> MarketSnapshot {
-        MarketSnapshot {
-            market_id: 1,
-            sequence: 1,
-            exchange_timestamp_ns: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as i64,
-            local_recv_ns: 0,
-            local_publish_ns: 0,
-            best_bid_price: 50_000_000_000_000,  // $50,000
-            best_bid_size: 1_000_000_000,        // 1 BTC
-            best_ask_price: 50_010_000_000_000,  // $50,010 (2bps spread)
-            best_ask_size: 1_000_000_000,        // 1 BTC
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(1)
+            .timestamp(now)
+            .best_bid(50_000_000_000_000, 1_000_000_000)  // $50,000, 1 BTC
+            .best_ask(50_010_000_000_000, 1_000_000_000)  // $50,010, 1 BTC (2bps spread)
+            .incremental_snapshot()
+            .build()
     }
 
     #[test]

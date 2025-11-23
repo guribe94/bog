@@ -118,7 +118,7 @@ use crate::config::{
     MAX_POST_STALE_CHANGE_BPS
 };
 use crate::core::{Position, Signal};
-use crate::data::MarketSnapshot;
+use crate::data::{MarketSnapshot, SnapshotBuilder};
 use crate::risk::circuit_breaker::{CircuitBreaker, BreakerState};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
@@ -918,24 +918,14 @@ mod tests {
         let executor = MockExecutor { execute_count: 0 };
         let mut engine = Engine::new(strategy, executor);
 
-        let snapshot = MarketSnapshot {
-            market_id: 1,
-            sequence: 1,
-            exchange_timestamp_ns: 0,
-            local_recv_ns: 0,
-            local_publish_ns: 0,
-            best_bid_price: 50_000_000_000_000,
-            best_bid_size: 1_000_000_000,
-            best_ask_price: 50_005_000_000_000,
-            best_ask_size: 1_000_000_000,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        };
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(1)
+            .timestamp(0)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
 
         // First tick - should process
         engine.process_tick(&snapshot, true).unwrap();

@@ -7,7 +7,7 @@ use crate::core::strategy_fsm::{
     StrategyState, StrategyInitializing
 };
 use crate::core::{Position, Signal};
-use crate::data::MarketSnapshot;
+use crate::data::{MarketSnapshot, SnapshotBuilder};
 use super::Strategy;
 
 /// Wrapper that adds lifecycle FSM to any Strategy
@@ -160,24 +160,14 @@ mod tests {
             .unwrap()
             .as_nanos() as u64;
 
-        MarketSnapshot {
-            market_id: 1,
-            sequence: 100,
-            exchange_timestamp_ns: now,
-            local_recv_ns: now,
-            local_publish_ns: now,
-            best_bid_price: 50_000_000_000_000,
-            best_bid_size: 1_000_000_000,
-            best_ask_price: 50_010_000_000_000,
-            best_ask_size: 1_000_000_000,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        }
+        SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(100)
+            .timestamp(now)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_010_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build()
     }
 
     #[test]
