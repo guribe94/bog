@@ -217,8 +217,8 @@ fn test_wraparound_impact_on_operations() {
 
     // A naive "is this order old?" check might fail
     fn is_order_old(order: OrderId, current_counter: u128) -> bool {
-        // Naive implementation
-        order.0 < current_counter - 1000
+        // Naive implementation (using wrapping_sub to avoid panic during test)
+        order.0 < current_counter.wrapping_sub(1000)
     }
 
     // With current_counter = 2 (after wrap)

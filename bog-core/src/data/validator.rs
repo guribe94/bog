@@ -445,7 +445,8 @@ impl SnapshotValidator {
                         price, last_bid_price
                     ),
                 };
-                self.capture_invalid_snapshot(snapshot, &error);
+                // Only log error, don't block on IO
+                // self.capture_invalid_snapshot(snapshot, &error);
                 return Err(error);
             }
 
@@ -455,7 +456,7 @@ impl SnapshotValidator {
                     level: i + 1,
                     reason: "Size is zero but price is set".to_string(),
                 };
-                self.capture_invalid_snapshot(snapshot, &error);
+                // self.capture_invalid_snapshot(snapshot, &error);
                 return Err(error);
             }
 
@@ -484,7 +485,7 @@ impl SnapshotValidator {
                         price, last_ask_price
                     ),
                 };
-                self.capture_invalid_snapshot(snapshot, &error);
+                // self.capture_invalid_snapshot(snapshot, &error);
                 return Err(error);
             }
 
@@ -494,7 +495,7 @@ impl SnapshotValidator {
                     level: i + 1,
                     reason: "Size is zero but price is set".to_string(),
                 };
-                self.capture_invalid_snapshot(snapshot, &error);
+                // self.capture_invalid_snapshot(snapshot, &error);
                 return Err(error);
             }
 

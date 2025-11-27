@@ -178,6 +178,8 @@ pub struct SimulatedExecutor {
     queue_tracker: QueueTracker,
     /// Configuration for fill realism
     config: RealisticFillConfig,
+    /// Simulated account balance (quote currency)
+    balance: Decimal,
 }
 
 impl SimulatedExecutor {
@@ -207,7 +209,13 @@ impl SimulatedExecutor {
             mode: ExecutionMode::Simulated,
             queue_tracker: QueueTracker::new(config),
             config,
+            balance: Decimal::MAX, // Default to infinite balance
         }
+    }
+
+    /// Set simulated balance
+    pub fn set_balance(&mut self, balance: Decimal) {
+        self.balance = balance;
     }
 
     /// Create executor with realistic fills (for backtesting)
@@ -368,6 +376,18 @@ impl Executor for SimulatedExecutor {
             return Err(anyhow!("Order price cannot be negative"));
         }
 
+        // Check balance for Buy orders
+        if order.side == Side::Buy {
+            let cost = order.price * order.size;
+            if cost > self.balance {
+                return Err(anyhow!(
+                    "Insufficient balance: {} required, {} available",
+                    cost,
+                    self.balance
+                ));
+            }
+        }
+
         let order_id = order.id.clone();
 
         // Create state machine wrapper from legacy order (WITH VALIDATION!)
@@ -482,6 +502,10 @@ impl Executor for SimulatedExecutor {
 
     fn execution_mode(&self) -> ExecutionMode {
         self.mode
+    }
+
+    fn dropped_fill_count(&self) -> u64 {
+        self.dropped_fills
     }
 }
 

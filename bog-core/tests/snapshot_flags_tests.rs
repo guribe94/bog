@@ -355,7 +355,12 @@ fn test_multiple_incremental_updates() {
     assert_eq!(orderbook.ask_prices[5], initial_deep_ask, "Deep ask changed without full snapshot");
 
     // Now receive a new full snapshot - deep levels should update
-    let new_full_snapshot = create_test_snapshot(2000, true);
+    let mut new_full_snapshot = create_test_snapshot(2000, true);
+    
+    // Change deep levels to ensure we can detect the update
+    new_full_snapshot.bid_prices[5] -= 1_000_000_000;
+    new_full_snapshot.ask_prices[5] += 1_000_000_000;
+    
     orderbook.sync_from_snapshot(&new_full_snapshot);
 
     // Verify deep levels are now different

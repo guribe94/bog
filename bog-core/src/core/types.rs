@@ -599,13 +599,16 @@ impl Position {
                 self.entry_price.store(price, Ordering::Release);
             } else {
                 // Calculate weighted average: (old_entry * old_qty + new_price * new_qty) / total_qty
-                let old_value = (old_entry as u128 * old_qty.abs() as u128) / 1_000_000_000;
-                let new_value = (price as u128 * position_delta.abs() as u128) / 1_000_000_000;
-                let total_value = old_value + new_value;
+                // Note: We calculate using full precision (u128) to avoid rounding errors.
+                // old_entry and price are 9 decimals. old_qty and delta are 9 decimals.
+                // Product is 18 decimals. Dividing by total_qty (9 decimals) gives 9 decimals.
+                let old_notional = old_entry as u128 * old_qty.abs() as u128;
+                let new_notional = price as u128 * position_delta.abs() as u128;
+                let total_notional = old_notional + new_notional;
                 let total_qty = old_qty.abs() + position_delta.abs();
 
                 if total_qty > 0 {
-                    let avg_entry_u128 = (total_value * 1_000_000_000) / total_qty as u128;
+                    let avg_entry_u128 = total_notional / total_qty as u128;
 
                     // Check for overflow before casting to u64
                     if avg_entry_u128 > u64::MAX as u128 {

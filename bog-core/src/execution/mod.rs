@@ -171,6 +171,12 @@ pub trait Executor: Send {
 
     /// Get execution mode
     fn execution_mode(&self) -> ExecutionMode;
+
+    /// Get the count of fills that were dropped due to queue overflow
+    /// (Default implementation returns 0 for backends that don't support this)
+    fn dropped_fill_count(&self) -> u64 {
+        0
+    }
 }
 
 #[cfg(test)]

@@ -94,10 +94,11 @@ fn test_position_fill_overflow_protection() {
     position.quantity.store(large_qty, std::sync::atomic::Ordering::Release);
 
     // Try to add another large position (would overflow)
+    // Use (i64::MAX / 2) + 100 to ensure it overflows
     let result = position.process_fill_fixed(
         0, // Buy side
         50_000_000_000_000, // Price
-        (i64::MAX / 2) as u64, // Size that would cause overflow
+        (i64::MAX / 2 + 100) as u64, // Size that would cause overflow
     );
 
     // Should detect overflow and return error

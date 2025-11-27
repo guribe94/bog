@@ -12,6 +12,7 @@
 pub mod generic;
 pub mod traits;
 pub mod simulated;
+pub mod executor_bridge;
 pub mod risk;
 pub mod position_reconciliation;
 pub mod gap_recovery;

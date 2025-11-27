@@ -78,6 +78,9 @@
 //!   Human:     0.1 BTC
 //!   Fixed:     100_000_000  (0.1 * 10^9)
 //!
+//!   Human:     0.1 BTC
+//!   Fixed:     100_000_000  (0.1 * 10^9)
+//!
 //! Calculation preserves precision without floating point:
 //!
 //!   bid = 50_000_000_000_000
@@ -718,24 +721,28 @@ impl Strategy for SimpleSpread {
 
             // Calculate inventory ratio: -1.0 to +1.0
             // Positive = long, Negative = short
-            let inventory_ratio = if MAX_POSITION > 0 {
-                (current_qty as f64) / (MAX_POSITION as f64)
+            // Using fixed-point arithmetic to avoid FPU
+            let inventory_ratio_scaled = if MAX_POSITION > 0 {
+                // Scale by 1_000_000 for precision (result is ratio * 1M)
+                // current_qty and MAX_POSITION are both 9 decimals, so they cancel out
+                (current_qty * 1_000_000) / MAX_POSITION
             } else {
-                0.0
+                0
             };
 
-            // Clamp to [-1, 1] range to handle edge cases
-            let inventory_ratio = inventory_ratio.max(-1.0).min(1.0);
+            // Clamp to [-1M, 1M] range (equivalent to -1.0 to 1.0)
+            let inventory_ratio_scaled = inventory_ratio_scaled.max(-1_000_000).min(1_000_000);
 
             // Calculate skew in basis points
             // Max skew of 10 bps when at max position (adjustable)
             // Using INVENTORY_IMPACT_BPS from config module
-            let skew_bps = (inventory_ratio.abs() * INVENTORY_IMPACT_BPS as f64) as u64;
+            // Formula: (abs(ratio_scaled) * MAX_SKEW) / SCALE
+            let skew_bps = (inventory_ratio_scaled.abs() as u64 * INVENTORY_IMPACT_BPS as u64) / 1_000_000;
 
             // Apply asymmetric adjustment based on position
             // Market making goal: reduce inventory by making our quotes more attractive
             // for the direction that reduces position
-            if inventory_ratio > 0.01 { // Long position (threshold to avoid noise)
+            if inventory_ratio_scaled > 10_000 { // Long position > 1% (10k/1M)
                 // Long: want to SELL to reduce inventory
                 // - Lower ask (more attractive to buyers) -> encourages buying from us
                 // - Lower bid (less attractive to sellers) -> discourages selling to us
@@ -745,7 +752,7 @@ impl Strategy for SimpleSpread {
                 // Shift quotes DOWN to encourage selling
                 our_ask = our_ask.checked_sub(ask_adjustment).unwrap_or(our_ask);
                 our_bid = our_bid.checked_sub(bid_adjustment / 2).unwrap_or(our_bid);
-            } else if inventory_ratio < -0.01 { // Short position
+            } else if inventory_ratio_scaled < -10_000 { // Short position < -1%
                 // Short: want to BUY to reduce inventory
                 // - Raise bid (more attractive to sellers) -> encourages selling to us
                 // - Raise ask (less attractive to buyers) -> discourages buying from us
@@ -921,14 +928,8 @@ mod tests {
     fn test_price_bounds() {
         // Valid price range
         assert!(SimpleSpread::is_price_valid(50_000_000_000_000)); // $50k
-
-        // Too low (< $1)
         assert!(!SimpleSpread::is_price_valid(500_000_000)); // $0.50
-
-        // Too high (> $1M)
         assert!(!SimpleSpread::is_price_valid(1_500_000_000_000_000)); // $1.5M
-
-        // Edge cases
         assert!(SimpleSpread::is_price_valid(MIN_VALID_PRICE)); // Exactly $1
         assert!(SimpleSpread::is_price_valid(MAX_VALID_PRICE)); // Exactly $1M
         assert!(!SimpleSpread::is_price_valid(MIN_VALID_PRICE - 1));
@@ -939,17 +940,9 @@ mod tests {
     fn test_liquidity_checks() {
         // Sufficient liquidity
         assert!(SimpleSpread::is_liquidity_sufficient(100_000_000, 100_000_000)); // 0.1 BTC each
-
-        // Insufficient bid size
         assert!(!SimpleSpread::is_liquidity_sufficient(500_000, 100_000_000)); // 0.0005 BTC bid
-
-        // Insufficient ask size
         assert!(!SimpleSpread::is_liquidity_sufficient(100_000_000, 500_000)); // 0.0005 BTC ask
-
-        // Both insufficient
         assert!(!SimpleSpread::is_liquidity_sufficient(500_000, 500_000));
-
-        // Edge case: exactly at threshold
         assert!(SimpleSpread::is_liquidity_sufficient(MIN_SIZE_THRESHOLD, MIN_SIZE_THRESHOLD));
         assert!(!SimpleSpread::is_liquidity_sufficient(MIN_SIZE_THRESHOLD - 1, MIN_SIZE_THRESHOLD));
     }

@@ -50,13 +50,24 @@ fn test_engine_multiple_ticks() -> Result<()> {
 
     // Process multiple ticks with varying prices
     for i in 0..10 {
+        // Sleep to satisfy Engine's rate limiter (100ms min interval)
+        // Since Engine uses SystemTime::now() for rate limiting, we must actually sleep.
+        if i > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(110));
+        }
+
         let snapshot = MarketSnapshot {
             market_id: 1,
             sequence: i + 1,
-            exchange_timestamp_ns: i * 1_000_000,
+            // Use 200ms increments to satisfy MIN_QUOTE_INTERVAL_NS (100ms)
+            exchange_timestamp_ns: i * 200_000_000,
             best_bid_price: 50_000_000_000_000 + i * 1_000_000_000,
             best_bid_size: 1_000_000_000,
-            best_ask_price: 50_010_000_000_000 + i * 1_000_000_000,
+            // Use 20bps spread ($100 at $50k) to be safely within [MIN_SPREAD_BPS, MAX_SPREAD_BPS]
+            // Start: $50,000 -> $50,100 (20bps)
+            // End:   $60,000 -> $60,100 (16.6bps)
+            // Both are well above MIN_SPREAD_BPS (1-2bps) and well below MAX_SPREAD_BPS (50bps)
+            best_ask_price: 50_000_000_000_000 + i * 1_000_000_000 + 100_000_000_000,
             best_ask_size: 1_000_000_000,
             ..Default::default()
         };

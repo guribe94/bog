@@ -98,8 +98,15 @@ impl L2OrderBook {
     /// Performance: ~50ns (memcpy of 40 u64 values)
     #[inline]
     pub fn full_rebuild(&mut self, snapshot: &MarketSnapshot) {
-        // Copy all 10 levels (zero-copy from shared memory)
-        // This is critical: replaces ALL state with fresh data
+        // Reconstruct L2 book from snapshot
+        // Level 0 (Best) comes from dedicated fields (redundant if arrays are full, but safe)
+        self.bid_prices[0] = snapshot.best_bid_price;
+        self.bid_sizes[0] = snapshot.best_bid_size;
+        self.ask_prices[0] = snapshot.best_ask_price;
+        self.ask_sizes[0] = snapshot.best_ask_size;
+
+        // Copy all depth levels (0-9) directly from snapshot arrays
+        // Huginn ensures bid_prices[0] == best_bid_price for consistency
         self.bid_prices.copy_from_slice(&snapshot.bid_prices);
         self.bid_sizes.copy_from_slice(&snapshot.bid_sizes);
         self.ask_prices.copy_from_slice(&snapshot.ask_prices);
