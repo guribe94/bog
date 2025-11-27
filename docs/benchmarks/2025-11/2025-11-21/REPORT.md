@@ -348,7 +348,7 @@ When adding new benchmarks:
 2. Capture output: `cargo bench 2>&1 | tee benchmark_YYYY-MM-DD.txt`
 3. Create REPORT.md with system context and analysis
 4. Create comparison.md showing deltas vs previous run
-5. Update INDEX.md with new entry
+5. Update results/README.md with new entry
 6. Update LATEST.md to point to new results
 
 **Establish regression detection: flag any >10% slowdown in core hot-path benchmarks.**

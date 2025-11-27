@@ -371,6 +371,6 @@ All critical paths use lock-free operations:
 ## References
 
 - [Huginn Documentation](../../huginn/docs)
-- [Performance Measurements](performance/MEASURED_PERFORMANCE_COMPLETE.md)
+- [Performance Benchmarks](benchmarks/LATEST.md)
 - [Architecture Deep Dive](architecture/STATE_MACHINES.md)
 - [Source Code](../bog-core/src/resilience/mod.rs)

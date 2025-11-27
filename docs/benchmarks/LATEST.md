@@ -1,16 +1,16 @@
 # Latest Benchmark Results
 
-**Most Recent Run:** 2025-11-21
+**Most Recent Run**: 2025-11-21
 
-**Location:** [docs/benchmarks/2025-11/2025-11-21/](2025-11/2025-11-21/)
+**Location**: [results/2025-11/2025-11-21_120000_M1.md](results/2025-11/2025-11-21_120000_M1.md)
 
 ---
 
 ## Quick Summary
 
-**Date:** 2025-11-21
-**Status:** VERIFIED - Comprehensive benchmark suite expansion
-**System:** macOS Sequoia 15.6 (Darwin 24.6.0), Apple Silicon
+**Date**: 2025-11-21
+**Status**: VERIFIED - Comprehensive benchmark suite expansion
+**Platform**: macOS Sequoia 15.6 (Darwin 24.6.0), Apple M1 (ARM64)
 
 ### Headline Numbers
 
@@ -47,11 +47,6 @@
    - Risk validation: 2.18 ns
    - Overflow checks: same or faster than unchecked
 
-### Files
-
-- [full_suite.txt](2025-11/2025-11-21/full_suite.txt) - Complete criterion output (1,777 lines)
-- [REPORT.md](2025-11/2025-11-21/REPORT.md) - Detailed analysis with system context
-
 ### Comparison to Previous
 
 First successful benchmark run after Phase 1-3 implementation. The 2025-11-19 attempt failed due to compilation errors. These results establish the performance baseline for the zero-overhead architecture.
@@ -60,8 +55,9 @@ First successful benchmark run after Phase 1-3 implementation. The 2025-11-19 at
 
 ## Navigation
 
-- **Full report:** [2025-11-21/REPORT.md](2025-11/2025-11-21/REPORT.md)
-- **All runs:** [INDEX.md](INDEX.md)
+- **Full report:** [results/2025-11/2025-11-21_120000_M1.md](results/2025-11/2025-11-21_120000_M1.md)
+- **All runs:** [results/README.md](results/README.md)
+- **Results directory:** [results/README.md](results/README.md)
 - **Benchmark guide:** [README.md](README.md)
 - **Latency budgets:** [latency-budget.md](latency-budget.md)
 

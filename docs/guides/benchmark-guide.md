@@ -80,7 +80,7 @@ mv benchmark_results_*.txt docs/benchmarks/$(date +%Y-%m)/$(date +%Y-%m-%d)/full
 
 # 3. Create REPORT.md with analysis (see docs/benchmarks/README.md for template)
 
-# 4. Update docs/benchmarks/INDEX.md with new entry
+# 4. Update docs/benchmarks/results/README.md with new entry
 
 # 5. Update docs/benchmarks/LATEST.md to point to new results
 ```
@@ -422,7 +422,7 @@ tick_to_trade_pipeline/complete_pipeline
 - [Benchmark README](../../bog-core/benches/README.md) - Suite overview
 - [BASELINE.md](../../bog-core/benches/BASELINE.md) - Reference numbers
 - [Latest Results](../benchmarks/LATEST.md) - Most recent benchmark data
-- [All Results](../benchmarks/INDEX.md) - Historical benchmark tracking
+- [All Results](../benchmarks/results/README.md) - Historical benchmark tracking
 - [Latency Budget](../benchmarks/latency-budget.md) - Component targets
 
 ---

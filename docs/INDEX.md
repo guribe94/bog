@@ -1,47 +1,40 @@
 # Bog Documentation Index
 
-**Quick Navigation**: Master index for all documentation
+Master navigation for all documentation.
 
----
+## Getting Started
 
-##  Getting Started
-
-**New to Bog?** Start here:
 1. [README.md](../README.md) - Project overview, quick start
-2. [Market Making Guide](guides/market-making-guide.md) - How the strategy works
-3. [Command Reference](guides/command-reference.md) - How to run the bot
+2. [Market Making Guide](guides/market-making-guide.md) - Strategy explanation
+3. [Command Reference](guides/command-reference.md) - CLI usage
 
----
-
-##  By Role
+## By Role
 
 ### For New Users
--  [README.md](../README.md) - Quick start
--  [Market Making Guide](guides/market-making-guide.md) - Strategy walkthrough
--  [Command Reference](guides/command-reference.md) - Basic commands
--  [Market Selection](guides/market-selection.md) - Choosing markets
+- [README.md](../README.md) - Quick start
+- [Market Making Guide](guides/market-making-guide.md) - Strategy walkthrough
+- [Command Reference](guides/command-reference.md) - Basic commands
+- [Market Selection](guides/market-selection.md) - Choosing markets
 
 ### For Developers
--  [System Design](architecture/system-design.md) - Core architecture
--  [State Machines](architecture/STATE_MACHINES.md) - Typestate patterns
--  [Overflow Handling](architecture/overflow-handling.md) - Safety design
--  [Huginn Integration](HUGINN_INTEGRATION_GUIDE.md) - Market data IPC
--  [Project Roadmap](PROJECT_ROADMAP.md) - Development phases
+- [System Design](architecture/system-design.md) - Core architecture
+- [State Machines](architecture/STATE_MACHINES.md) - Typestate patterns
+- [Overflow Handling](architecture/overflow-handling.md) - Safety design
+- [Huginn Integration](HUGINN_INTEGRATION_GUIDE.md) - Market data IPC
+- [Project Roadmap](PROJECT_ROADMAP.md) - Development phases
 
 ### For Operators
--  [Production Readiness](deployment/PRODUCTION_READINESS.md) - Complete ops manual
--  [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - Quick deploy
--  [Failure Modes](deployment/failure-modes.md) - Troubleshooting guide
--  [Paper Trading Realism](deployment/PAPER_TRADING_REALISM.md) - Testing guide
+- [Production Readiness](deployment/PRODUCTION_READINESS.md) - Complete ops manual
+- [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - Quick deploy
+- [Failure Modes](deployment/failure-modes.md) - Troubleshooting guide
+- [Paper Trading Realism](deployment/PAPER_TRADING_REALISM.md) - Testing guide
 
 ### For Performance Engineers
--  [Benchmark Results](benchmarks/LATEST.md) - Latest performance data
--  [Latency Budget](benchmarks/latency-budget.md) - Component breakdown
--  [Benchmark Guide](guides/benchmark-guide.md) - How to run benchmarks
+- [Benchmark Results](benchmarks/LATEST.md) - Latest performance data
+- [Latency Budget](benchmarks/latency-budget.md) - Component breakdown
+- [Benchmark Guide](guides/benchmark-guide.md) - How to run benchmarks
 
----
-
-##  By Topic
+## By Topic
 
 ### Architecture
 Core system design and implementation patterns
@@ -55,14 +48,14 @@ Core system design and implementation patterns
 
 **Key concepts**: Zero-cost abstractions, compile-time safety, cache optimization
 
-### Performance
-Latency analysis and benchmarks
+### Benchmarks
+Latency analysis and performance results
 
 | Document | Lines | Purpose |
 |----------|-------|---------|
 | [LATEST.md](benchmarks/LATEST.md) | - | Most recent benchmark results |
 | [latency-budget.md](benchmarks/latency-budget.md) | 803 | Component latency targets |
-| [INDEX.md](benchmarks/INDEX.md) | - | All benchmark runs over time |
+| [results/README.md](benchmarks/results/README.md) | - | All benchmark runs over time |
 | [README.md](benchmarks/README.md) | - | Benchmark guide and structure |
 
 **Latest Results**: 70.79ns tick-to-trade (14.1x under 1μs target)
@@ -85,10 +78,14 @@ User-facing tutorials and references
 | Document | Lines | Purpose |
 |----------|-------|---------|
 | [market-making-guide.md](guides/market-making-guide.md) | ~700 | Strategy deep dive |
+| [trait-implementation-guide.md](guides/trait-implementation-guide.md) | ~600 | Custom Strategy/Executor guide |
+| [error-handling-guide.md](guides/error-handling-guide.md) | ~450 | Production error patterns |
+| [monitoring-guide.md](guides/monitoring-guide.md) | ~550 | Metrics and alerts |
+| [benchmark-guide.md](guides/benchmark-guide.md) | ~500 | Performance testing |
 | [command-reference.md](guides/command-reference.md) | 134 | CLI commands |
 | [market-selection.md](guides/market-selection.md) | 77 | Market configuration |
 
-**Best for**: Learning the system, daily operations
+**Best for**: Learning the system, daily operations, production deployment
 
 ### Integration
 External system connections
@@ -122,40 +119,43 @@ Historical design documents
 
 ### "I want to deploy to production"
 1. [Production Readiness](deployment/PRODUCTION_READINESS.md) - Pre-flight checklist
-2. [Failure Modes](deployment/failure-modes.md) - What can go wrong
-3. [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) - Verify targets
+2. [Monitoring Guide](guides/monitoring-guide.md) - Metrics and alerts
+3. [Error Handling Guide](guides/error-handling-guide.md) - Critical error patterns
+4. [Failure Modes](deployment/failure-modes.md) - What can go wrong
+5. [Latest Benchmarks](benchmarks/LATEST.md) - Verify targets
 
 ### "I want to modify the code"
 1. [System Design](architecture/system-design.md) - Architecture overview
-2. [State Machines](architecture/STATE_MACHINES.md) - Safety patterns
-3. [Project Roadmap](PROJECT_ROADMAP.md) - Current status
+2. [Trait Implementation Guide](guides/trait-implementation-guide.md) - Custom strategies/executors
+3. [State Machines](architecture/STATE_MACHINES.md) - Safety patterns
+4. [Project Roadmap](PROJECT_ROADMAP.md) - Current status
 
 ### "Something went wrong"
-1. [Failure Modes](deployment/failure-modes.md) - Troubleshooting
-2. [Command Reference](guides/command-reference.md) - Debug commands
-3. [Production Readiness](deployment/PRODUCTION_READINESS.md) - Emergency procedures
+1. [Error Handling Guide](guides/error-handling-guide.md) - Critical error recovery
+2. [Monitoring Guide](guides/monitoring-guide.md) - Health check and runbooks
+3. [Failure Modes](deployment/failure-modes.md) - Troubleshooting scenarios
+4. [Command Reference](guides/command-reference.md) - Debug commands
+5. [Production Readiness](deployment/PRODUCTION_READINESS.md) - Emergency procedures
 
----
-
-##  Quick Reference Tables
+## Quick Reference
 
 ### Performance Targets
 | Component | Budget | Measured | Status |
 |-----------|--------|----------|--------|
-| Tick-to-trade | <1μs | 70.79ns |  14x under |
-| Strategy calc | <100ns | 17.28ns |  5.8x under |
-| Risk validation | <50ns | 2.37ns |  21x under |
-| Orderbook sync | <50ns | ~20ns |  2.5x under |
+| Tick-to-trade | <1μs | 70.79ns | 14x under |
+| Strategy calc | <100ns | 17.28ns | 5.8x under |
+| Risk validation | <50ns | 2.37ns | 21x under |
+| Orderbook sync | <50ns | ~20ns | 2.5x under |
 
 ### Safety Layers
-1.  Compile-time spread validation (won't compile if unprofitable)
-2.  Market data validation (spread, liquidity, prices)
-3.  Position limits (max 1.0 BTC)
-4.  Daily loss limits (max $1,000)
-5.  Circuit breaker (>10% move halts)
-6.  Rate limiter (10 orders/sec)
-7.  Pre-trade validation (6 checks)
-8.  Kill switch (SIGUSR1)
+1. Compile-time spread validation (won't compile if unprofitable)
+2. Market data validation (spread, liquidity, prices)
+3. Position limits (max 1.0 BTC)
+4. Daily loss limits (max $1,000)
+5. Circuit breaker (>10% move halts)
+6. Rate limiter (10 orders/sec)
+7. Pre-trade validation (6 checks)
+8. Kill switch (SIGUSR1)
 
 ### File Organization
 ```
@@ -165,46 +165,30 @@ docs/
  PROJECT_ROADMAP.md          ← Development plan
  HUGINN_INTEGRATION_GUIDE.md ← Market data
  architecture/               ← Design docs
- performance/                ← Benchmarks
+ benchmarks/                 ← Performance results
  deployment/                 ← Operations
  guides/                     ← User guides
  design/                     ← Historical
 ```
 
----
+## Document Status
 
-##  Document Status
+All documents current unless noted otherwise.
 
-| Badge | Meaning |
-|-------|---------|
-|  Current | Up-to-date, actively maintained |
-|  Needs Update | May have outdated info |
-|  Work in Progress | Incomplete |
-|  Historical | Archived for reference |
-
-All documents in this index are  Current unless noted.
-
----
-
-##  Contributing to Documentation
+## Contributing to Documentation
 
 When adding or updating docs:
-1. **Add header block** with: Purpose, Audience, Prerequisites, Related
-2. **Add TL;DR section** for LLM quick reference
-3. **Update this index** with new document
-4. **Fix all cross-references** to use relative paths
-5. **Add status badge** (   )
+1. Add header block: Purpose, Audience, Prerequisites, Related
+2. Add TL;DR section for LLM quick reference
+3. Update this index with new document
+4. Fix all cross-references to use relative paths
+
+## External Resources
+
+- Huginn Repository: `../../huginn/` (sibling repo)
+- Lighter DEX Docs: https://docs.lighter.xyz
+- Rust Performance Book: https://nnethercote.github.io/perf-book/
 
 ---
 
-##  External Resources
-
-- **Huginn Repository**: `../../huginn/` (sibling repo)
-- **Lighter DEX Docs**: https://docs.lighter.xyz
-- **Rust Performance Book**: https://nnethercote.github.io/perf-book/
-
----
-
-**Last Updated**: 2025-11-21
-**Maintained by**: Bog Team
-**Feedback**: Open an issue or submit a PR
+**Last Updated**: 2025-11-26

@@ -1112,5 +1112,4 @@ fi
 
 - [Overflow Handling Architecture](../architecture/overflow-handling.md)
 - [System Design](../architecture/system-design.md)
-- [Latency Budget](../performance/latency-budget.md)
-- [Monitoring](./monitoring.md) (future)
+- [Latency Budget](../benchmarks/latency-budget.md)

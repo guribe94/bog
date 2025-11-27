@@ -549,7 +549,7 @@ bog_performance_tick_to_trade  # Should be <1μs
 - [Command Reference](command-reference.md) - How to run the bot
 - [Market Selection](market-selection.md) - Choosing markets
 - [State Machines](../architecture/STATE_MACHINES.md) - Safety architecture
-- [Performance Benchmarks](../performance/MEASURED_PERFORMANCE_COMPLETE.md) - Measured latencies
+- [Performance Benchmarks](../benchmarks/LATEST.md) - Measured latencies
 - [Production Readiness](../deployment/PRODUCTION_READINESS.md) - Operations manual
 
 ---

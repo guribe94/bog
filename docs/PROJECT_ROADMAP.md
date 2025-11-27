@@ -411,7 +411,7 @@ When adding TODOs to the codebase:
 
 For questions about the roadmap:
 - Review [PRODUCTION_READINESS.md](deployment/PRODUCTION_READINESS.md) for current status
-- Check [MEASURED_PERFORMANCE_COMPLETE.md](performance/MEASURED_PERFORMANCE_COMPLETE.md) for metrics
+- Check [benchmarks/LATEST.md](benchmarks/LATEST.md) for metrics
 - See [README.md](README.md) for complete documentation
 
 ---

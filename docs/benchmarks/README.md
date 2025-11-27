@@ -15,11 +15,15 @@ This directory contains comprehensive benchmark results for the Bog HFT trading 
 ```
 benchmarks/
 ├── README.md                                    # This file
-├── INDEX.md                                     # Chronological manifest
 ├── LATEST.md                                    # Most recent results
 ├── latency-budget.md                            # Latency targets
-└── YYYY-MM/                                     # Results by year-month
-    └── YYYY-MM-DD_HHmmss_platform.md           # Consolidated result files
+├── results/                                     # Consolidated benchmark results
+│   ├── README.md                                # Results index
+│   └── YYYY-MM/                                 # Results by year-month
+│       └── YYYY-MM-DD_HHmmss_platform.md       # Consolidated result files
+└── 2025-11/                                     # Legacy format (being migrated)
+    └── 2025-11-21/
+        └── REPORT.md
 ```
 
 ## New Consolidated Format
@@ -217,7 +221,7 @@ When adding new benchmark code:
 - **Processing Script**: [../../benchmarks/process_benchmarks.py](../../benchmarks/process_benchmarks.py)
 - **Migration Script**: [../../benchmarks/migrate_historical_data.py](../../benchmarks/migrate_historical_data.py)
 - **Latency Budget**: [latency-budget.md](latency-budget.md)
-- **Index**: [INDEX.md](INDEX.md)
+- **Results Index**: [results/README.md](results/README.md)
 - **Latest Results**: [LATEST.md](LATEST.md)
 
 ## Questions?
@@ -227,6 +231,6 @@ If you're unsure about:
 - How to interpret results → See consolidated markdown file sections
 - What changed from previous run → Check "Regression Analysis" section
 - Latency targets → See latency-budget.md
-- Historical context → See INDEX.md
+- Historical context → See results/README.md
 
 **Last Updated**: 2025-11-23

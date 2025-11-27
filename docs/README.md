@@ -1,31 +1,27 @@
 # Bog Documentation Hub
 
-> Sub-microsecond HFT trading engine with zero-overhead abstractions
+Sub-microsecond HFT trading engine with zero-overhead abstractions.
 
 **Quick Links**: [Complete Index](INDEX.md) | [Quick Start](../README.md) | [Benchmarks](benchmarks/LATEST.md)
 
----
+## Start Here
 
-##  Start Here
+**New to Bog:**
+1. [Quick Start](../README.md) - Build and run
+2. [Market Making Guide](guides/market-making-guide.md) - Strategy explanation
+3. [Command Reference](guides/command-reference.md) - CLI usage
 
-**New to Bog?**
-1. [Quick Start (../README.md)](../README.md) - Build and run in 5 minutes
-2. [Market Making Guide](guides/market-making-guide.md) - Understand the strategy
-3. [Command Reference](guides/command-reference.md) - Basic operations
-
-**Deploying to Production?**
+**Deploying to Production:**
 1. [Production Readiness](deployment/PRODUCTION_READINESS.md) - Complete checklist
 2. [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - Quick deployment
 3. [Failure Modes](deployment/failure-modes.md) - Troubleshooting
 
-**Developing?**
-1. [System Design](architecture/system-design.md) - Architecture deep dive
+**Developing:**
+1. [System Design](architecture/system-design.md) - Architecture
 2. [State Machines](architecture/STATE_MACHINES.md) - Safety patterns
 3. [Project Roadmap](PROJECT_ROADMAP.md) - Current status
 
----
-
-##  Documentation Structure
+## Documentation Structure
 
 ```
 docs/
@@ -56,9 +52,7 @@ docs/
      PHASE4_REALISTIC_FILLS.md
 ```
 
----
-
-##  By Topic
+## By Topic
 
 ### Architecture & Design
 
@@ -73,10 +67,10 @@ docs/
 
 2. **[Benchmark Results](benchmarks/LATEST.md)** - Verified performance data
    - 70.79ns tick-to-trade latency measured
-   - Comprehensive component benchmarks
+   - Component benchmarks
    - See [latency-budget.md](benchmarks/latency-budget.md) for targets
 
-3. **[Failure Modes](deployment/failure-modes.md)** - Learn operational considerations
+3. **[Failure Modes](deployment/failure-modes.md)** - Operational considerations
    - 10 major failure scenarios
    - Detection and mitigation strategies
    - Incident response procedures
@@ -111,7 +105,7 @@ docs/
    - Network failure recovery
    - Dependency monitoring
 
-2. **[Latency Budget](performance/latency-budget.md)** - Performance expectations
+2. **[Latency Budget](benchmarks/latency-budget.md)** - Performance expectations
    - Normal: 27ns (p50)
    - Degraded: 45ns (p99)
    - Alert thresholds
@@ -186,11 +180,9 @@ pub struct Position {
 | Risk validation | <50ns | 2.37ns |  21x under |
 | Orderbook sync | <50ns | ~20ns |  2.5x under |
 
-→ See [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) for full benchmarks
+See [Latest Benchmarks](benchmarks/LATEST.md) for full results.
 
----
-
-##  Document Summaries
+## Document Summaries
 
 ### Architecture
 
@@ -205,8 +197,8 @@ pub struct Position {
 
 | Document | What It Covers | Read Time |
 |----------|----------------|-----------|
-| [latency-budget.md](performance/latency-budget.md) | Component-by-component breakdown | 40 min |
-| [MEASURED_PERFORMANCE_COMPLETE.md](performance/MEASURED_PERFORMANCE_COMPLETE.md) | Verified benchmark results | 20 min |
+| [latency-budget.md](benchmarks/latency-budget.md) | Component-by-component breakdown | 40 min |
+| [LATEST.md](benchmarks/LATEST.md) | Latest benchmark results | 5 min |
 
 ### Deployment
 
@@ -226,9 +218,7 @@ pub struct Position {
 | [command-reference.md](guides/command-reference.md) | CLI commands | 5 min |
 | [market-selection.md](guides/market-selection.md) | Market configuration | 5 min |
 
----
-
-##  Learning Paths
+## Learning Paths
 
 ### Path 1: "I Want to Run It" (30 minutes)
 1. [Quick Start](../README.md) - 5 min
@@ -240,100 +230,89 @@ pub struct Position {
 1. [Market Making Guide](guides/market-making-guide.md) - 35 min (full read)
 2. [System Design](architecture/system-design.md) - 30 min
 3. [State Machines](architecture/STATE_MACHINES.md) - 25 min
-4. [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) - 20 min
+4. [Latest Benchmarks](benchmarks/LATEST.md) - 20 min
 5. [Huginn Integration](HUGINN_INTEGRATION_GUIDE.md) - 15 min
 
 ### Path 3: "I Want to Deploy It" (3 hours)
 1. [Production Readiness](deployment/PRODUCTION_READINESS.md) - 45 min
 2. [Failure Modes](deployment/failure-modes.md) - 45 min
 3. [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md) - 10 min
-4. [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md) - 20 min
+4. [Latest Benchmarks](benchmarks/LATEST.md) - 20 min
 5. Practice deployment - 60 min
 
 ### Path 4: "I Want to Modify It" (4 hours)
 1. [System Design](architecture/system-design.md) - 30 min
 2. [State Machines](architecture/STATE_MACHINES.md) - 25 min
 3. [Overflow Handling](architecture/overflow-handling.md) - 20 min
-4. [Latency Budget](performance/latency-budget.md) - 40 min
+4. [Latency Budget](benchmarks/latency-budget.md) - 40 min
 5. [Fill Processing Trace](architecture/fill-processing-trace.md) - 15 min
 6. [Project Roadmap](PROJECT_ROADMAP.md) - 20 min
 7. Code exploration - 90 min
 
----
-
-##  Quick Operations
+## Quick Operations
 
 ### Common Tasks
 
-**Run paper trading**:
+Run paper trading:
 ```bash
 ./target/release/bog-simple-spread-simulated --market 1
 ```
-→ [Command Reference](guides/command-reference.md)
+See [Command Reference](guides/command-reference.md).
 
-**Check performance**:
+Check performance:
 ```bash
 cargo bench
 ```
-→ [Measured Performance](performance/MEASURED_PERFORMANCE_COMPLETE.md)
+See [Latest Benchmarks](benchmarks/LATEST.md).
 
-**Deploy to production** (when ready):
+Deploy to production (when ready):
 1. Review [Production Readiness](deployment/PRODUCTION_READINESS.md)
 2. Follow [24H Deployment Guide](deployment/24H_DEPLOYMENT_GUIDE.md)
-3. Monitor with [Failure Modes](deployment/failure-modes.md) guide
+3. Monitor with [Failure Modes](deployment/failure-modes.md)
 
-**Troubleshoot issues**:
-1. Check [Failure Modes](deployment/failure-modes.md) - Section by symptom
+Troubleshoot issues:
+1. Check [Failure Modes](deployment/failure-modes.md)
 2. Review logs with [Command Reference](guides/command-reference.md)
-3. See [Production Readiness](deployment/PRODUCTION_READINESS.md) - Part 10 (Troubleshooting)
+3. See [Production Readiness](deployment/PRODUCTION_READINESS.md)
 
----
+## System Status
 
-##  System Status
+Production Readiness: 95%
 
-### Production Readiness: 95%
-
- **Complete**:
+Complete:
 - Market making strategy
 - Data ingestion (Huginn)
 - Risk management
 - State machines
-- Monitoring & alerts
+- Monitoring and alerts
 - Visualization tools
 - Safety infrastructure
 
- **Pending**:
+Pending:
 - Lighter SDK integration (execution stubbed)
 - Live trading deployment
 
----
+## External Resources
 
-##  External Resources
+- Huginn Repository: `../../huginn/` (sibling repo)
+- Lighter DEX API: https://docs.lighter.xyz
+- Rust Performance Book: https://nnethercote.github.io/perf-book/
 
-- **Huginn Repository**: `../../huginn/` (sibling repo)
-- **Lighter DEX API**: https://docs.lighter.xyz
-- **Rust Performance Book**: https://nnethercote.github.io/perf-book/
-
----
-
-##  Contributing
+## Contributing
 
 When updating documentation:
 1. Add header block: Purpose, Audience, Prerequisites, Related
 2. Add TL;DR section for LLM quick reference
 3. Update [INDEX.md](INDEX.md) with new document
 4. Fix all cross-references (use relative paths)
-5. Add status badge ( Current |  Needs Update |  WIP |  Historical)
 
-### Quality Standards
--  All code examples must compile
--  All benchmarks must be verified
--  All broken links must be fixed
--  All outdated info must be marked or updated
+Quality Standards:
+- All code examples must compile
+- All benchmarks must be verified
+- All broken links must be fixed
+- All outdated info must be marked or updated
 
----
-
-##  Complete Navigation
+## Complete Navigation
 
 Need something specific? Use the [Complete Index](INDEX.md) for:
 - By role (users, developers, operators)
@@ -361,16 +340,16 @@ Need something specific? Use the [Complete Index](INDEX.md) for:
 
 | Failure | Severity | Probability | Status |
 |---------|----------|-------------|--------|
-| Position overflow | Critical | Near zero |  Protected |
-| Conversion errors | High | Low |  Protected |
-| Fill queue overflow | High | Medium |  Protected |
-| Flash crash | High | Medium |  Partial |
-| Clock desync | Medium | Low |  Protected |
-| Memory exhaustion | Critical | Near zero |  Protected |
-| Network failures | High | Medium |  Partial |
-| Race conditions | Critical | Zero |  Protected |
-| Strategy errors | High | Low |  Protected |
-| Dependency failures | Varies | Medium |  Partial |
+| Position overflow | Critical | Near zero | Protected |
+| Conversion errors | High | Low | Protected |
+| Fill queue overflow | High | Medium | Protected |
+| Flash crash | High | Medium | Partial |
+| Clock desync | Medium | Low | Protected |
+| Memory exhaustion | Critical | Near zero | Protected |
+| Network failures | High | Medium | Partial |
+| Race conditions | Critical | Zero | Protected |
+| Strategy errors | High | Low | Protected |
+| Dependency failures | Varies | Medium | Partial |
 
 ### Key Metrics
 
@@ -398,19 +377,13 @@ rate(bog_dropped_fills_total[5m]) > 0  # Alert: CRITICAL
 
 ---
 
-##  You're Ready!
-
-**For detailed information on any topic**, see:
-- [ Complete Index](INDEX.md) - Master navigation
-- [ Architecture docs](architecture/) - System design
-- [ Performance docs](performance/) - Benchmarks
-- [ Deployment docs](deployment/) - Operations
-- [ User guides](guides/) - Tutorials
-
-**Need help?** Start with the [Complete Index](INDEX.md) which organizes everything by role, topic, and use case.
+**For detailed information**, see:
+- [Complete Index](INDEX.md) - Master navigation
+- [Architecture](architecture/) - System design
+- [Benchmarks](benchmarks/) - Performance results
+- [Deployment](deployment/) - Operations
+- [Guides](guides/) - Tutorials
 
 ---
 
-**Last Updated**: 2025-11-21
-**Status**:  Current
-**Maintained by**: Bog Team
+**Last Updated**: 2025-11-26

@@ -748,6 +748,6 @@ cargo run --bin simple-spread-simulated
 ## References
 
 - [Overflow Handling Architecture](./overflow-handling.md)
-- [Latency Budget](../performance/latency-budget.md)
+- [Latency Budget](../benchmarks/latency-budget.md)
 - [Failure Modes](../deployment/failure-modes.md)
-- [Huginn Integration](../../huginn/docs/architecture.md)
+- [Huginn Integration](../HUGINN_INTEGRATION_GUIDE.md)
