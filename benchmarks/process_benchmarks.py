@@ -221,6 +221,50 @@ def generate_consolidated_markdown(raw_dir: str,
     for benchmark, filepath in raw_files.items():
         all_results[benchmark] = extract_benchmarks(filepath)
 
+    # If we have full_suite, categorize results by benchmark name
+    if 'full_suite' in all_results:
+        full_suite_results = all_results['full_suite']
+        categorized = {}
+
+        # Special mappings for non-standard benchmark names
+        special_mappings = {
+            'engine_tick_processing': 'engine_bench',
+            'strategy_calculation': 'engine_bench',
+            'risk_validation': 'engine_bench',
+            'executor': 'engine_bench',
+            'signal_creation': 'engine_bench',
+            'position_operations': 'engine_bench',
+            'market_change': 'engine_bench',
+            'varying_order_sizes': 'engine_bench',
+            'tick_to_trade_pipeline': 'engine_bench',
+            'error_paths': 'engine_bench',
+            'orderid': 'tls_overhead_bench',
+        }
+
+        for result in full_suite_results:
+            bench_name = result['benchmark_name']
+            # Extract category from benchmark name
+            category = bench_name.split('/')[0] if '/' in bench_name else bench_name
+
+            # Check special mappings first
+            matched_bench = special_mappings.get(category)
+
+            # If no special mapping, try standard prefix matching
+            if not matched_bench:
+                for bench in ALL_BENCHMARKS:
+                    bench_prefix = bench.replace('_bench', '')  # "atomic_bench" -> "atomic"
+                    if category == bench_prefix or category.startswith(bench_prefix):
+                        matched_bench = bench
+                        break
+
+            if matched_bench:
+                if matched_bench not in categorized:
+                    categorized[matched_bench] = []
+                categorized[matched_bench].append(result)
+
+        # Merge categorized results into all_results
+        all_results.update(categorized)
+
     # Read system info
     system_info = read_system_info(raw_dir)
 
