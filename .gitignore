@@ -1,8 +1,14 @@
-# Rust
+# Rust build artifacts
 /target
 **/*.rs.bk
 *.pdb
-Cargo.lock
+
+# Profiling data
+*.profraw
+*.profdata
+perf.data
+perf.data.old
+flamegraph.svg
 
 # IDE
 .vscode/
@@ -10,20 +16,76 @@ Cargo.lock
 *.swp
 *.swo
 *~
+.helix/
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Logs
 *.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
 
 # Config (may contain secrets)
 config/local.toml
 config/prod.toml
 *.pem
 *.key
+.env
+.env.*
+!.env.example
 
 # Database
 *.db
 *.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# Benchmarks - keep scripts, ignore raw output
+benchmarks/raw/
+benchmarks/archive/
+benchmarks/results/
+benchmarks/*.json
+!benchmarks/process_benchmarks.py
+!benchmarks/migrate_historical_data.py
+
+# Coverage
+*.profraw
+*.gcda
+*.gcno
+lcov.info
+coverage/
+tarpaulin-report.html
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.#*
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Crash logs
+*.dmp
+crash.log
