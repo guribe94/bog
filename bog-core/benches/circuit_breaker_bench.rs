@@ -41,7 +41,7 @@ fn create_normal_snapshot() -> MarketSnapshot {
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 110],
+        _padding: [0; 54],
     }
 }
 
