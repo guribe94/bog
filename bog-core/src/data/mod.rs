@@ -66,29 +66,22 @@ impl std::fmt::Display for SnapshotValidationError {
     }
 }
 
-/// Validate a market snapshot for trading safety
+/// Validate a market snapshot for trading safety (with cached time to avoid syscalls)
 ///
-/// Checks all critical invariants that MUST be true before using this data for trading.
-/// This is the first line of defense against trading on bad/corrupted/stale data.
-///
-/// # Validation Rules
-///
-/// 1. **Non-zero prices**: bid_price > 0, ask_price > 0
-/// 2. **Non-zero sizes**: bid_size > 0, ask_size > 0
-/// 3. **Not crossed**: bid_price < ask_price
-/// 4. **Reasonable spread**: spread < 1000bps (10%)
-/// 5. **Not stale**: age <= max_age_ns
+/// This version uses a provided current time to avoid syscalls in hot paths.
 ///
 /// # Arguments
 /// - `snapshot`: The market snapshot to validate
-/// - `max_age_ns`: Maximum acceptable age in nanoseconds (e.g., 5_000_000_000 for 5 seconds)
+/// - `max_age_ns`: Maximum acceptable age in nanoseconds
+/// - `now_ns`: Current time in nanoseconds (cached to avoid syscalls)
 ///
 /// # Returns
 /// - `Ok(())`: Snapshot is valid and safe to use
 /// - `Err(SnapshotValidationError)`: Snapshot is invalid, DO NOT TRADE
-pub fn validate_snapshot(
+pub fn validate_snapshot_with_time(
     snapshot: &MarketSnapshot,
     max_age_ns: u64,
+    now_ns: u64,
 ) -> Result<(), SnapshotValidationError> {
     // Check 1: Non-zero bid price
     if snapshot.best_bid_price == 0 {
@@ -127,12 +120,8 @@ pub fn validate_snapshot(
         return Err(SnapshotValidationError::SpreadTooWide { spread_bps });
     }
 
-    // Check 7: Not stale (data age within acceptable threshold)
-    if is_stale(snapshot, max_age_ns) {
-        let now_ns = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64;
+    // Check 7: Not stale (data age within acceptable threshold) - using cached time
+    if is_stale_with_time(snapshot, max_age_ns, now_ns) {
         let age_ns = now_ns.saturating_sub(snapshot.exchange_timestamp_ns);
 
         return Err(SnapshotValidationError::StaleData {
@@ -142,6 +131,44 @@ pub fn validate_snapshot(
     }
 
     Ok(())
+}
+
+/// Validate a market snapshot for trading safety
+///
+/// Checks all critical invariants that MUST be true before using this data for trading.
+/// This is the first line of defense against trading on bad/corrupted/stale data.
+///
+/// # Validation Rules
+///
+/// 1. **Non-zero prices**: bid_price > 0, ask_price > 0
+/// 2. **Non-zero sizes**: bid_size > 0, ask_size > 0
+/// 3. **Not crossed**: bid_price < ask_price
+/// 4. **Reasonable spread**: spread < 1000bps (10%)
+/// 5. **Not stale**: age <= max_age_ns
+///
+/// # Arguments
+/// - `snapshot`: The market snapshot to validate
+/// - `max_age_ns`: Maximum acceptable age in nanoseconds (e.g., 5_000_000_000 for 5 seconds)
+///
+/// # Returns
+/// - `Ok(())`: Snapshot is valid and safe to use
+/// - `Err(SnapshotValidationError)`: Snapshot is invalid, DO NOT TRADE
+///
+/// # Note
+/// This function performs a syscall to get current time. For hot paths with frequent validation,
+/// consider using `validate_snapshot_with_time` with a cached timestamp.
+pub fn validate_snapshot(
+    snapshot: &MarketSnapshot,
+    max_age_ns: u64,
+) -> Result<(), SnapshotValidationError> {
+    // Get current time for validation
+    let now_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+
+    // Delegate to cached version
+    validate_snapshot_with_time(snapshot, max_age_ns, now_ns)
 }
 
 /// Check if snapshot is valid (wrapper that returns bool)
@@ -165,19 +192,26 @@ pub fn is_locked(snapshot: &MarketSnapshot) -> bool {
         && snapshot.best_bid_price == snapshot.best_ask_price
 }
 
-/// Check if snapshot is stale (older than threshold)
-pub fn is_stale(snapshot: &MarketSnapshot, max_age_ns: u64) -> bool {
-    let now_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64;
-
+/// Check if snapshot is stale (older than threshold) using a provided current time
+/// This version avoids syscalls by accepting a cached timestamp
+pub fn is_stale_with_time(snapshot: &MarketSnapshot, max_age_ns: u64, now_ns: u64) -> bool {
     if now_ns < snapshot.exchange_timestamp_ns {
         return false; // Future timestamp (clock skew)
     }
 
     let age_ns = now_ns - snapshot.exchange_timestamp_ns;
     age_ns > max_age_ns
+}
+
+/// Check if snapshot is stale (older than threshold)
+/// Note: This performs a syscall. Consider using is_stale_with_time with a cached timestamp for hot paths.
+pub fn is_stale(snapshot: &MarketSnapshot, max_age_ns: u64) -> bool {
+    let now_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+
+    is_stale_with_time(snapshot, max_age_ns, now_ns)
 }
 
 /// Configuration for epoch change monitoring
@@ -246,6 +280,10 @@ pub struct MarketFeed {
     last_epoch_check_time: Instant,
     backpressure_config: BackpressureConfig,
     backpressure_triggered: bool,
+    /// Cached current time in nanoseconds (updated every 100ms to avoid syscalls)
+    cached_time_ns: u64,
+    /// When the time cache was last updated
+    last_time_cache_update: Instant,
 }
 
 /// Statistics for the market feed
@@ -280,6 +318,12 @@ impl MarketFeed {
         // Get initial epoch from huginn
         let initial_epoch = inner.epoch();
 
+        // Initialize time cache to avoid syscalls in hot path
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
         Ok(Self {
             inner,
             market_id,
@@ -296,6 +340,8 @@ impl MarketFeed {
             last_epoch_check_time: Instant::now(),
             backpressure_config: BackpressureConfig::default(),
             backpressure_triggered: false,
+            cached_time_ns: now_ns,
+            last_time_cache_update: Instant::now(),
         })
     }
 
@@ -323,6 +369,12 @@ impl MarketFeed {
         // Get initial epoch from huginn
         let initial_epoch = inner.epoch();
 
+        // Initialize time cache to avoid syscalls in hot path
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
         Ok(Self {
             inner,
             market_id,
@@ -339,11 +391,22 @@ impl MarketFeed {
             last_epoch_check_time: Instant::now(),
             backpressure_config: BackpressureConfig::default(),
             backpressure_triggered: false,
+            cached_time_ns: now_ns,
+            last_time_cache_update: Instant::now(),
         })
     }
 
     /// Try to receive a market snapshot (non-blocking)
     pub fn try_recv(&mut self) -> Option<MarketSnapshot> {
+        // Update time cache periodically to avoid syscalls in hot path (every 100ms)
+        if self.last_time_cache_update.elapsed().as_millis() >= 100 {
+            self.cached_time_ns = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64;
+            self.last_time_cache_update = Instant::now();
+        }
+
         match self.inner.try_recv() {
             Some(snapshot) => {
                 self.last_message_time = Instant::now();
@@ -356,7 +419,7 @@ impl MarketFeed {
                 // Check for sequence gaps using wraparound-safe detector
                 let gap_size = self.gap_detector.check(snapshot.sequence);
                 if gap_size > 0 {
-                    warn!(
+                    debug!(
                         "Sequence gap detected: {} messages missed (last={}, current={}) - recovery required",
                         gap_size, self.last_sequence, snapshot.sequence
                     );
@@ -372,10 +435,11 @@ impl MarketFeed {
                 if queue_depth > self.stats.max_queue_depth {
                     self.stats.max_queue_depth = queue_depth;
                     if queue_depth > 100 {
-                        warn!("High queue depth: {} messages behind", queue_depth);
+                        debug!("High queue depth: {} messages behind", queue_depth);
                     }
                 }
 
+                #[cfg(feature = "debug-logging")]
                 debug!(
                     "Received snapshot: seq={}, bid={}, ask={}, latency={}μs",
                     snapshot.sequence,
@@ -590,6 +654,39 @@ impl MarketFeed {
         self.inner.fetch_snapshot(timeout)
     }
 
+    /// Request a full orderbook snapshot from Huginn
+    ///
+    /// CRITICAL: This MUST be called before fetch_snapshot() for the snapshot
+    /// protocol to work correctly. This increments an atomic counter in shared
+    /// memory that Huginn's snapshot polling task checks every 100ms.
+    ///
+    /// # How It Works
+    /// 1. This method increments snapshot_request_counter (atomic, ~10ns)
+    /// 2. Huginn's snapshot polling task sees the counter change
+    /// 3. Huginn spawns async task to fetch snapshot via temporary WebSocket
+    /// 4. Huginn publishes snapshot to ring buffer with IS_FULL_SNAPSHOT flag
+    /// 5. Your fetch_snapshot() call receives it
+    ///
+    /// # Rate Limiting
+    /// Huginn enforces 1 snapshot per 10 seconds to protect the exchange.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Correct usage:
+    /// feed.request_snapshot();                          // Signal Huginn
+    /// let snap = feed.fetch_snapshot(Some(Duration::from_secs(2)))?;  // Wait for it
+    ///
+    /// // Wrong usage:
+    /// let snap = feed.fetch_snapshot(Some(Duration::from_secs(30)))?;  // Times out!
+    /// // Never requested, so Huginn never fetches, so fetch_snapshot waits forever
+    /// ```
+    ///
+    /// # Performance
+    /// ~10ns (single atomic increment in shared memory)
+    pub fn request_snapshot(&mut self) {
+        self.inner.request_snapshot()
+    }
+
     /// Rewind consumer to a previous position for replay
     ///
     /// Used after snapshot fetch to replay updates that arrived while
@@ -652,15 +749,21 @@ impl MarketFeed {
 
         let start = Instant::now();
 
-        // Fetch full snapshot directly (blocking with timeout)
+        // CRITICAL FIX: Request snapshot from Huginn BEFORE waiting for it
+        // Without this, fetch_snapshot() will timeout because no snapshot is ever generated
+        info!("Requesting full snapshot from Huginn (via atomic counter signal)...");
+        self.request_snapshot();
+
+        // Wait for snapshot (Huginn should fetch and publish within ~500ms)
         let snapshot = self.fetch_snapshot(Some(timeout))
             .ok_or_else(|| anyhow::anyhow!(
-                "Snapshot timeout after {:.1}s. Huginn may not have published a snapshot.",
+                "Snapshot timeout after {:.1}s. Verify: (1) Huginn snapshot polling task is running, \
+                 (2) No rate limiting (max 1 request per 10s), (3) Huginn can reach Lighter exchange",
                 timeout.as_secs_f64()
             ))?;
 
         info!(
-            "✅ Snapshot initialization complete (seq={}, bid={}, ask={}, took {:.3}s)",
+            "✅ Snapshot received: seq={}, bid={}, ask={}, took {:.3}s",
             snapshot.sequence,
             types::conversions::u64_to_f64(snapshot.best_bid_price),
             types::conversions::u64_to_f64(snapshot.best_ask_price),
@@ -734,9 +837,15 @@ impl MarketFeed {
 
         if current_epoch != self.last_epoch {
             warn!(
-                "🔄 Huginn restart detected! Epoch changed: {} → {} (market_id={})",
+                "🔄 Huginn restart detected! Epoch changed: {} → {} (market_id={}) - triggering snapshot recovery",
                 self.last_epoch, current_epoch, self.market_id
             );
+
+            // Automatically trigger snapshot recovery on epoch change
+            info!("AUTO-RECOVERY: Requesting snapshot due to epoch change");
+            self.request_snapshot();
+            self.recovery_in_progress = true;
+
             self.last_epoch = current_epoch;
             self.stats.epoch_changes += 1;
             self.epoch_check_counter = 0;

@@ -157,5 +157,10 @@ testing = []                # Enable test-only code paths
 conservative = ["max-position-half", "max-order-tenth", "max-daily-loss-100"]
 aggressive = ["max-position-five", "max-order-one", "max-daily-loss-10000"]
 
+# Logging features (compile-time conditional logging)
+debug-logging = []          # Enable hot_debug! macros (development only)
+info-logging = []           # Enable cold_info! macros (testing/staging)
+production = []             # Production build (only warn/error, no debug/info)
+
 # Performance features
 metrics = ["tracing/release_max_level_off"]  # Disable tracing in release
