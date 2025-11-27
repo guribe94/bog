@@ -426,7 +426,10 @@ mod tests {
         let rule = HuginnConnectionRule::new(Duration::from_secs(5), AlertSeverity::Critical);
         let context = create_test_context();
 
-        // Connection is up (default) - no alert
+        // Set connection as up first (default may be 0)
+        context.metrics.system().huginn_connected.set(1);
+
+        // Connection is up - no alert
         assert!(rule.evaluate(&context).is_none());
 
         // Simulate connection loss

@@ -164,6 +164,13 @@ pub fn calculate_imbalance(
 ///
 /// # Performance
 /// Target: <3ns
+///
+/// # Example
+/// ```ignore
+/// // Orderbook with 5 bid levels: [2.0, 1.5, 1.0, 0.5, 0.5] BTC
+/// let bid_liquidity = calculate_liquidity(&snapshot, true, 5);
+/// // Returns: 5_500_000_000 (5.5 BTC in fixed-point)
+/// ```
 #[inline(always)]
 pub fn calculate_liquidity(
     snapshot: &MarketSnapshot,
@@ -199,8 +206,29 @@ pub fn calculate_liquidity(
 
 /// Calculate mid price from best bid/ask
 ///
+/// Simple average of best bid and ask prices. Used as reference price for
+/// market making strategies and spread calculations.
+///
+/// # Formula
+/// ```text
+/// mid = (best_bid + best_ask) / 2
+/// ```
+///
+/// # Arguments
+/// * `snapshot` - Market data with best bid/ask prices
+///
 /// # Returns
 /// Mid price in u64 fixed-point (9 decimals)
+///
+/// # Performance
+/// Target: <2ns (single addition and division)
+///
+/// # Example
+/// ```ignore
+/// // Best bid: $50,000, Best ask: $50,010
+/// let mid = mid_price(&snapshot);
+/// // Returns: 50_005_000_000_000 ($50,005 in fixed-point)
+/// ```
 #[inline(always)]
 pub fn mid_price(snapshot: &MarketSnapshot) -> u64 {
     (snapshot.best_bid_price + snapshot.best_ask_price) / 2
@@ -208,8 +236,31 @@ pub fn mid_price(snapshot: &MarketSnapshot) -> u64 {
 
 /// Calculate spread in basis points
 ///
+/// Measures the bid-ask spread as a percentage of the bid price.
+/// Used to assess market tightness and trading costs.
+///
+/// # Formula
+/// ```text
+/// spread_bps = (ask - bid) / bid * 10,000
+/// ```
+///
+/// # Arguments
+/// * `snapshot` - Market data with best bid/ask prices
+///
 /// # Returns
 /// Spread as u32 in basis points (1 bp = 0.01%)
+/// Returns 0 if bid price is 0 (invalid market)
+///
+/// # Performance
+/// Target: <5ns (arithmetic operations only)
+///
+/// # Example
+/// ```ignore
+/// // Best bid: $50,000, Best ask: $50,010
+/// let spread = spread_bps(&snapshot);
+/// // Spread: $10 / $50,000 * 10,000 = 2 bps
+/// // Returns: 2
+/// ```
 #[inline(always)]
 pub fn spread_bps(snapshot: &MarketSnapshot) -> u32 {
     spread_bps_from_prices(snapshot.best_bid_price, snapshot.best_ask_price)
@@ -218,6 +269,32 @@ pub fn spread_bps(snapshot: &MarketSnapshot) -> u32 {
 /// Calculate spread in basis points from raw prices
 ///
 /// Helper function for L2OrderBook that works on raw u64 prices.
+/// Same formula as `spread_bps()` but accepts prices directly.
+///
+/// # Formula
+/// ```text
+/// spread_bps = (ask_price - bid_price) / bid_price * 10,000
+/// ```
+///
+/// # Arguments
+/// * `bid_price` - Bid price in u64 fixed-point (9 decimals)
+/// * `ask_price` - Ask price in u64 fixed-point (9 decimals)
+///
+/// # Returns
+/// Spread as u32 in basis points (1 bp = 0.01%)
+/// Returns 0 if bid_price is 0
+///
+/// # Safety
+/// Uses saturating_sub to prevent underflow if ask < bid (crossed market)
+///
+/// # Example
+/// ```ignore
+/// let spread = spread_bps_from_prices(
+///     50_000_000_000_000,  // $50,000 bid
+///     50_010_000_000_000,  // $50,010 ask
+/// );
+/// // Returns: 2 (2 basis points)
+/// ```
 #[inline(always)]
 pub fn spread_bps_from_prices(bid_price: u64, ask_price: u64) -> u32 {
     if bid_price == 0 {
@@ -231,7 +308,31 @@ pub fn spread_bps_from_prices(bid_price: u64, ask_price: u64) -> u32 {
 
 /// Calculate VWAP from raw price and size arrays
 ///
-/// Helper function for L2OrderBook that works on raw arrays.
+/// Helper function for L2OrderBook that works on raw arrays instead of MarketSnapshot.
+/// Identical algorithm to `calculate_vwap()` but accepts slices directly.
+///
+/// # Arguments
+/// * `prices` - Price levels in u64 fixed-point (9 decimals)
+/// * `sizes` - Size at each price level in u64 fixed-point (9 decimals)
+/// * `max_levels` - How many levels to include
+///
+/// # Returns
+/// * `Some(vwap_price)` - Weighted average price in u64 fixed-point
+/// * `None` - If no liquidity (all sizes are 0)
+///
+/// # Fixed-Point Arithmetic
+/// - prices and sizes: 9 decimal places
+/// - price * size: 18 decimal places (intermediate)
+/// - VWAP result: 9 decimal places (18 - 9 = 9)
+///
+/// # Example
+/// ```ignore
+/// let prices = [50_000_000_000_000, 49_990_000_000_000, 49_980_000_000_000];
+/// let sizes = [1_000_000_000, 2_000_000_000, 3_000_000_000];
+/// let vwap = calculate_vwap_u64(&prices, &sizes, 3);
+/// // Weighted average of $50,000 (1 BTC), $49,990 (2 BTC), $49,980 (3 BTC)
+/// // Returns: Some(49_985_000_000_000) ≈ $49,985
+/// ```
 #[inline]
 pub fn calculate_vwap_u64(
     prices: &[u64],
@@ -263,8 +364,40 @@ pub fn calculate_vwap_u64(
 
 /// Calculate orderbook imbalance from raw arrays (returns i64 -100 to +100)
 ///
-/// Helper function for L2OrderBook that works on raw arrays.
-/// Returns imbalance scaled to -100 to +100 range instead of -1.0 to +1.0.
+/// Helper function for L2OrderBook that works on raw arrays instead of MarketSnapshot.
+/// Returns imbalance scaled to -100 to +100 range instead of -1.0 to +1.0 for convenience.
+///
+/// # Formula
+/// ```text
+/// imbalance = (bid_volume - ask_volume) / (bid_volume + ask_volume) * 100
+/// ```
+///
+/// # Arguments
+/// * `bid_prices` - Bid price levels (unused, kept for symmetry)
+/// * `bid_sizes` - Bid sizes in u64 fixed-point (9 decimals)
+/// * `ask_prices` - Ask price levels (unused, kept for symmetry)
+/// * `ask_sizes` - Ask sizes in u64 fixed-point (9 decimals)
+/// * `max_levels` - How many levels to sum
+///
+/// # Returns
+/// Imbalance ratio as i64 in range [-100, +100]:
+/// * `+100` = 100% bid pressure (no asks)
+/// * `0` = Balanced market
+/// * `-100` = 100% ask pressure (no bids)
+///
+/// # Difference from `calculate_imbalance()`
+/// - Accepts raw arrays instead of MarketSnapshot
+/// - Returns -100 to +100 instead of -1.0 to +1.0 (scaled by 100, not 1e9)
+/// - More convenient for L2OrderBook integer-based calculations
+///
+/// # Example
+/// ```ignore
+/// let bid_sizes = [2_000_000_000, 3_000_000_000, 1_000_000_000]; // 6.0 BTC total
+/// let ask_sizes = [1_000_000_000, 1_000_000_000, 0];            // 2.0 BTC total
+/// let imbalance = calculate_imbalance_i64(&[], &bid_sizes, &[], &ask_sizes, 3);
+/// // (6.0 - 2.0) / (6.0 + 2.0) * 100 = 4.0 / 8.0 * 100 = 50
+/// // Returns: 50 (50% bid pressure)
+/// ```
 #[inline]
 pub fn calculate_imbalance_i64(
     bid_prices: &[u64],

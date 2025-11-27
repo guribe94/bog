@@ -47,24 +47,24 @@
 //! ### Design Principles
 //!
 //! 1. **Zero-Sized Types (ZSTs)** - Strategies contain no data
-//!    ```rust
+//!    ```rust,ignore
 //!    assert_eq!(std::mem::size_of::<SimpleSpread>(), 0);
 //!    ```
 //!
 //! 2. **Compile-Time Parameters** - All configuration via Cargo features
-//!    ```rust
+//!    ```rust,ignore
 //!    const SPREAD: u64 = 10_000_000;  // 10bps, set at compile time
 //!    ```
 //!
 //! 3. **u64 Fixed-Point Arithmetic** - No `Decimal` heap allocations
-//!    ```rust
+//!    ```rust,ignore
 //!    let mid_price: u64 = 50_000_000_000_000;  // $50k in 9 decimals
 //!    ```
 //!
 //! 4. **Aggressive Inlining** - Full monomorphization by LLVM
-//!    ```rust
+//!    ```rust,ignore
 //!    #[inline(always)]
-//!    fn calculate(&mut self, snapshot: &MarketSnapshot) -> Signal
+//!    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Signal
 //!    ```
 //!
 //! ## Usage Example
@@ -78,8 +78,10 @@
 //!
 //! // Calculate signal from market data
 //! # use bog_core::data::MarketSnapshot;
+//! # use bog_core::core::Position;
 //! # let snapshot = unsafe { std::mem::zeroed() };
-//! let signal = strategy.calculate(&snapshot);
+//! # let position = Position::new();
+//! let signal = strategy.calculate(&snapshot, &position);
 //!
 //! // Signal is stack-allocated, 64 bytes (one cache line)
 //! assert_eq!(std::mem::size_of_val(&signal), 64);

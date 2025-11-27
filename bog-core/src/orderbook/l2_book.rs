@@ -514,7 +514,11 @@ mod tests {
     #[test]
     fn test_all_levels_synced() {
         let mut book = L2OrderBook::new(1);
-        let snapshot = create_test_snapshot();
+        let mut snapshot = create_test_snapshot();
+
+        // Must use full snapshot for all levels to be synced
+        // (incremental only syncs level 0)
+        set_full_snapshot(&mut snapshot, true);
 
         book.sync_from_snapshot(&snapshot);
 
@@ -568,7 +572,8 @@ mod tests {
     #[test]
     fn test_vwap_calculation() {
         let mut book = L2OrderBook::new(1);
-        let snapshot = create_test_snapshot();
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true); // Need full snapshot for depth levels
         book.sync_from_snapshot(&snapshot);
 
         // Calculate bid VWAP for 3 levels
@@ -592,7 +597,8 @@ mod tests {
     #[test]
     fn test_total_liquidity() {
         let mut book = L2OrderBook::new(1);
-        let snapshot = create_test_snapshot();
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true); // Need full snapshot for depth levels
         book.sync_from_snapshot(&snapshot);
 
         let bid_liq = book.total_liquidity(true, 10);
@@ -663,7 +669,8 @@ mod tests {
     #[test]
     fn test_bid_and_ask_levels() {
         let mut book = L2OrderBook::new(1);
-        let snapshot = create_test_snapshot();
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true); // Need full snapshot for depth levels
         book.sync_from_snapshot(&snapshot);
 
         let bid_levels = book.bid_levels();
@@ -685,7 +692,8 @@ mod tests {
     #[test]
     fn test_depth_counting() {
         let mut book = L2OrderBook::new(1);
-        let snapshot = create_test_snapshot();
+        let mut snapshot = create_test_snapshot();
+        set_full_snapshot(&mut snapshot, true); // Need full snapshot for depth levels
         book.sync_from_snapshot(&snapshot);
 
         assert_eq!(book.bid_depth(), 10);

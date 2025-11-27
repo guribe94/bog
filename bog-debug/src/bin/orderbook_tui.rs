@@ -41,7 +41,6 @@ use ratatui::{
 use rust_decimal::Decimal;
 use std::io;
 use std::time::{Duration, Instant};
-use tracing::info;
 
 fn main() -> Result<()> {
     // Setup terminal
@@ -370,7 +369,7 @@ fn render_metrics(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(paragraph, area);
 }
 
-fn render_footer(f: &mut Frame, area: Rect, app: &App) {
+fn render_footer(f: &mut Frame, area: Rect, _app: &App) {
     let controls = Line::from(vec![
         Span::styled("Controls: ", Style::default().fg(Color::Cyan)),
         Span::raw("[Q]uit "),

@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
-use bog_core::data::MarketSnapshot;
+use bog_core::data::{MarketSnapshot, SnapshotBuilder};
 use bog_core::engine::{Engine, SimulatedExecutor};
 use bog_core::resilience::install_panic_handler;
 use bog_strategies::SimpleSpread;
@@ -87,23 +87,15 @@ fn create_test_feed(market_id: u64) -> impl FnMut() -> Result<(Option<MarketSnap
         // Data is always fresh in simulated feed
         let data_fresh = true;
 
-        Ok((Some(MarketSnapshot {
-            market_id,
-            sequence: tick_count,
-            exchange_timestamp_ns: current_ns,
-            local_recv_ns: current_ns,
-            local_publish_ns: current_ns,
-            best_bid_price: base_price + price_offset,
-            best_bid_size: 1_000_000_000, // 1.0 BTC
-            best_ask_price: base_price + price_offset + spread,
-            best_ask_size: 1_000_000_000,
-            bid_prices: [0; 10],
-            bid_sizes: [0; 10],
-            ask_prices: [0; 10],
-            ask_sizes: [0; 10],
-            snapshot_flags: 0,
-            dex_type: 1,
-            _padding: [0; 110],
-        }), data_fresh))
+        let snapshot = SnapshotBuilder::new()
+            .market_id(market_id)
+            .sequence(tick_count)
+            .timestamp(current_ns)
+            .best_bid(base_price + price_offset, 1_000_000_000)
+            .best_ask(base_price + price_offset + spread, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        Ok((Some(snapshot), data_fresh))
     }
 }

@@ -489,7 +489,8 @@ mod tests {
     #[test]
     fn test_rate_limiting() {
         let mut config = AlertConfig::default();
-        config.rate_limit_per_minute = 2;
+        // HighLatency has Warning severity, so we need to set that limit
+        config.rate_limit_by_severity.insert(AlertSeverity::Warning, 2);
         let mut manager = AlertManager::new(config);
 
         // First two alerts should succeed

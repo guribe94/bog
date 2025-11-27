@@ -191,9 +191,9 @@ impl PoolStats {
         }
     }
 
-    /// Check if pool is near exhaustion (>90% utilized)
+    /// Check if pool is near exhaustion (>=90% utilized)
     pub fn is_near_exhaustion(&self) -> bool {
-        self.utilization > 0.9
+        self.utilization >= 0.9
     }
 }
 

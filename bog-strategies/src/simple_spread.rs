@@ -283,7 +283,7 @@ impl SimpleSpread {
     /// High volatility → wider spreads (up to 2x)
     /// Low volatility → tighter spreads (down to 0.5x)
     #[inline(always)]
-    fn calculate_volatility_multiplier(mid_price: u64) -> u64 {
+    fn calculate_volatility_multiplier(_mid_price: u64) -> u64 {
         // Use a simple price-based volatility proxy for now
         // In production, would use actual historical volatility
 
@@ -656,10 +656,60 @@ impl Strategy for SimpleSpread {
 
         // === INVENTORY-BASED SKEW ADJUSTMENT ===
         //
-        // Implement Avellaneda-Stoikov style inventory management:
-        // - If long: widen ask spread to encourage selling, tighten bid to discourage buying
-        // - If short: widen bid spread to encourage buying, tighten ask to discourage selling
-        // - The adjustment is proportional to inventory level
+        // ## RATIONALE: Why Adjust BOTH Bid and Ask
+        //
+        // When carrying inventory risk, a market maker must balance two objectives:
+        // 1. **Incentive**: Make quotes attractive for trades that REDUCE inventory
+        // 2. **Disincentive**: Make quotes less attractive for trades that INCREASE inventory
+        //
+        // ### Avellaneda-Stoikov Model
+        //
+        // Based on the seminal paper "High-frequency trading in a limit order book" (2008),
+        // optimal market making quotes should be:
+        //
+        //   bid = mid - spread/2 - inventory_penalty
+        //   ask = mid + spread/2 + inventory_penalty
+        //
+        // Where `inventory_penalty` shifts quotes away from mid when holding inventory.
+        //
+        // ### Why Both Sides?
+        //
+        // **When LONG** (holding +0.5 BTC):
+        // - Primary goal: SELL to reduce inventory risk
+        // - **Lower ask** (incentive): Make selling TO us more attractive → buyers pay less
+        // - **Lower bid** (disincentive): Make buying FROM us less attractive → sellers get less
+        // - Net effect: Shift entire quote DOWN to favor sells over buys
+        //
+        // **When SHORT** (holding -0.5 BTC):
+        // - Primary goal: BUY to cover short position
+        // - **Raise bid** (incentive): Make selling TO us more attractive → sellers get more
+        // - **Raise ask** (disincentive): Make buying FROM us less attractive → buyers pay more
+        // - Net effect: Shift entire quote UP to favor buys over sells
+        //
+        // ### Asymmetric Adjustment (Disincentive / 2)
+        //
+        // The disincentive side is adjusted by half (`/ 2`) because:
+        // 1. **Primary focus**: The incentive side does most of the work
+        // 2. **Market depth**: Too-wide spread on disincentive side wastes liquidity provision
+        // 3. **Fill probability**: Half adjustment maintains reasonable fill rate while still discouraging
+        //
+        // ### Example with Numbers
+        //
+        // Base quotes: bid=$50,000, ask=$50,010 (10 bps spread)
+        // Position: +0.5 BTC (50% of max position)
+        // Skew: 5 bps adjustment (50% * 10 bps max)
+        //
+        // Adjustment calculation:
+        // - ask_adjustment = $50,010 * 0.0005 = $25.00
+        // - bid_adjustment = $50,000 * 0.0005 = $25.00
+        //
+        // New quotes (long position):
+        // - ask = $50,010 - $25.00 = $49,985 (INCENTIVE: -25 bps from mid)
+        // - bid = $50,000 - $12.50 = $49,987.50 (DISINCENTIVE: -12.5 bps from mid)
+        // - New spread: $2.50 (0.5 bps) - MUCH tighter, favoring sells
+        //
+        // This creates strong economic incentive for market takers to sell TO us,
+        // reducing our long inventory while still providing liquidity on both sides.
         {
             // Get current position quantity (fixed-point with 9 decimals)
             let current_qty = position.get_quantity();
@@ -683,22 +733,28 @@ impl Strategy for SimpleSpread {
             let skew_bps = (inventory_ratio.abs() * INVENTORY_IMPACT_BPS as f64) as u64;
 
             // Apply asymmetric adjustment based on position
+            // Market making goal: reduce inventory by making our quotes more attractive
+            // for the direction that reduces position
             if inventory_ratio > 0.01 { // Long position (threshold to avoid noise)
-                // Long: make ask more expensive (widen), make bid less attractive (tighten)
+                // Long: want to SELL to reduce inventory
+                // - Lower ask (more attractive to buyers) -> encourages buying from us
+                // - Lower bid (less attractive to sellers) -> discourages selling to us
                 let ask_adjustment = (our_ask * skew_bps) / 10_000;
                 let bid_adjustment = (our_bid * skew_bps) / 10_000;
 
-                // Use checked arithmetic with fallback to original prices on overflow
-                our_ask = our_ask.checked_add(ask_adjustment).unwrap_or(our_ask); // Push ask higher
-                our_bid = our_bid.checked_add(bid_adjustment / 2).unwrap_or(our_bid); // Slightly raise bid
+                // Shift quotes DOWN to encourage selling
+                our_ask = our_ask.checked_sub(ask_adjustment).unwrap_or(our_ask);
+                our_bid = our_bid.checked_sub(bid_adjustment / 2).unwrap_or(our_bid);
             } else if inventory_ratio < -0.01 { // Short position
-                // Short: make bid more expensive (widen), make ask less attractive (tighten)
+                // Short: want to BUY to reduce inventory
+                // - Raise bid (more attractive to sellers) -> encourages selling to us
+                // - Raise ask (less attractive to buyers) -> discourages buying from us
                 let bid_adjustment = (our_bid * skew_bps) / 10_000;
                 let ask_adjustment = (our_ask * skew_bps) / 10_000;
 
-                // Use checked arithmetic with fallback to original prices on underflow
-                our_bid = our_bid.checked_sub(bid_adjustment).unwrap_or(our_bid); // Push bid lower
-                our_ask = our_ask.checked_sub(ask_adjustment / 2).unwrap_or(our_ask); // Slightly lower ask
+                // Shift quotes UP to encourage buying
+                our_bid = our_bid.checked_add(bid_adjustment).unwrap_or(our_bid);
+                our_ask = our_ask.checked_add(ask_adjustment / 2).unwrap_or(our_ask);
             }
             // If near-neutral position (abs(ratio) <= 0.01), no adjustment needed
         }
@@ -918,7 +974,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let position = create_test_position();
@@ -953,7 +1009,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let position = create_test_position();
@@ -1017,7 +1073,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         // This should be <100ns (measure with criterion in benchmarks)
@@ -1049,7 +1105,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         // Strategy should cancel all orders during flash crash
@@ -1066,15 +1122,16 @@ mod tests {
         let mut strategy = SimpleSpread;
 
         // Test 1: Price too low (< $1)
+        // Use a tight spread (< 100 bps) so we test price bounds, not spread volatility
         let low_price_snapshot = MarketSnapshot {
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
             local_recv_ns: 0,
             local_publish_ns: 0,
-            best_bid_price: 500_000_000,  // $0.50
+            best_bid_price: 500_000_000,   // $0.50
             best_bid_size: 1_000_000_000,
-            best_ask_price: 510_000_000,  // $0.51
+            best_ask_price: 500_500_000,   // $0.5005 (10 bps spread)
             best_ask_size: 1_000_000_000,
             bid_prices: [0; 10],
             bid_sizes: [0; 10],
@@ -1082,13 +1139,14 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let position = create_test_position();
         assert!(strategy.calculate(&low_price_snapshot, &position).is_none());
 
         // Test 2: Price too high (> $1M)
+        // Spread here is ~67 bps which is under the 100 bps threshold
         let high_price_snapshot = MarketSnapshot {
             market_id: 1,
             sequence: 1,
@@ -1097,7 +1155,7 @@ mod tests {
             local_publish_ns: 0,
             best_bid_price: 1_500_000_000_000_000,  // $1.5M
             best_bid_size: 1_000_000_000,
-            best_ask_price: 1_510_000_000_000_000,  // $1.51M
+            best_ask_price: 1_510_000_000_000_000,  // $1.51M (~67 bps spread)
             best_ask_size: 1_000_000_000,
             bid_prices: [0; 10],
             bid_sizes: [0; 10],
@@ -1105,7 +1163,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let position = create_test_position();
@@ -1133,7 +1191,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         // Strategy should cancel all orders in thin markets
@@ -1166,7 +1224,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         // Test with zero position
@@ -1184,9 +1242,13 @@ mod tests {
         ).unwrap();
         let long_signal = strategy.calculate(&snapshot, &long_position).unwrap();
 
-        // With long position, ask should be pushed higher (to encourage selling)
-        assert!(long_signal.ask_price > zero_signal.ask_price,
-                "Long position should increase ask price to encourage selling");
+        // With long position, quotes shift DOWN to encourage selling (reduce long)
+        // - Ask LOWER (more attractive to buyers)
+        // - Bid LOWER (less attractive to sellers)
+        assert!(long_signal.ask_price < zero_signal.ask_price,
+                "Long position should LOWER ask price to attract buyers");
+        assert!(long_signal.bid_price < zero_signal.bid_price,
+                "Long position should LOWER bid price to deter sellers");
 
         // Test with short position
         let mut short_position = Position::new();
@@ -1199,9 +1261,13 @@ mod tests {
         ).unwrap();
         let short_signal = strategy.calculate(&snapshot, &short_position).unwrap();
 
-        // With short position, bid should be pushed lower (to encourage buying)
-        assert!(short_signal.bid_price < zero_signal.bid_price,
-                "Short position should decrease bid price to encourage buying");
+        // With short position, quotes shift UP to encourage buying (reduce short)
+        // - Bid HIGHER (more attractive to sellers)
+        // - Ask HIGHER (less attractive to buyers)
+        assert!(short_signal.bid_price > zero_signal.bid_price,
+                "Short position should RAISE bid price to attract sellers");
+        assert!(short_signal.ask_price > zero_signal.ask_price,
+                "Short position should RAISE ask price to deter buyers");
     }
 
     #[test]
@@ -1227,7 +1293,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let signal = strategy.calculate(&wide_spread_snapshot, &position);
@@ -1253,7 +1319,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let signal = strategy.calculate(&low_liquidity_snapshot, &position);
@@ -1279,7 +1345,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let signal = strategy.calculate(&normal_snapshot, &position);
@@ -1311,7 +1377,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 110],
+            _padding: [0; 54],
         };
 
         let position = create_test_position();

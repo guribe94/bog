@@ -216,24 +216,116 @@ impl Position {
     }
 
     /// Get current quantity (relaxed ordering for reads in hot path)
+    ///
+    /// Returns the current position quantity in fixed-point (9 decimals).
+    /// - Positive values indicate long positions
+    /// - Negative values indicate short positions
+    /// - Zero indicates flat (no position)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Position;
+    /// let pos = Position::new();
+    ///
+    /// // Initially flat
+    /// assert_eq!(pos.get_quantity(), 0);
+    ///
+    /// // After going long 1.5 BTC
+    /// pos.update_quantity(1_500_000_000); // 1.5 BTC in fixed-point
+    /// assert_eq!(pos.get_quantity(), 1_500_000_000);
+    ///
+    /// // After selling 2.0 BTC (now short 0.5 BTC)
+    /// pos.update_quantity(-2_000_000_000);
+    /// assert_eq!(pos.get_quantity(), -500_000_000);
+    /// ```
     #[inline(always)]
     pub fn get_quantity(&self) -> i64 {
         self.quantity.load(Ordering::Relaxed)
     }
 
     /// Update quantity (acquire-release semantics)
+    ///
+    /// Atomically adds `delta` to the current position quantity.
+    /// Returns the new quantity after the update.
+    ///
+    /// # Arguments
+    ///
+    /// * `delta` - Change in quantity (positive for buy, negative for sell)
+    ///
+    /// # Returns
+    ///
+    /// The new quantity after applying the delta
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Position;
+    /// let pos = Position::new();
+    ///
+    /// // Buy 1.0 BTC
+    /// let new_qty = pos.update_quantity(1_000_000_000);
+    /// assert_eq!(new_qty, 1_000_000_000);
+    ///
+    /// // Buy another 0.5 BTC (now long 1.5 BTC)
+    /// let new_qty = pos.update_quantity(500_000_000);
+    /// assert_eq!(new_qty, 1_500_000_000);
+    ///
+    /// // Sell 2.0 BTC (now short 0.5 BTC)
+    /// let new_qty = pos.update_quantity(-2_000_000_000);
+    /// assert_eq!(new_qty, -500_000_000);
+    /// ```
     #[inline(always)]
     pub fn update_quantity(&self, delta: i64) -> i64 {
         self.quantity.fetch_add(delta, Ordering::AcqRel) + delta
     }
 
     /// Get realized PnL
+    ///
+    /// Returns the cumulative realized profit/loss in fixed-point (9 decimals).
+    /// Only includes PnL from closed positions.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Position;
+    /// let pos = Position::new();
+    ///
+    /// // Initially zero
+    /// assert_eq!(pos.get_realized_pnl(), 0);
+    ///
+    /// // After profitable trade: $100 profit
+    /// pos.update_realized_pnl(100_000_000_000); // $100 in fixed-point
+    /// assert_eq!(pos.get_realized_pnl(), 100_000_000_000);
+    ///
+    /// // After losing trade: -$50 loss
+    /// pos.update_realized_pnl(-50_000_000_000);
+    /// assert_eq!(pos.get_realized_pnl(), 50_000_000_000); // Net $50 profit
+    /// ```
     #[inline(always)]
     pub fn get_realized_pnl(&self) -> i64 {
         self.realized_pnl.load(Ordering::Relaxed)
     }
 
     /// Update realized PnL
+    ///
+    /// Atomically adds `delta` to the realized PnL.
+    /// Called when closing positions to track cumulative profit/loss.
+    ///
+    /// # Arguments
+    ///
+    /// * `delta` - PnL change in fixed-point (positive for profit, negative for loss)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Position;
+    /// let pos = Position::new();
+    ///
+    /// // Close profitable position: made $250
+    /// pos.update_realized_pnl(250_000_000_000);
+    /// assert_eq!(pos.get_realized_pnl(), 250_000_000_000);
+    /// ```
     #[inline(always)]
     pub fn update_realized_pnl(&self, delta: i64) {
         self.realized_pnl.fetch_add(delta, Ordering::AcqRel);

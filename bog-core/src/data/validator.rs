@@ -12,8 +12,6 @@ pub enum ValidationError {
     ZeroSequence,
     ZeroBidPrice,
     ZeroAskPrice,
-    ZeroBidSize,
-    ZeroAskSize,
     OrderbookCrossed { bid: u64, ask: u64 },
     OrderbookLocked { price: u64 },
     SpreadTooWide { spread_bps: u64 },
@@ -32,8 +30,6 @@ impl std::fmt::Display for ValidationError {
             ValidationError::ZeroSequence => write!(f, "Sequence number is zero"),
             ValidationError::ZeroBidPrice => write!(f, "Bid price is zero"),
             ValidationError::ZeroAskPrice => write!(f, "Ask price is zero"),
-            ValidationError::ZeroBidSize => write!(f, "Bid size is zero"),
-            ValidationError::ZeroAskSize => write!(f, "Ask size is zero"),
             ValidationError::OrderbookCrossed { bid, ask } => {
                 write!(f, "Orderbook crossed: bid={} >= ask={}", bid, ask)
             }
@@ -237,14 +233,6 @@ impl SnapshotValidator {
 
         if snapshot.best_ask_price == 0 {
             return Err(ValidationError::ZeroAskPrice);
-        }
-
-        if snapshot.best_bid_size == 0 {
-            return Err(ValidationError::ZeroBidSize);
-        }
-
-        if snapshot.best_ask_size == 0 {
-            return Err(ValidationError::ZeroAskSize);
         }
 
         Ok(())
@@ -568,13 +556,13 @@ mod tests {
     #[test]
     fn test_validator_creation() {
         let validator = SnapshotValidator::new();
-        assert_eq!(validator.max_age_ns, 5_000_000_000);
+        assert_eq!(validator.config.max_age_ns, 5_000_000_000);
     }
 
     #[test]
     fn test_custom_max_age() {
         let validator = SnapshotValidator::with_max_age(10_000_000_000);
-        assert_eq!(validator.max_age_ns, 10_000_000_000);
+        assert_eq!(validator.config.max_age_ns, 10_000_000_000);
     }
 
     #[test]

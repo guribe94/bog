@@ -1,3 +1,126 @@
+//! Order Execution System
+//!
+//! Provides execution backends for order placement and fill simulation/tracking.
+//!
+//! ## Architecture
+//!
+//! All executors implement the [`Executor`] trait and handle:
+//! - Order placement and cancellation
+//! - Fill generation and tracking
+//! - Order state management
+//! - Metrics collection
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────────────┐
+//! │              Executor Trait                          │
+//! ├──────────────────────────────────────────────────────┤
+//! │  place_order()  cancel_order()  get_fills()          │
+//! └──────────────────────────────────────────────────────┘
+//!            │                  │                  │
+//!            v                  v                  v
+//!   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+//!   │  Simulated   │  │    Lighter   │  │  Production  │
+//!   │   Executor   │  │   Executor   │  │   Executor   │
+//!   └──────────────┘  └──────────────┘  └──────────────┘
+//!    Instant fills     Real DEX API     Full production
+//!    Paper trading     Live trading     w/ journaling
+//! ```
+//!
+//! ## Available Executors
+//!
+//! ### [`SimulatedExecutor`] - Paper Trading
+//!
+//! Instant fill simulation with realistic market dynamics:
+//! - **Zero latency** - Fills generated immediately
+//! - **Fee accounting** - 2 bps taker fee simulation
+//! - **Object pools** - Lock-free fill queue (1024 capacity)
+//! - **Performance**: ~50ns per execution
+//!
+//! **Use case**: Backtesting, strategy development, paper trading
+//!
+//! ### [`LighterExecutor`] - Live Trading (Stub)
+//!
+//! Real order placement via Lighter DEX API:
+//! - **REST API** - Order placement and cancellation
+//! - **WebSocket** - Fill updates
+//! - **Async execution** - Non-blocking order submission
+//!
+//! **Status**: 🚧 Stub implementation
+//!
+//! ### [`ProductionExecutor`] - Full Production (Legacy)
+//!
+//! Complete production executor with:
+//! - **State journaling** - Crash recovery
+//! - **Metrics** - Prometheus integration
+//! - **Fill reconciliation** - Exchange vs local state
+//!
+//! **Status**: Legacy implementation, needs migration to new Engine API
+//!
+//! ## Object Pool Architecture
+//!
+//! Executors use lock-free object pools for zero-allocation execution:
+//!
+//! ```text
+//! Order Pool (256 entries)          Fill Pool (1024 entries)
+//! ┌─────────────────────┐          ┌─────────────────────┐
+//! │ [Order][Order]...   │          │ [Fill][Fill][Fill]  │
+//! │  ↑acquire  ↑release │          │   ↑push    ↑pop     │
+//! │  └─────────┘        │          │   crossbeam queue   │
+//! └─────────────────────┘          └─────────────────────┘
+//!   Lock-free ArrayQueue             Lock-free ArrayQueue
+//! ```
+//!
+//! See [`crate::perf::pools`] for pool implementation details.
+//!
+//! ## Usage Example
+//!
+//! ```rust
+//! use bog_core::execution::{SimulatedExecutor, RealisticFillConfig};
+//! use bog_core::engine::{Engine, Strategy};
+//! use bog_strategies::SimpleSpread;
+//!
+//! // Create executor with realistic fill simulation
+//! let config = RealisticFillConfig {
+//!     fill_probability: 0.8,  // 80% fill rate
+//!     latency_range_us: 50..150,  // 50-150μs latency
+//!     slippage_bps: 1,  // 1 bp slippage
+//!     partial_fill_rate: 0.2,  // 20% partial fills
+//! };
+//! let executor = SimulatedExecutor::new_with_config(config);
+//!
+//! // Create engine
+//! let strategy = SimpleSpread;
+//! let mut engine = Engine::new(strategy, executor);
+//!
+//! // Process market data
+//! # use bog_core::data::MarketSnapshot;
+//! # let snapshot: MarketSnapshot = unsafe { std::mem::zeroed() };
+//! engine.process_tick(&snapshot, true)?;
+//!
+//! // Get fills
+//! let fills = engine.get_fills();
+//! # Ok::<(), anyhow::Error>(())
+//! ```
+//!
+//! ## Types
+//!
+//! - [`Order`] - Order request with price, size, side, type
+//! - [`OrderId`] - Unique 128-bit order identifier
+//! - [`Fill`] - Executed trade with price, size, fees
+//! - [`Side`] - Buy or Sell
+//! - [`OrderStatus`] - Order lifecycle state
+//! - [`ExecutionMode`] - Simulated vs Live
+//!
+//! ## Performance Characteristics
+//!
+//! | Operation | Target | SimulatedExecutor |
+//! |-----------|--------|-------------------|
+//! | **execute()** | <200ns | **~50ns** ✅ |
+//! | **get_fills()** | <100ns | **~25ns** ✅ |
+//! | **Fill generation** | <150ns | **~75ns** ✅ |
+//!
+//! See [execution benchmarks](../../docs/benchmarks/) for details.
+
 pub mod types;
 pub mod simulated;
 pub mod lighter;
@@ -14,8 +137,22 @@ pub use order_bridge::{OrderStateWrapper, order_state_to_legacy, legacy_order_to
 
 use anyhow::Result;
 
-/// Executor trait - abstraction over order execution
-/// Implementations: SimulatedExecutor (paper/backtest), LighterExecutor (live)
+/// Executor trait - abstraction over order execution backends
+///
+/// All order execution backends implement this trait, enabling:
+/// - Strategy-independent order placement
+/// - Polymorphic execution (simulated, paper, live)
+/// - Consistent fill tracking interface
+///
+/// # Implementations
+///
+/// - [`SimulatedExecutor`] - Instant fills for backtesting
+/// - [`LighterExecutor`] - Live trading via Lighter DEX
+/// - [`ProductionExecutor`] - Full production with journaling
+///
+/// # Example
+///
+/// See module-level documentation for usage examples.
 pub trait Executor: Send {
     /// Place an order
     fn place_order(&mut self, order: Order) -> Result<OrderId>;

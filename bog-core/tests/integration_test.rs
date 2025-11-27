@@ -91,10 +91,10 @@ fn test_engine_market_change_detection() -> Result<()> {
     };
 
     // First tick - should process
-    engine.process_tick(&snapshot)?;
+    engine.process_tick(&snapshot, true)?;
 
     // Second tick with same prices - should skip strategy call
-    engine.process_tick(&snapshot)?;
+    engine.process_tick(&snapshot, true)?;
 
     // Both ticks counted, but market change detection optimizes second tick
     let stats = engine.stats();

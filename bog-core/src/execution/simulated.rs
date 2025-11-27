@@ -587,6 +587,7 @@ mod tests {
         let mut executor = SimulatedExecutor::new();
 
         // Buy order
+        // SimulatedExecutor adds 2 bps taker fee
         let buy_order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         executor.place_order(buy_order).unwrap();
 
@@ -594,7 +595,9 @@ mod tests {
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(0.1)); // Position increases
-        assert_eq!(fill.cash_flow(), dec!(-5000)); // Cash decreases
+        // Cash flow = -(notional + fee) = -(5000 + 1) = -5001
+        // Fee: 5000 * 0.0002 = 1.0
+        assert_eq!(fill.cash_flow(), dec!(-5001)); // Cash decreases (includes 2 bps fee)
 
         // Sell order
         let sell_order = Order::limit(Side::Sell, dec!(50100), dec!(0.1));
@@ -604,7 +607,9 @@ mod tests {
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(-0.1)); // Position decreases
-        assert_eq!(fill.cash_flow(), dec!(5010)); // Cash increases
+        // Cash flow = notional - fee = 5010 - 1.002 = 5008.998
+        // Fee: 5010 * 0.0002 = 1.002
+        assert_eq!(fill.cash_flow(), dec!(5008.998)); // Cash increases (net of 2 bps fee)
     }
 
     #[test]

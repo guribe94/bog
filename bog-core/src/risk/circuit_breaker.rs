@@ -82,7 +82,7 @@
 //! }
 //! ```
 
-use crate::data::{MarketSnapshot, SnapshotBuilder};
+use crate::data::MarketSnapshot;
 use crate::core::circuit_breaker_fsm::{BinaryNormal, BinaryBreakerState};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
@@ -266,9 +266,10 @@ impl CircuitBreaker {
 
     /// Check if data is stale
     fn check_staleness(&self, snapshot: &MarketSnapshot) -> Option<HaltReason> {
+        // Get current time, return None if system clock is broken (extremely unlikely)
         let now_ns = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .ok()?
             .as_nanos() as u64;
 
         if now_ns < snapshot.exchange_timestamp_ns {
@@ -390,6 +391,7 @@ impl Default for CircuitBreaker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::SnapshotBuilder;
 
     fn create_normal_snapshot() -> MarketSnapshot {
         let now = SystemTime::now()
@@ -581,7 +583,7 @@ mod tests {
         };
         assert!(format!("{}", reason2).contains("20%"));
 
-        let reason3 = HaltReason::Manual;
-        assert_eq!(format!("{}", reason3), "Manual halt");
+        let reason3 = HaltReason::Manual("Manual halt".to_string());
+        assert_eq!(format!("{}", reason3), "Manual halt: Manual halt");
     }
 }

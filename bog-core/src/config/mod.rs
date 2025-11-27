@@ -1,3 +1,157 @@
+//! Configuration System
+//!
+//! Bog uses a **two-tier configuration system** for maximum performance:
+//!
+//! 1. **Compile-time configuration** via Cargo features (primary)
+//! 2. **Runtime configuration** via TOML files (secondary, for non-hot-path settings)
+//!
+//! ## Philosophy
+//!
+//! **Hot path settings** (strategy parameters, risk limits) are **compile-time only**
+//! to enable full const propagation and inlining by the compiler. This eliminates
+//! runtime branches and achieves zero-overhead configuration.
+//!
+//! **Cold path settings** (logging, monitoring, API endpoints) use **runtime TOML**
+//! files for operational flexibility without performance impact.
+//!
+//! ## Compile-Time Configuration (Primary)
+//!
+//! ### Strategy Parameters
+//!
+//! ```toml
+//! [dependencies]
+//! bog-strategies = { features = [
+//!     "spread-10bps",      # 10 basis point spread
+//!     "size-medium",       # 0.1 BTC orders
+//!     "min-spread-1bps",   # Min market spread
+//! ] }
+//! ```
+//!
+//! **Performance impact**: Zero - values are constants, fully inlined
+//!
+//! ### Risk Limits
+//!
+//! ```toml
+//! bog-core = { features = [
+//!     "max-position-one",     # Max 1.0 BTC position
+//!     "max-order-half",       # Max 0.5 BTC per order
+//!     "max-daily-loss-1000",  # Max $1000 daily loss
+//! ] }
+//! ```
+//!
+//! **Performance impact**: Zero - limits are const, checks compile to constant comparisons
+//!
+//! ### Pre-configured Profiles
+//!
+//! Meta-features bundle related settings:
+//!
+//! ```toml
+//! # Conservative profile
+//! bog-core = { features = ["conservative"] }
+//! # Equivalent to: max-position-half, max-order-tenth, max-daily-loss-100
+//!
+//! # Aggressive profile
+//! bog-core = { features = ["aggressive"] }
+//! # Equivalent to: max-position-2btc, max-order-one, max-daily-loss-10000
+//!
+//! # Testing profile
+//! bog-core = { features = ["testing"] }
+//! # Equivalent to: max-position-tenth, max-order-centi, max-daily-loss-100
+//! ```
+//!
+//! See [bog-core/Cargo.toml](../Cargo.toml#L158-L162) for profile definitions.
+//!
+//! ## Runtime Configuration (Secondary)
+//!
+//! TOML files configure **non-performance-critical** settings:
+//!
+//! ### Example: config/default.toml
+//!
+//! ```toml
+//! [huginn]
+//! market_id = 1
+//! dex_type = 1  # Lighter DEX
+//!
+//! [execution]
+//! mode = "simulated"  # or "live"
+//!
+//! [metrics]
+//! log_level = "info"
+//! prometheus_port = 9090
+//!
+//! [monitoring]
+//! enable_prometheus = true
+//! metrics_addr = "127.0.0.1:9090"
+//!
+//! [alerts]
+//! console_output = true
+//! rate_limit_secs = 60
+//! ```
+//!
+//! ### Loading Configuration
+//!
+//! ```rust
+//! use bog_core::config::Config;
+//!
+//! // Load from file
+//! let config = Config::load("config/production.toml")?;
+//!
+//! // Or use default
+//! let config = Config::load_default()?;
+//!
+//! // Validation happens automatically
+//! # Ok::<(), anyhow::Error>(())
+//! ```
+//!
+//! ## Configuration Precedence
+//!
+//! Settings are applied in order (later overrides earlier):
+//!
+//! 1. **Compile-time defaults** - From Cargo feature flags
+//! 2. **TOML file** - From `config/*.toml`
+//! 3. **Environment variables** - `BOG_*` prefix (e.g., `BOG_METRICS__LOG_LEVEL=debug`)
+//!
+//! ### Environment Variable Examples
+//!
+//! ```bash
+//! # Override log level
+//! BOG_METRICS__LOG_LEVEL=debug ./bog-simple-spread-simulated
+//!
+//! # Override Prometheus port
+//! BOG_MONITORING__METRICS_ADDR=0.0.0.0:9091 ./bog-simple-spread-simulated
+//! ```
+//!
+//! Note: Double underscore (`__`) separates nested fields.
+//!
+//! ## Available Profiles
+//!
+//! See [`ConfigProfile`] for pre-built configuration sets:
+//!
+//! - **Development** - Low limits, verbose logging, simulated execution
+//! - **Testing** - Minimal limits for integration tests
+//! - **Production** - Production-ready settings with monitoring
+//!
+//! ## Constants Module
+//!
+//! See [`constants`] for compile-time configuration values based on active features:
+//!
+//! - `MAX_POSITION` - Position limit from features
+//! - `MAX_ORDER_SIZE` - Order size limit from features
+//! - `INVENTORY_IMPACT_BPS` - Inventory skew adjustment
+//! - `VOLATILITY_THRESHOLD_BPS` - Volatility filter
+//! - And more...
+//!
+//! ## Migration from Runtime to Compile-Time
+//!
+//! The codebase is migrating from TOML-based runtime configuration to
+//! compile-time feature flags for performance-critical settings.
+//!
+//! **Status**:
+//! - ✅ Strategy parameters → Compile-time (bog-strategies features)
+//! - ✅ Risk limits → Compile-time (bog-core features)
+//! - 🚧 Execution mode → Partial (still runtime in some places)
+//! - ✅ Metrics/monitoring → Runtime (appropriate for cold path)
+
 pub mod types;
 pub mod profiles;
 pub mod constants;

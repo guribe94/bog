@@ -34,8 +34,7 @@ pub struct CommonArgs {
 /// Initialize tracing/logging
 pub fn init_logging(level: &str) -> Result<()> {
     let filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(level))
-        .unwrap();
+        .or_else(|_| EnvFilter::try_new(level))?;
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_target(false))

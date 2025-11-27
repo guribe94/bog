@@ -18,7 +18,10 @@ pub struct MockHuginnFeed {
     successful_reads: u64,
     empty_reads: u64,
     sequence_gaps: u64,
-    last_sequence: u64,
+    /// Sequence counter for generating snapshots
+    next_sequence: u64,
+    /// Last sequence received by try_recv (for gap detection)
+    last_recv_sequence: u64,
     inject_sequence_gap: bool,
     inject_latency: Option<Duration>,
     start_time: Instant,
@@ -35,7 +38,8 @@ impl MockHuginnFeed {
             successful_reads: 0,
             empty_reads: 0,
             sequence_gaps: 0,
-            last_sequence: 0,
+            next_sequence: 0,
+            last_recv_sequence: 0,
             inject_sequence_gap: false,
             inject_latency: None,
             start_time: Instant::now(),
@@ -62,11 +66,11 @@ impl MockHuginnFeed {
         bid_size: u64,
         ask_size: u64,
     ) -> MarketSnapshot {
-        self.last_sequence += 1;
+        self.next_sequence += 1;
 
         // Inject sequence gap if configured
         if self.inject_sequence_gap {
-            self.last_sequence += 10;
+            self.next_sequence += 10;
             self.inject_sequence_gap = false;
         }
 
@@ -74,7 +78,7 @@ impl MockHuginnFeed {
 
         SnapshotBuilder::new()
             .market_id(self.market_id)
-            .sequence(self.last_sequence)
+            .sequence(self.next_sequence)
             .timestamp(timestamp)
             .best_bid(bid_price, bid_size)
             .best_ask(ask_price, ask_size)
@@ -129,18 +133,21 @@ impl MockHuginnFeed {
         }
 
         self.total_reads += 1;
+        self.stats.total_reads += 1;
 
         if let Some(snapshot) = self.snapshots.pop_front() {
             // Track sequence for gap detection
-            if self.last_sequence > 0 && snapshot.sequence > self.last_sequence + 1 {
+            if self.last_recv_sequence > 0 && snapshot.sequence > self.last_recv_sequence + 1 {
                 self.sequence_gaps += 1;
+                self.stats.sequence_gaps += 1;
             }
 
             self.successful_reads += 1;
-            self.last_sequence = snapshot.sequence;
+            self.last_recv_sequence = snapshot.sequence;
             Some(snapshot)
         } else {
             self.empty_reads += 1;
+            self.stats.empty_reads += 1;
             None
         }
     }

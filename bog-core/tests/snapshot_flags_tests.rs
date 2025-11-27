@@ -9,7 +9,7 @@
 
 use anyhow::Result;
 use bog_core::data::{MarketSnapshot, SnapshotBuilder, ORDERBOOK_DEPTH};
-use bog_core::orderbook::L2OrderBook;
+use bog_core::orderbook::l2_book::L2OrderBook;
 
 /// Helper to create a test snapshot with specific parameters
 ///

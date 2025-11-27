@@ -140,9 +140,19 @@ mod tests {
 
     #[test]
     fn test_mark_fresh_resets_state() {
-        let mut breaker = StaleDataBreaker::new(StaleDataConfig::default());
-        breaker.mark_empty_poll();
+        // Use custom config with low threshold so we can trigger non-fresh state
+        let config = StaleDataConfig {
+            max_age: Duration::from_secs(5),
+            max_empty_polls: 5,
+        };
+        let mut breaker = StaleDataBreaker::new(config);
+
+        // Mark enough empty polls to trigger offline state
+        for _ in 0..6 {
+            breaker.mark_empty_poll();
+        }
         assert!(!breaker.is_fresh());
+        assert!(breaker.is_offline());
 
         breaker.mark_fresh();
         assert!(breaker.is_fresh());

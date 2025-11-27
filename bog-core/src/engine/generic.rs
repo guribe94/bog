@@ -118,7 +118,7 @@ use crate::config::{
     MAX_POST_STALE_CHANGE_BPS
 };
 use crate::core::{Position, Signal};
-use crate::data::{MarketSnapshot, SnapshotBuilder};
+use crate::data::MarketSnapshot;
 use crate::risk::circuit_breaker::{CircuitBreaker, BreakerState};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
@@ -788,9 +788,11 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     self.process_tick(&snapshot, data_fresh)?;
                 }
                 (None, _) => {
-                    // Feed ended or replay complete
-                    tracing::info!("Market feed ended");
-                    break;
+                    // For live trading: empty buffer is normal, continue spinning
+                    // For replay: would return None at end of file, which also just
+                    // continues spinning (harmless since shutdown flag will be set)
+                    // The shutdown flag or kill switch will terminate the loop properly
+                    continue;
                 }
             }
         }
@@ -853,6 +855,7 @@ pub struct EngineStats {
 mod tests {
     use super::*;
     use crate::core::{Signal, SignalAction};
+    use crate::data::SnapshotBuilder;
 
     /// Mock strategy for testing
     struct MockStrategy {
@@ -918,7 +921,7 @@ mod tests {
         let executor = MockExecutor { execute_count: 0 };
         let mut engine = Engine::new(strategy, executor);
 
-        let snapshot = SnapshotBuilder::new()
+        let snapshot1 = SnapshotBuilder::new()
             .market_id(1)
             .sequence(1)
             .timestamp(0)
@@ -927,17 +930,32 @@ mod tests {
             .incremental_snapshot()
             .build();
 
-        // First tick - should process
-        engine.process_tick(&snapshot, true).unwrap();
+        // First tick - MockStrategy returns None on odd calls (call_count=1)
+        engine.process_tick(&snapshot1, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 1);
+        assert_eq!(engine.strategy.call_count, 1);
+        assert_eq!(engine.executor.execute_count, 0);  // No signal, no execution
 
-        // Second tick with same prices - should skip
-        engine.process_tick(&snapshot, true).unwrap();
-        assert_eq!(engine.stats().ticks_processed, 2);
+        // Second tick with same prices - early return (market_changed=false)
+        engine.process_tick(&snapshot1, true).unwrap();
+        assert_eq!(engine.stats().ticks_processed, 2); // ticks_processed increments regardless
+        assert_eq!(engine.strategy.call_count, 1);     // Strategy NOT called (early return)
+        assert_eq!(engine.executor.execute_count, 0);  // Executor NOT called
 
-        // Strategy called but signal generated only on even calls
-        assert_eq!(engine.strategy.call_count, 2);
-        assert_eq!(engine.executor.execute_count, 1);
+        // Third tick with different prices - MockStrategy returns Signal on even calls (call_count=2)
+        let snapshot2 = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(2)
+            .timestamp(1000)
+            .best_bid(50_001_000_000_000, 1_000_000_000)  // Different price
+            .best_ask(50_006_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        engine.process_tick(&snapshot2, true).unwrap();
+        assert_eq!(engine.stats().ticks_processed, 3);
+        assert_eq!(engine.strategy.call_count, 2);     // Strategy called (call_count now 2, even)
+        assert_eq!(engine.executor.execute_count, 1);  // Executor called (signal returned on even)
     }
 
     #[test]

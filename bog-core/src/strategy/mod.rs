@@ -1,3 +1,64 @@
+//! Trading Strategy System (Legacy)
+//!
+//! **⚠️  DEPRECATION NOTICE**: This module contains the legacy Strategy trait.
+//! **New code should use** [`crate::engine::Strategy`] instead.
+//!
+//! ## Migration Status
+//!
+//! The codebase is migrating from this trait to the new const-generic Engine API:
+//!
+//! **Old API** (this module):
+//! ```rust,ignore
+//! trait Strategy {
+//!     fn on_update(&mut self, snapshot: &MarketSnapshot, orderbook: &OrderBookManager)
+//!         -> Option<Signal>;
+//! }
+//! ```
+//!
+//! **New API** ([`crate::engine::Strategy`]):
+//! ```rust,ignore
+//! trait Strategy {
+//!     fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position)
+//!         -> Option<Signal>;
+//! }
+//! ```
+//!
+//! **Key differences:**
+//! - New API passes `Position` instead of `OrderBookManager`
+//! - Renamed `on_update` → `calculate` for clarity
+//! - Simpler interface with fewer dependencies
+//! - Enables full const-generic monomorphization
+//!
+//! ## Legacy Strategies
+//!
+//! This module still contains the legacy implementations:
+//!
+//! - [`SimpleSpreadStrategy`] - Basic market making (legacy)
+//! - [`InventoryBasedStrategy`] - Avellaneda-Stoikov (legacy)
+//!
+//! **For new strategies**, see:
+//! - [`bog_strategies::SimpleSpread`] - New zero-sized implementation
+//! - [`bog_strategies::InventoryBased`] - New zero-sized implementation
+//!
+//! ## Usage (Legacy)
+//!
+//! ```rust,ignore
+//! use bog_core::strategy::{Strategy, SimpleSpreadStrategy};
+//! use bog_core::orderbook::OrderBookManager;
+//!
+//! let mut strategy = SimpleSpreadStrategy::new(10.0, dec!(0.1), 1.0);
+//! let mut orderbook = OrderBookManager::new(1);
+//!
+//! // Process market update
+//! if let Some(signal) = strategy.on_update(&snapshot, &orderbook) {
+//!     // Execute signal
+//! }
+//! ```
+//!
+//! ## For New Strategies
+//!
+//! See [`crate::engine::Strategy`] for the current API and examples.
+
 pub mod types;
 pub mod simple_spread;
 pub mod inventory_based;
@@ -10,7 +71,13 @@ use crate::data::MarketSnapshot;
 use crate::execution::Fill;
 use crate::orderbook::OrderBookManager;
 
-/// Strategy trait - all trading strategies must implement this
+/// Strategy trait - all trading strategies must implement this (LEGACY)
+///
+/// **⚠️  DEPRECATED**: Use [`crate::engine::Strategy`] instead for new code.
+///
+/// This trait is part of the legacy dynamic-dispatch engine that used
+/// `Box<dyn Strategy>`. The new engine uses const generics for full
+/// monomorphization and zero-overhead dispatch.
 pub trait Strategy: Send {
     /// Called on each market data update
     /// Returns a signal if the strategy wants to take action

@@ -52,11 +52,23 @@ pub struct Signal {
     _reserved: [u8; 2],
 
     /// Padding to exactly 64 bytes
-    _padding: [u8; 32],
+    /// Layout: action(1) + side(1) + align_pad(6) + bid_price(8) + ask_price(8) + size(8) + reserved(2) = 34
+    /// So _padding needs to be 64 - 34 = 30 bytes
+    _padding: [u8; 30],
 }
 
 impl Signal {
     /// Create a no-action signal
+    ///
+    /// Used when strategy determines no trading action is needed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Signal;
+    /// let signal = Signal::no_action();
+    /// assert!(!signal.requires_action());
+    /// ```
     #[inline(always)]
     pub const fn no_action() -> Self {
         Self {
@@ -66,11 +78,36 @@ impl Signal {
             ask_price: 0,
             size: 0,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 
     /// Create a quote-both signal
+    ///
+    /// Places quotes on both bid and ask sides for market making.
+    /// This is the primary signal type for market making strategies.
+    ///
+    /// # Arguments
+    ///
+    /// * `bid_price` - Bid quote price in fixed-point (9 decimals)
+    /// * `ask_price` - Ask quote price in fixed-point (9 decimals)
+    /// * `size` - Order size for each side in fixed-point (9 decimals)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use bog_core::core::Signal;
+    /// // Quote $50,000 bid / $50,010 ask for 0.1 BTC each side
+    /// let signal = Signal::quote_both(
+    ///     50_000_000_000_000,  // $50,000 bid
+    ///     50_010_000_000_000,  // $50,010 ask
+    ///     100_000_000,         // 0.1 BTC size
+    /// );
+    ///
+    /// assert!(signal.requires_action());
+    /// assert_eq!(signal.total_size(), 200_000_000); // 0.2 BTC total (both sides)
+    /// assert_eq!(signal.net_position_change(), 0); // Market making is position-neutral
+    /// ```
     #[inline(always)]
     pub const fn quote_both(bid_price: u64, ask_price: u64, size: u64) -> Self {
         Self {
@@ -80,7 +117,7 @@ impl Signal {
             ask_price,
             size,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 
@@ -94,7 +131,7 @@ impl Signal {
             ask_price: 0,
             size,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 
@@ -108,7 +145,7 @@ impl Signal {
             ask_price: price,
             size,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 
@@ -122,7 +159,7 @@ impl Signal {
             ask_price: 0,
             size: 0,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 
@@ -136,7 +173,7 @@ impl Signal {
             ask_price: 0,
             size,
             _reserved: [0; 2],
-            _padding: [0; 32],
+            _padding: [0; 30],
         }
     }
 

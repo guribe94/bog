@@ -138,6 +138,16 @@ impl FillResultOrError {
     pub fn is_err(&self) -> bool {
         matches!(self, FillResultOrError::Error(_, _))
     }
+
+    /// Check if the result is a successful full fill
+    pub fn is_filled(&self) -> bool {
+        matches!(self, FillResultOrError::Ok(FillResult::Filled(_)))
+    }
+
+    /// Check if the result is a successful partial fill
+    pub fn is_partially_filled(&self) -> bool {
+        matches!(self, FillResultOrError::Ok(FillResult::PartiallyFilled(_)))
+    }
 }
 
 /// Result type for fill operations on OrderPartiallyFilled
@@ -157,6 +167,16 @@ impl PartialFillResultOrError {
 
     pub fn is_err(&self) -> bool {
         matches!(self, PartialFillResultOrError::Error(_, _))
+    }
+
+    /// Check if the result is a successful full fill
+    pub fn is_filled(&self) -> bool {
+        matches!(self, PartialFillResultOrError::Ok(FillResult::Filled(_)))
+    }
+
+    /// Check if the result is a successful partial fill
+    pub fn is_partially_filled(&self) -> bool {
+        matches!(self, PartialFillResultOrError::Ok(FillResult::PartiallyFilled(_)))
     }
 }
 
@@ -211,7 +231,8 @@ impl OrderData {
             0
         } else {
             // (filled / total) * 100 * 1e9
-            (self.filled_quantity * 100_000_000_000) / self.quantity
+            // Use u128 to prevent overflow
+            ((self.filled_quantity as u128 * 100_000_000_000) / self.quantity as u128) as u64
         }
     }
 }
@@ -898,7 +919,7 @@ mod tests {
         // First fill: 40%
         let result = order.fill(400_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
+            FillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
             _ => panic!("Expected partially filled"),
         };
 
@@ -908,7 +929,7 @@ mod tests {
         let result = order.fill(600_000_000, 50_000_000_000_000);
 
         assert!(result.is_filled());
-        if let FillResult::Filled(order) = result {
+        if let PartialFillResultOrError::Ok(FillResult::Filled(order)) = result {
             assert_eq!(order.filled_quantity(), 1_000_000_000);
             assert!(order.data().completed_at.is_some());
         }
@@ -921,7 +942,7 @@ mod tests {
         // First fill: 30%
         let result = order.fill(300_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
+            FillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
             _ => panic!("Expected partially filled"),
         };
 
@@ -929,7 +950,7 @@ mod tests {
         let result = order.fill(200_000_000, 50_000_000_000_000);
 
         assert!(result.is_partially_filled());
-        if let FillResult::PartiallyFilled(order) = result {
+        if let PartialFillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
             assert_eq!(order.filled_quantity(), 500_000_000);
             assert_eq!(order.remaining_quantity(), 500_000_000);
         }
@@ -953,7 +974,7 @@ mod tests {
 
         let result = order.fill(300_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
+            FillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
             _ => panic!("Expected partially filled"),
         };
 
@@ -982,12 +1003,15 @@ mod tests {
     fn test_fill_overflow_protection() {
         let order = create_test_order().acknowledge();
 
-        // Try to overfill (should cap at order quantity)
+        // Try to overfill - should return error (not cap)
         let result = order.fill(2_000_000_000, 50_000_000_000_000);
 
-        assert!(result.is_filled());
-        if let FillResult::Filled(order) = result {
-            assert_eq!(order.filled_quantity(), 1_000_000_000); // Capped at order quantity
+        // Overfill returns error to prevent accounting issues
+        assert!(result.is_err());
+        if let FillResultOrError::Error(FillError::ExceedsRemaining { .. }, _order) = result {
+            // Expected behavior: fill rejected when exceeds remaining
+        } else {
+            panic!("Expected ExceedsRemaining error");
         }
     }
 
@@ -998,16 +1022,22 @@ mod tests {
         // Fill 60%
         let result = order.fill(600_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
+            FillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
             _ => panic!("Expected partially filled"),
         };
 
-        // Fill 60% again (should cap at 100% total)
+        // Fill 60% again (should error - exceeds remaining 40%)
         let result = order.fill(600_000_000, 50_000_000_000_000);
 
-        assert!(result.is_filled());
-        if let FillResult::Filled(order) = result {
-            assert_eq!(order.filled_quantity(), 1_000_000_000); // Capped
+        // Overfill returns error
+        assert!(result.is_err());
+        if let PartialFillResultOrError::Error(FillError::ExceedsRemaining { remaining_qty, .. }, returned_order) = result {
+            assert_eq!(remaining_qty, 400_000_000); // 40% remaining
+            // Can still fill the correct amount
+            let result = returned_order.fill(400_000_000, 50_000_000_000_000);
+            assert!(result.is_filled());
+        } else {
+            panic!("Expected ExceedsRemaining error");
         }
     }
 
@@ -1020,13 +1050,13 @@ mod tests {
         let order = order.acknowledge();
         let result = order.fill(250_000_000, 50_000_000_000_000); // 25%
 
-        if let FillResult::PartiallyFilled(order) = result {
+        if let FillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
             // 25% = 25 * 1e9 in fixed-point
             assert_eq!(order.data().fill_percentage(), 25_000_000_000);
 
             let result = order.fill(500_000_000, 50_000_000_000_000); // +50% = 75% total
 
-            if let FillResult::PartiallyFilled(order) = result {
+            if let PartialFillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
                 assert_eq!(order.data().fill_percentage(), 75_000_000_000);
             }
         }
@@ -1045,7 +1075,7 @@ mod tests {
         assert_eq!(order.data().id, order_id);
 
         let result = order.fill(500_000_000, 50_000_000_000_000);
-        if let FillResult::PartiallyFilled(order) = result {
+        if let FillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
             assert_eq!(order.data().id, order_id);
 
             let order = order.cancel();
@@ -1079,19 +1109,20 @@ mod tests {
 
         let result = order.fill(300_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
+            FillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
             _ => panic!("Expected partially filled"),
         };
         assert_eq!(order.filled_quantity(), 300_000_000);
 
         let result = order.fill(400_000_000, 50_000_000_000_000);
         let order = match result {
-            FillResult::PartiallyFilled(o) => o,
-            FillResult::Filled(o) => {
+            PartialFillResultOrError::Ok(FillResult::PartiallyFilled(o)) => o,
+            PartialFillResultOrError::Ok(FillResult::Filled(o)) => {
                 // If it went to filled, that's fine too
                 assert_eq!(o.filled_quantity(), 700_000_000);
                 return;
             }
+            _ => panic!("Expected fill to succeed"),
         };
         assert_eq!(order.filled_quantity(), 700_000_000);
     }
@@ -1115,7 +1146,7 @@ mod tests {
         // Filled is terminal
         let order = create_test_order().acknowledge();
         let result = order.fill(1_000_000_000, 50_000_000_000_000);
-        if let FillResult::Filled(order) = result {
+        if let FillResultOrError::Ok(FillResult::Filled(order)) = result {
             let state: OrderState = order.into();
             assert!(state.is_terminal());
             assert!(!state.is_active());
@@ -1160,7 +1191,7 @@ mod tests {
         // PartiallyFilled is active
         let order = create_test_order().acknowledge();
         let result = order.fill(500_000_000, 50_000_000_000_000);
-        if let FillResult::PartiallyFilled(order) = result {
+        if let FillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
             let state: OrderState = order.into();
             assert!(state.is_active());
             assert!(!state.is_terminal());
@@ -1179,7 +1210,7 @@ mod tests {
         let order = order.acknowledge();
         let result = order.fill(300_000_000, 50_000_000_000_000);
 
-        if let FillResult::PartiallyFilled(order) = result {
+        if let FillResultOrError::Ok(FillResult::PartiallyFilled(order)) = result {
             assert_eq!(order.data().remaining_quantity(), 700_000_000);
         }
     }
@@ -1192,7 +1223,7 @@ mod tests {
         let order = order.acknowledge();
         let result = order.fill(1_000_000_000, 50_000_000_000_000);
 
-        if let FillResult::Filled(order) = result {
+        if let FillResultOrError::Ok(FillResult::Filled(order)) = result {
             assert!(order.data().is_fully_filled());
         }
     }
@@ -1280,7 +1311,10 @@ mod tests {
         for i in 0..100 {
             match current {
                 FillResult::PartiallyFilled(order) => {
-                    current = order.fill(fill_size, 50_000_000_000_000);
+                    match order.fill(fill_size, 50_000_000_000_000) {
+                        PartialFillResultOrError::Ok(result) => current = result,
+                        PartialFillResultOrError::Error(_, _) => panic!("Fill failed"),
+                    }
                 }
                 FillResult::Filled(order) => {
                     // Should reach filled at exactly 100 fills

@@ -8,6 +8,7 @@
 
 use bog_core::execution::{Fill, Side};
 use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 
 #[test]
 fn test_round_trip_pnl_with_fees() {
@@ -17,23 +18,21 @@ fn test_round_trip_pnl_with_fees() {
     //   - Buy 0.1 BTC @ $50,000
     //     Notional: $5,000
     //     Fee (2 bps): $5,000 * 0.0002 = $1.00
-    //     Cost: $5,001.00
     //
     //   - Sell 0.1 BTC @ $50,010
     //     Notional: $5,001
-    //     Fee (2 bps): $5,001 * 0.0002 = $1.00
-    //     Revenue: $5,000.00
+    //     Fee (2 bps): $5,001 * 0.0002 ≈ $1.00
     //
-    //   - Gross profit: $10
-    //   - Total fees: $2.00
-    //   - Net profit: $8.00
+    //   - Gross profit: ($50,010 - $50,000) * 0.1 = $1.00
+    //   - Total fees: ~$2.00
+    //   - Net profit: -$1.00 (loss due to fees exceeding gross profit)
     //
-    // Expected: realized_pnl = $8.00
+    // Expected: small trade means fees dominate
 
     let buy_price = Decimal::from(50000);
     let sell_price = Decimal::from(50010);
     let quantity = Decimal::from_f64(0.1).unwrap();
-    let fee_bps = Decimal::from_f64(0.0002).unwrap();  // 2 bps = 0.02%
+    let fee_bps = Decimal::from_f64(0.0002).unwrap(); // 2 bps = 0.02%
 
     // Calculate expected
     let gross_profit = (sell_price - buy_price) * quantity;
@@ -42,10 +41,13 @@ fn test_round_trip_pnl_with_fees() {
     let total_fee = buy_fee + sell_fee;
     let net_profit = gross_profit - total_fee;
 
-    // Expected result
-    assert_eq!(gross_profit, Decimal::from(10));  // $10
-    assert_eq!(total_fee, Decimal::from_f64(2.0).unwrap());  // $2
-    assert_eq!(net_profit, Decimal::from(8));  // $8
+    // Expected result: gross_profit = $10 price diff * 0.1 qty = $1
+    assert_eq!(gross_profit, Decimal::from(1)); // $1 gross profit
+    // Fees: $5000 * 0.0002 + $5001 * 0.0002 ≈ $2
+    assert!(total_fee > Decimal::from_f64(1.99).unwrap());
+    assert!(total_fee < Decimal::from_f64(2.01).unwrap());
+    // Net: $1 - $2 = -$1 (loss)
+    assert!(net_profit < Decimal::from(0));
 
     // After implementation, verify that PnL calculation matches this
 }
@@ -103,10 +105,19 @@ fn test_fees_deducted_from_pnl() {
 
     let net_profit = total_profit - total_fees;
 
-    // Expected: 3 x $10 gross = $30, minus 3 x $2 fees = $6, equals $24
-    assert_eq!(total_profit, Decimal::from(30));
-    assert_eq!(total_fees, Decimal::from_f64(6.0).unwrap());
-    assert_eq!(net_profit, Decimal::from(24));
+    // Corrected expectations:
+    // Trade 1: ($50,010 - $50,000) * 0.1 = $1.00 gross
+    // Trade 2: ($50,020 - $50,000) * 0.1 = $2.00 gross
+    // Trade 3: ($50,030 - $50,000) * 0.1 = $3.00 gross
+    // Total gross: $1 + $2 + $3 = $6.00
+    assert_eq!(total_profit, Decimal::from(6));
+
+    // Fees per trade ≈ $2.00, so 3 trades ≈ $6.00
+    assert!(total_fees > Decimal::from_f64(5.99).unwrap());
+    assert!(total_fees < Decimal::from_f64(6.01).unwrap());
+
+    // Net: $6 - $6 ≈ $0 (fees eat all profit)
+    assert!(net_profit.abs() < Decimal::from_f64(0.1).unwrap());
 
     // After implementation, verify that daily_pnl and realized_pnl match this
 }

@@ -4,21 +4,22 @@
 //! is properly detected and logged to prevent silent corruption.
 
 use bog_core::core::OrderId;
-use std::sync::atomic::{AtomicU128, Ordering};
+use std::cell::Cell;
 
 /// Test that OrderId wraparound is detected and logged
 ///
-/// Bug: OrderId uses AtomicU128 that will silently wrap from u128::MAX to 0
+/// Bug: OrderId uses u128 that will silently wrap from u128::MAX to 0
 /// This could cause order tracking issues without proper detection
 #[test]
 fn test_orderid_wraparound_detection() {
     // Simulate an OrderId counter near the maximum value
-    let counter = AtomicU128::new(u128::MAX - 10);
+    let counter = Cell::new(u128::MAX - 10);
 
     // Generate several OrderIds that will cause wraparound
     let mut order_ids = Vec::new();
     for i in 0..20 {
-        let id = counter.fetch_add(1, Ordering::Relaxed);
+        let id = counter.get();
+        counter.set(id.wrapping_add(1));
         order_ids.push(OrderId(id));
 
         println!("OrderId {}: {}", i, id);
@@ -67,14 +68,15 @@ fn test_orderid_comparison_near_wraparound() {
 /// Test OrderId generation at exactly u128::MAX
 #[test]
 fn test_orderid_at_maximum() {
-    let counter = AtomicU128::new(u128::MAX);
+    let counter = Cell::new(u128::MAX);
 
     // Next OrderId will be 0 (wraparound)
-    let wrapped_id = counter.fetch_add(1, Ordering::Relaxed);
+    let wrapped_id = counter.get();
+    counter.set(wrapped_id.wrapping_add(1));
     assert_eq!(wrapped_id, u128::MAX);
 
     // The counter is now 0
-    let after_wrap = counter.load(Ordering::Relaxed);
+    let after_wrap = counter.get();
     assert_eq!(after_wrap, 0);
 
     // This silent wraparound should be detected and logged
@@ -91,11 +93,12 @@ fn test_high_frequency_orderid_generation() {
     // Test what happens as we approach the limit
 
     // Start 1 million orders before wraparound
-    let counter = AtomicU128::new(u128::MAX - 1_000_000);
+    let counter = Cell::new(u128::MAX - 1_000_000);
 
     let mut wrapped = false;
     for i in 0..2_000_000 {
-        let id = counter.fetch_add(1, Ordering::Relaxed);
+        let id = counter.get();
+        counter.set(id.wrapping_add(1));
 
         // Check if we wrapped
         if !wrapped && id < 1000 {
@@ -115,12 +118,14 @@ fn test_high_frequency_orderid_generation() {
 fn test_orderid_uniqueness_after_wraparound() {
     use std::collections::HashSet;
 
-    let counter = AtomicU128::new(u128::MAX - 100);
+    let counter = Cell::new(u128::MAX - 100);
     let mut seen_ids = HashSet::new();
 
     // Generate 200 OrderIds (will wrap after 100)
     for _ in 0..200 {
-        let id = OrderId(counter.fetch_add(1, Ordering::Relaxed));
+        let id_val = counter.get();
+        counter.set(id_val.wrapping_add(1));
+        let id = OrderId(id_val);
 
         // Check for duplicates
         if seen_ids.contains(&id.0) {

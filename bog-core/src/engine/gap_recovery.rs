@@ -38,9 +38,9 @@ impl Default for GapRecoveryConfig {
         Self {
             auto_recover: true,
             max_recoverable_gap: 10000,  // Up to 10k messages
-            snapshot_timeout: Duration::from_secs(30),  // Increased from 5s to handle Huginn reconnects
+            snapshot_timeout: Duration::from_secs(2),  // Reduced from 30s - with request_snapshot(), Huginn responds in <1s
             max_recovery_attempts: 10,  // Increased from 3 for more resilience
-            recovery_retry_delay: Duration::from_secs(2),  // Increased from 500ms to wait for reconnect
+            recovery_retry_delay: Duration::from_millis(100),  // Reduced from 500ms - faster retries to prevent buffer fill during waits
             pause_trading_during_recovery: true,
             alert_on_gap: true,
         }
@@ -142,7 +142,7 @@ impl GapRecoveryManager {
 
         // Try recovery with retries
         for attempt in 1..=self.config.max_recovery_attempts {
-            match self.attempt_recovery(feed) {
+            match self.attempt_recovery(feed, current_seq) {
                 Ok(snapshot) => {
                     // Success!
                     let recovery_time = start_time.elapsed();
@@ -195,25 +195,52 @@ impl GapRecoveryManager {
     }
 
     /// Attempt a single recovery
-    fn attempt_recovery(&self, feed: &mut MarketFeed) -> Result<MarketSnapshot> {
+    ///
+    /// # Arguments
+    /// - `feed`: The market feed to recover
+    /// - `current_seq`: The sequence number that triggered the gap (received_seq)
+    fn attempt_recovery(&self, feed: &mut MarketFeed, current_seq: u64) -> Result<MarketSnapshot> {
         debug!("Saving current position for recovery...");
         let checkpoint = feed.save_position();
 
-        debug!("Requesting full snapshot (timeout: {:?})...", self.config.snapshot_timeout);
+        // CRITICAL FIX: Request snapshot from Huginn BEFORE waiting for it
+        // This increments an atomic counter that Huginn's snapshot polling task monitors
+        info!("📸 REQUESTING snapshot from Huginn (atomic signal via shared memory)...");
+        feed.request_snapshot();
+
+        info!("⏳ Waiting for snapshot from Huginn (timeout: {:?})...", self.config.snapshot_timeout);
         let snapshot = feed.fetch_snapshot(Some(self.config.snapshot_timeout))
             .ok_or_else(|| anyhow!(
-                "Snapshot timeout after {:?}",
+                "Snapshot timeout after {:?}. Check Huginn logs for 'Snapshot request detected'.",
                 self.config.snapshot_timeout
             ))?;
 
-        debug!("Snapshot received: seq={}", snapshot.sequence);
+        info!("✅ Snapshot received successfully: seq={}", snapshot.sequence);
 
         // Rewind to checkpoint to replay any buffered messages
         debug!("Rewinding to checkpoint for message replay...");
         feed.rewind_to(checkpoint);
 
-        // Mark recovery complete in feed
-        feed.mark_recovery_complete(snapshot.sequence);
+        // CRITICAL FIX (Bug #11): Use current_seq instead of snapshot.sequence for gap detector reset
+        //
+        // The exchange returns CACHED snapshots with OLD sequence numbers (can be 5000+ behind).
+        // If we reset the gap detector to the snapshot's old sequence, the next live message
+        // will immediately trigger another gap (since live stream is far ahead).
+        //
+        // Solution: Reset gap detector to (current_seq - 1) so the current message is accepted.
+        // The snapshot's orderbook data is still valid - we just ignore its stale sequence.
+        //
+        // Example:
+        //   - Gap detected: expected 1,882,792, received 1,882,809
+        //   - Snapshot fetched with seq 1,875,988 (stale!)
+        //   - OLD behavior: reset to 1,875,988 → next message at 1,882,809 → gap of 6821!
+        //   - NEW behavior: reset to 1,882,808 → next message at 1,882,809 → no gap!
+        let reset_seq = current_seq.saturating_sub(1);
+        info!(
+            "📊 Gap detector reset: using current_seq-1={} (snapshot had stale seq={})",
+            reset_seq, snapshot.sequence
+        );
+        feed.mark_recovery_complete(reset_seq);
 
         Ok(snapshot)
     }

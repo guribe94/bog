@@ -359,9 +359,12 @@ mod tests {
     fn test_ewma_volatility() {
         let mut ewma = EwmaVolatility::new(200); // alpha = 0.2
 
+        // is_ready() requires count >= 5
         ewma.add_price(50000_000000000);
         ewma.add_price(50500_000000000); // +1% = 100 bps
         ewma.add_price(50000_000000000); // -1%
+        ewma.add_price(50250_000000000); // +0.5%
+        ewma.add_price(50100_000000000); // -0.3%
 
         let v = ewma.volatility();
         assert!(v > 0);
@@ -372,10 +375,12 @@ mod tests {
     fn test_parkinson_volatility() {
         let mut park = ParkinsonVolatility::<10>::new();
 
-        // Add high-low pairs
+        // is_ready() requires count >= WINDOW_SIZE/2 = 5
         park.add_high_low(50500_000000000, 50000_000000000);
         park.add_high_low(50600_000000000, 50100_000000000);
         park.add_high_low(50700_000000000, 50200_000000000);
+        park.add_high_low(50800_000000000, 50300_000000000);
+        park.add_high_low(50900_000000000, 50400_000000000);
 
         let v = park.volatility();
         assert!(v > 0);

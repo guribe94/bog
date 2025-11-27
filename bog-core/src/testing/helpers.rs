@@ -1,11 +1,79 @@
-//! Test helper utilities for creating test data and assertions
+//! Test Helper Utilities
 //!
-//! Provides convenient builders and utilities for:
-//! - MarketSnapshot creation
-//! - Position setup
-//! - Signal creation
-//! - Performance assertions
-//! - Metrics collection
+//! Provides convenient builders and utilities for testing the trading engine.
+//!
+//! ## Categories
+//!
+//! ### Market Data Creation
+//!
+//! - [`create_test_snapshot`] - Custom snapshot with specified prices/sizes
+//! - [`create_simple_snapshot`] - Default BTC-USD snapshot ($50,000 bid, $50,005 ask)
+//!
+//! Use SnapshotBuilder internally to ensure proper struct initialization.
+//!
+//! ### Position Builders
+//!
+//! - [`create_test_position`] - Position with specified quantity
+//! - [`create_test_position_with_pnl`] - Position with quantity and PnL values
+//!
+//! Returns Arc<Position> for use with Engine.
+//!
+//! ### Signal Builders
+//!
+//! - [`create_quote_both_signal`] - Two-sided market making signal
+//! - [`create_quote_signal`] - Single-side quote (bid or ask)
+//! - [`create_cancel_signal`] - Cancel all orders
+//! - [`create_no_action_signal`] - No-op signal
+//!
+//! ### Performance Measurement
+//!
+//! - [`assert_within_latency`] - Assert operation completes within time limit
+//! - [`measure_latency`] - Measure single operation latency
+//! - [`measure_average_latency`] - Measure average over multiple iterations
+//!
+//! Use these to verify sub-microsecond performance targets.
+//!
+//! ### Fixed-Point Conversion
+//!
+//! [`fixed_point`] module provides:
+//! - [`fixed_point::from_f64`] - Convert f64 to u64 (9 decimals)
+//! - [`fixed_point::to_f64`] - Convert u64 to f64
+//! - [`fixed_point::to_f64_signed`] - Convert i64 to f64
+//!
+//! ### Test Constants
+//!
+//! [`constants`] module provides common test values:
+//! - `BTC_BID` - $50,000 in fixed-point
+//! - `BTC_ASK` - $50,025 in fixed-point (5 bp spread)
+//! - `BTC_SIZE` - 1.0 BTC
+//! - `BTC_SMALL_SIZE` - 0.1 BTC
+//! - `ONE_BP`, `TEN_BP` - Basis point values
+//!
+//! ## Example Usage
+//!
+//! ```ignore
+//! use bog_core::testing::helpers::*;
+//! use std::time::Duration;
+//!
+//! // Create test data
+//! let snapshot = create_simple_snapshot(1);
+//! let position = create_test_position(1_000_000_000); // 1.0 BTC long
+//!
+//! // Measure performance
+//! assert_within_latency(Duration::from_nanos(1000), || {
+//!     // Operation that should complete in <1μs
+//!     let signal = create_quote_both_signal(
+//!         constants::BTC_BID,
+//!         constants::BTC_ASK,
+//!         constants::BTC_SIZE,
+//!     );
+//! }, "signal creation");
+//!
+//! // Fixed-point conversion
+//! let price_f64 = 50000.50;
+//! let price_fp = fixed_point::from_f64(price_f64);
+//! assert_eq!(price_fp, 50_000_500_000_000);
+//! ```
 
 use crate::core::{OrderId, Position, Signal, SignalAction, Side};
 use crate::data::SnapshotBuilder;
@@ -181,8 +249,9 @@ pub mod constants {
     /// Default BTC-USD bid price: $50,000
     pub const BTC_BID: u64 = 50000_000000000;
 
-    /// Default BTC-USD ask price: $50,005 (5bp spread)
-    pub const BTC_ASK: u64 = 50005_000000000;
+    /// Default BTC-USD ask price: $50,025 (5bp spread)
+    /// 5 bp on $50,000 = $50,000 * 0.0005 = $25
+    pub const BTC_ASK: u64 = 50025_000000000;
 
     /// Default size: 1.0 BTC
     pub const BTC_SIZE: u64 = 1_000000000;
@@ -278,7 +347,7 @@ mod tests {
 
         // Verify spread
         let spread = BTC_ASK - BTC_BID;
-        assert_eq!(spread, 5_000000000); // $5
+        assert_eq!(spread, 25_000000000); // $25
 
         // Verify 5bp spread
         let spread_bps = (spread * 10000) / BTC_BID;

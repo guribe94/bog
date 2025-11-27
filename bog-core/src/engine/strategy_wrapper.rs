@@ -7,7 +7,7 @@ use crate::core::strategy_fsm::{
     StrategyState, StrategyInitializing
 };
 use crate::core::{Position, Signal};
-use crate::data::{MarketSnapshot, SnapshotBuilder};
+use crate::data::MarketSnapshot;
 use super::Strategy;
 
 /// Wrapper that adds lifecycle FSM to any Strategy
@@ -136,6 +136,7 @@ impl<S: Strategy> StrategyWrapper<S> {
 mod tests {
     use super::*;
     use crate::core::SignalAction;
+    use crate::data::SnapshotBuilder;
 
     // Test strategy that always generates signals
     struct AlwaysQuoteStrategy;

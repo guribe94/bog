@@ -260,7 +260,7 @@ mod tests {
             ..Default::default()
         };
 
-        let spread = snapshot.spread_bps();
+        let spread = MarketSnapshotExt::spread_bps(&snapshot);
         // 5 / 50000 * 10000 = 1 bp
         assert!((spread - 1.0).abs() < 0.01);
     }
