@@ -122,6 +122,8 @@ detect_platform() {
             echo "M2"
         elif echo "$cpu_brand" | grep -qi "Apple M3"; then
             echo "M3"
+        elif echo "$cpu_brand" | grep -qi "Apple M4"; then
+            echo "M4"
         else
             echo "macOS"
         fi
