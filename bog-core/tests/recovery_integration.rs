@@ -3,6 +3,7 @@ use bog_core::engine::{Engine, Strategy};
 use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
+use bog_core::orderbook::L2OrderBook;
 use rust_decimal_macros::dec;
 use tempfile::NamedTempFile;
 use anyhow::Result;
@@ -10,7 +11,7 @@ use anyhow::Result;
 // Mock Strategy for Engine
 struct NoOpStrategy;
 impl Strategy for NoOpStrategy {
-    fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+    fn calculate(&mut self, _book: &L2OrderBook, _position: &Position) -> Option<Signal> {
         None
     }
     fn name(&self) -> &'static str { "NoOp" }

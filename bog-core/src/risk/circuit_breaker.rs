@@ -214,8 +214,12 @@ impl CircuitBreaker {
 
     /// Check if spread is excessive (flash crash indicator)
     fn check_spread(&self, bid: u64, ask: u64) -> Option<HaltReason> {
-        let spread = ask - bid;
-        let spread_bps = (spread * 10_000) / bid;
+        let spread = ask.saturating_sub(bid);
+        
+        // Use u128 for calculation to prevent overflow with high-value assets
+        // spread * 10,000 could overflow u64 if spread > 1.8e15 (price > $1.8M)
+        let spread_bps = (spread as u128 * 10_000) / bid as u128;
+        let spread_bps = spread_bps as u64; // Safe to cast back as result is small (bps)
 
         if spread_bps > MAX_SPREAD_BPS {
             Some(HaltReason::ExcessiveSpread {

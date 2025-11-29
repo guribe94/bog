@@ -7,6 +7,7 @@ use bog_core::core::{Position, Signal};
 use bog_core::data::SnapshotBuilder;
 use bog_core::engine::simulated::SimulatedExecutor;
 use bog_core::engine::Engine;
+use bog_core::orderbook::L2OrderBook;
 use huginn::MarketSnapshot;
 
 // Test strategy that builds a long position
@@ -15,7 +16,7 @@ struct LongOnlyStrategy {
 }
 
 impl bog_core::engine::Strategy for LongOnlyStrategy {
-    fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+    fn calculate(&mut self, _book: &L2OrderBook, _position: &Position) -> Option<Signal> {
         self.tick_count += 1;
 
         // Only quote bid for first 5 ticks to build long position

@@ -258,11 +258,12 @@
 //! use bog_core::core::{Position, Signal};
 //! use bog_core::data::MarketSnapshot;
 //! use bog_core::engine::{Engine, SimulatedExecutor, Strategy};
+//! use bog_core::orderbook::L2OrderBook;
 //!
 //! struct ExampleStrategy;
 //!
 //! impl Strategy for ExampleStrategy {
-//!     fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+//!     fn calculate(&mut self, _book: &L2OrderBook, _position: &Position) -> Option<Signal> {
 //!         None
 //!     }
 //!

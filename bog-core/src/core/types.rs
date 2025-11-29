@@ -200,8 +200,12 @@ pub struct Position {
     /// Total number of trades
     pub trade_count: AtomicU32,
 
+    /// Sequence number for lock-free snapshots (SeqLock)
+    /// Even = stable, Odd = updating
+    pub sequence: AtomicU64,
+
     /// Padding to 64 bytes
-    _padding: [u8; 20],
+    _padding: [u8; 12],
 }
 
 impl Position {
@@ -214,7 +218,8 @@ impl Position {
             realized_pnl: AtomicI64::new(0),
             daily_pnl: AtomicI64::new(0),
             trade_count: AtomicU32::new(0),
-            _padding: [0; 20],
+            sequence: AtomicU64::new(0),
+            _padding: [0; 12],
         }
     }
 
@@ -534,6 +539,9 @@ impl Position {
         size: u64,
         fee_bps: u32,
     ) -> Result<(), OverflowError> {
+        // SeqLock: Start write (make odd)
+        self.sequence.fetch_add(1, Ordering::Acquire);
+
         // Convert size to i64 for position delta
         let size_i64 = size as i64;
 
@@ -593,6 +601,12 @@ impl Position {
                 / (10_000u128 * 1_000_000_000u128);
 
             if fee_raw > i64::MAX as u128 {
+                // SeqLock: Abort write (restore even) - actually we must not leave it odd
+                // But since we're returning error, we should probably fix state or just accept it's borked.
+                // Better to finish the write sequence even if erroring out?
+                // Or just ensure we increment even if we error.
+                // For now, let's handle the error exit.
+                 self.sequence.fetch_add(1, Ordering::Release);
                 return Err(OverflowError::RealizedPnlOverflow {
                     old: self.realized_pnl.load(Ordering::Acquire),
                     delta: i64::MIN, // signify overflow attempt
@@ -602,13 +616,16 @@ impl Position {
         };
 
         // Update position quantity with overflow check
-        let new_qty =
-            old_qty
-                .checked_add(position_delta)
-                .ok_or(OverflowError::QuantityOverflow {
-                    old: old_qty,
-                    delta: position_delta,
-                })?;
+        let new_qty_result = old_qty.checked_add(position_delta);
+        
+        if new_qty_result.is_none() {
+             self.sequence.fetch_add(1, Ordering::Release);
+             return Err(OverflowError::QuantityOverflow {
+                 old: old_qty,
+                 delta: position_delta,
+             });
+        }
+        let new_qty = new_qty_result.unwrap();
 
         self.quantity.store(new_qty, Ordering::Release);
 
@@ -658,21 +675,38 @@ impl Position {
 
         // Update realized/daily PnL for price differential
         if pnl != 0 {
-            self.update_realized_pnl_checked(pnl)?;
-            self.update_daily_pnl_checked(pnl)?;
+            let res1 = self.update_realized_pnl_checked(pnl);
+            let res2 = self.update_daily_pnl_checked(pnl);
+            
+            if res1.is_err() || res2.is_err() {
+                 self.sequence.fetch_add(1, Ordering::Release);
+                 // If one failed, we return that error, but state is already partially updated.
+                 // This is a limitation of lock-free without complex rollbacks.
+                 // Given HFT context, we prioritize progress and catching it.
+                 if res1.is_err() { return res1; }
+                 return res2;
+            }
         }
 
         // Deduct fees (always costs money when fee_amount > 0)
         if fee_amount > 0 {
             let fee_delta = -fee_amount;
-            self.update_realized_pnl_checked(fee_delta)?;
-            self.update_daily_pnl_checked(fee_delta)?;
+            let res1 = self.update_realized_pnl_checked(fee_delta);
+            let res2 = self.update_daily_pnl_checked(fee_delta);
+             if res1.is_err() || res2.is_err() {
+                 self.sequence.fetch_add(1, Ordering::Release);
+                 if res1.is_err() { return res1; }
+                 return res2;
+            }
         }
 
         // Increment trade count
-        self.increment_trades_checked()?;
+        let res = self.increment_trades_checked();
+        
+        // SeqLock: End write (make even)
+        self.sequence.fetch_add(1, Ordering::Release);
 
-        Ok(())
+        res.map(|_| ())
     }
 
     /// Process a fill from the simulated executor (backward compatibility)
@@ -711,36 +745,56 @@ impl Position {
     /// by returning 0 instead of panicking from division by zero.
     #[inline(always)]
     pub fn get_unrealized_pnl(&self, market_price: u64) -> i64 {
-        let qty = self.quantity.load(Ordering::Relaxed);
-        if qty == 0 {
-            return 0; // No position, no unrealized PnL
+        loop {
+            let seq1 = self.sequence.load(Ordering::Acquire);
+            
+            if seq1 % 2 != 0 {
+                // Writer is updating, spin
+                std::hint::spin_loop();
+                continue;
+            }
+
+            let qty = self.quantity.load(Ordering::Relaxed);
+            let entry_price = self.entry_price.load(Ordering::Relaxed);
+            
+            let seq2 = self.sequence.load(Ordering::Acquire);
+            
+            if seq1 != seq2 {
+                // Modified during read, retry
+                std::hint::spin_loop();
+                continue;
+            }
+
+            // Consistent snapshot logic follows...
+            if qty == 0 {
+                return 0; // No position, no unrealized PnL
+            }
+    
+            if entry_price == 0 {
+                // SAFETY: Handle corrupted state gracefully
+                // This could happen due to:
+                // 1. Bug in fill processing
+                // 2. Concurrent modification issues (should be caught by SeqLock above)
+                // 3. Memory corruption
+                // Return 0 rather than panic
+                return 0;
+            }
+    
+            // Calculate price difference based on position side
+            let price_diff = if qty > 0 {
+                // Long position: profit if market > entry
+                market_price as i64 - entry_price as i64
+            } else {
+                // Short position: profit if market < entry
+                entry_price as i64 - market_price as i64
+            };
+    
+            // PnL = price_diff * abs(quantity) / SCALE
+            // We divide by SCALE because both price and quantity are in fixed-point
+            let abs_qty = qty.abs();
+            let pnl = (price_diff as i128 * abs_qty as i128 / 1_000_000_000) as i64;
+            return pnl;
         }
-
-        let entry_price = self.entry_price.load(Ordering::Relaxed);
-        if entry_price == 0 {
-            // SAFETY: Handle corrupted state gracefully
-            // This could happen due to:
-            // 1. Bug in fill processing
-            // 2. Concurrent modification issues
-            // 3. Memory corruption
-            // Return 0 rather than panic
-            return 0;
-        }
-
-        // Calculate price difference based on position side
-        let price_diff = if qty > 0 {
-            // Long position: profit if market > entry
-            market_price as i64 - entry_price as i64
-        } else {
-            // Short position: profit if market < entry
-            entry_price as i64 - market_price as i64
-        };
-
-        // PnL = price_diff * abs(quantity) / SCALE
-        // We divide by SCALE because both price and quantity are in fixed-point
-        let abs_qty = qty.abs();
-        let pnl = (price_diff as i128 * abs_qty as i128 / 1_000_000_000) as i64;
-        pnl
     }
 }
 

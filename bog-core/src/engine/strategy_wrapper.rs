@@ -6,7 +6,7 @@
 use super::Strategy;
 use crate::core::strategy_fsm::{StrategyInitializing, StrategyState};
 use crate::core::{Position, Signal};
-use crate::data::MarketSnapshot;
+use crate::orderbook::L2OrderBook;
 
 /// Wrapper that adds lifecycle FSM to any Strategy
 ///
@@ -98,10 +98,10 @@ impl<S: Strategy> StrategyWrapper<S> {
     /// * `Some(signal)` - If strategy is Active and generates signal
     /// * `None` - If strategy is not Active or no signal generated
     #[inline(always)]
-    pub fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal> {
+    pub fn calculate(&mut self, book: &L2OrderBook, position: &Position) -> Option<Signal> {
         // Only generate signals if Active
         match &self.lifecycle {
-            StrategyState::Active(_) => self.strategy.calculate(snapshot, position),
+            StrategyState::Active(_) => self.strategy.calculate(book, position),
             _ => None,
         }
     }
@@ -134,7 +134,7 @@ impl<S: Strategy> StrategyWrapper<S> {
 mod tests {
     use super::*;
     use crate::core::SignalAction;
-    use crate::data::SnapshotBuilder;
+    use crate::data::{MarketSnapshot, SnapshotBuilder};
 
     // Test strategy that always generates signals
     struct AlwaysQuoteStrategy;
@@ -142,7 +142,7 @@ mod tests {
     impl Strategy for AlwaysQuoteStrategy {
         fn calculate(
             &mut self,
-            _snapshot: &MarketSnapshot,
+            _book: &L2OrderBook,
             _position: &Position,
         ) -> Option<Signal> {
             Some(Signal::quote_both(
@@ -184,8 +184,10 @@ mod tests {
 
         // Wrapper should return None when paused
         let snapshot = create_test_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
         let position = Position::new();
-        let signal = wrapper.calculate(&snapshot, &position);
+        let signal = wrapper.calculate(&book, &position);
 
         assert!(signal.is_none(), "Should not generate signals when paused");
         assert!(
@@ -204,8 +206,10 @@ mod tests {
 
         // Wrapper should delegate to strategy when active
         let snapshot = create_test_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
         let position = Position::new();
-        let signal = wrapper.calculate(&snapshot, &position);
+        let signal = wrapper.calculate(&book, &position);
 
         assert!(signal.is_some(), "Should generate signals when active");
         assert!(
@@ -225,8 +229,10 @@ mod tests {
 
         // Don't start - should remain in Initializing state
         let snapshot = create_test_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
         let position = Position::new();
-        let signal = wrapper.calculate(&snapshot, &position);
+        let signal = wrapper.calculate(&book, &position);
 
         assert!(
             signal.is_none(),
@@ -247,8 +253,10 @@ mod tests {
         wrapper.stop();
 
         let snapshot = create_test_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
         let position = Position::new();
-        let signal = wrapper.calculate(&snapshot, &position);
+        let signal = wrapper.calculate(&book, &position);
 
         assert!(signal.is_none(), "Should not generate signals when stopped");
         assert!(
@@ -287,24 +295,26 @@ mod tests {
         let strategy = AlwaysQuoteStrategy;
         let mut wrapper = StrategyWrapper::new(strategy);
         let snapshot = create_test_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
         let position = Position::new();
 
         wrapper.start();
 
         // Should generate signal when active
-        assert!(wrapper.calculate(&snapshot, &position).is_some());
+        assert!(wrapper.calculate(&book, &position).is_some());
 
         // Pause
         wrapper.pause();
-        assert!(wrapper.calculate(&snapshot, &position).is_none());
+        assert!(wrapper.calculate(&book, &position).is_none());
 
         // Resume
         wrapper.resume();
-        assert!(wrapper.calculate(&snapshot, &position).is_some());
+        assert!(wrapper.calculate(&book, &position).is_some());
 
         // Pause again
         wrapper.pause();
-        assert!(wrapper.calculate(&snapshot, &position).is_none());
+        assert!(wrapper.calculate(&book, &position).is_none());
     }
 
     #[test]

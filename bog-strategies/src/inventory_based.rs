@@ -12,8 +12,8 @@
 //! For now, this is a stub that demonstrates the ZST pattern.
 
 use bog_core::core::{Position, Signal};
-use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
+use bog_core::orderbook::L2OrderBook;
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
 
@@ -88,10 +88,10 @@ impl InventoryBased {
 
 impl Strategy for InventoryBased {
     #[inline(always)]
-    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal> {
+    fn calculate(&mut self, book: &L2OrderBook, position: &Position) -> Option<Signal> {
         // Extract best bid and ask
-        let bid = snapshot.best_bid_price;
-        let ask = snapshot.best_ask_price;
+        let bid = book.best_bid_price();
+        let ask = book.best_ask_price();
 
         // Validate prices
         if bid == 0 || ask == 0 || ask <= bid {
@@ -146,6 +146,7 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bog_core::data::MarketSnapshot;
 
     #[test]
     fn test_inventory_based_is_zst() {
@@ -175,17 +176,20 @@ mod tests {
             _padding: [0; 54],
         };
 
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
+
         let position = Position::new();
-        let signal = strategy.calculate(&snapshot, &position);
+        let signal = strategy.calculate(&book, &position);
         assert!(signal.is_some());
     }
 
     #[test]
     fn test_const_values() {
-        println!("TARGET_INVENTORY: {}", TARGET_INVENTORY);
-        println!("RISK_AVERSION: {}", RISK_AVERSION);
-        println!("ORDER_SIZE: {}", ORDER_SIZE);
-        println!("VOLATILITY_BPS: {}", VOLATILITY_BPS);
-        println!("TIME_HORIZON_SECS: {}", TIME_HORIZON_SECS);
+        // Verify constants are sane
+        assert!(RISK_AVERSION > 0);
+        assert!(ORDER_SIZE > 0);
+        assert!(VOLATILITY_BPS > 0);
+        assert!(TIME_HORIZON_SECS > 0);
     }
 }

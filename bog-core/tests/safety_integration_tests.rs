@@ -6,13 +6,14 @@ use bog_core::engine::Engine;
 use bog_core::engine::Executor; // Import trait for get_fills
 use bog_core::engine::Strategy;
 use bog_core::execution::simulated::SimulatedExecutor;
+use bog_core::orderbook::L2OrderBook;
 use rust_decimal_macros::dec;
 
 // Strategy that always quotes 0.1 BTC on both sides
 struct AlwaysQuoteStrategy;
 
 impl Strategy for AlwaysQuoteStrategy {
-    fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+    fn calculate(&mut self, _book: &L2OrderBook, _position: &Position) -> Option<Signal> {
         Some(Signal::quote_both(
             50_000_000_000_000, // $50,000
             50_010_000_000_000, // $50,010

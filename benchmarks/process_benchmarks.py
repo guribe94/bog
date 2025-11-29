@@ -364,6 +364,18 @@ def generate_consolidated_markdown(raw_dir: str,
     if improvements:
         print(f"INFO: {len(improvements)} improvements detected")
 
+    # Check for stability issues
+    unstable = []
+    for benchmark, results in all_results.items():
+        for res in results:
+            if res.get('outliers_pct', 0) > 5.0:
+                unstable.append(f"{res['benchmark_name']} ({res['outliers_pct']}%)")
+
+    if unstable:
+        print(f"WARNING: {len(unstable)} benchmarks show high instability (>5% outliers):")
+        for u in unstable:
+            print(f"  - {u}")
+
 def main():
     parser = argparse.ArgumentParser(
         description='Process Bog benchmark results into consolidated markdown format'

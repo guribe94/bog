@@ -177,6 +177,51 @@ fn bench_volatile_market(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: Flash crash scenario (rapid price drop + high volume)
+fn bench_flash_crash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("multi_tick");
+    group.significance_level(0.01).sample_size(1000);
+
+    group.bench_function("flash_crash_scenario", |b| {
+        b.iter(|| {
+            let strategy = SimpleSpread;
+            let executor = SimulatedExecutor::new_default();
+            let mut engine = Engine::new(strategy, executor);
+
+            // 1. Stable period (100 ticks)
+            for tick in 0..100 {
+                let snapshot = create_market_snapshot(0, tick);
+                engine.process_tick(&snapshot, true).unwrap();
+            }
+
+            // 2. Crash: Price drops 10% in 50 ticks, Volume triples
+            let mut price_delta = 0i64;
+            for tick in 100..150 {
+                price_delta -= 100_000_000_000; // -$100 per tick
+                let mut snapshot = create_market_snapshot(price_delta, tick);
+                snapshot.best_ask_size *= 3; // Panic selling volume
+                snapshot.best_bid_size /= 2; // Liquidity drying up
+                black_box(engine.process_tick(&snapshot, true).unwrap());
+            }
+
+            // 3. Recovery/High Volatility (100 ticks)
+            for tick in 150..250 {
+                // Extreme volatility: +/- $50 alternating
+                if tick % 2 == 0 {
+                    price_delta += 50_000_000_000;
+                } else {
+                    price_delta -= 50_000_000_000;
+                }
+
+                let snapshot = create_market_snapshot(price_delta, tick);
+                black_box(engine.process_tick(&snapshot, true).unwrap());
+            }
+        });
+    });
+
+    group.finish();
+}
+
 /// Benchmark: Market with occasional gaps (realistic)
 fn bench_market_with_gaps(c: &mut Criterion) {
     let mut group = c.benchmark_group("multi_tick");
@@ -211,6 +256,7 @@ criterion_group!(
     bench_oscillating_market,
     bench_trending_market,
     bench_volatile_market,
+    bench_flash_crash,
     bench_market_with_gaps,
 );
 

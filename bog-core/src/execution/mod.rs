@@ -91,7 +91,8 @@
 //! # use bog_core::execution::{Order, Side};
 //! let order = Order::post_only(Side::Buy, dec!(50_000), dec!(0.1));
 //! let order_id = executor.place_order(order)?;
-//! let fills = executor.get_fills();
+//! let mut fills = Vec::new();
+//! executor.get_fills(&mut fills);
 //! # executor.cancel_order(&order_id)?;
 //! # Ok::<(), anyhow::Error>(())
 //! ```

@@ -152,12 +152,48 @@ fn bench_realistic_throughput(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: Latency jitter (variance) during sustained load
+/// Measures the impact of sequential processing on tail latency.
+fn bench_latency_jitter(c: &mut Criterion) {
+    let mut group = c.benchmark_group("throughput");
+    group.significance_level(0.01).sample_size(50);
+
+    group.bench_function("jitter_1000_ticks", |b| {
+        b.iter(|| {
+            let strategy = SimpleSpread;
+            let executor = SimulatedExecutor::new_default();
+            let mut engine = Engine::new(strategy, executor);
+
+            let mut max_latency = Duration::ZERO;
+
+            // Process 1000 ticks and track the worst-case single tick latency
+            for seq in 0..1000 {
+                let snapshot = create_snapshot(seq);
+
+                let start = Instant::now();
+                black_box(engine.process_tick(&snapshot, true).unwrap());
+                let duration = start.elapsed();
+
+                if duration > max_latency {
+                    max_latency = duration;
+                }
+            }
+
+            // Returning max_latency forces the compiler to respect the measurement
+            black_box(max_latency);
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_sustained_tick_rate,
     bench_max_orders_per_second,
     bench_max_fills_per_second,
     bench_realistic_throughput,
+    bench_latency_jitter,
 );
 
 criterion_main!(benches);

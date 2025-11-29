@@ -4,6 +4,7 @@ mod tests {
     use bog_core::core::{Position, SignalAction};
     use bog_core::data::MarketSnapshot;
     use bog_core::engine::Strategy;
+    use bog_core::orderbook::L2OrderBook;
     use bog_strategies::simple_spread::SimpleSpread;
 
     // Helper to create snapshot
@@ -43,8 +44,11 @@ mod tests {
 
         // 2. Generate signal
         let snapshot = create_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
+
         let signal = strategy
-            .calculate(&snapshot, &position)
+            .calculate(&book, &position)
             .expect("Should return a signal");
 
         // 3. Check signal
@@ -81,8 +85,11 @@ mod tests {
 
         // 2. Generate signal
         let snapshot = create_snapshot();
+        let mut book = L2OrderBook::new(1);
+        book.sync_from_snapshot(&snapshot);
+
         let signal = strategy
-            .calculate(&snapshot, &position)
+            .calculate(&book, &position)
             .expect("Should return a signal");
 
         // 3. Check signal

@@ -3,6 +3,7 @@ use bog_core::core::{Position, Signal, SignalAction, Side as CoreSide};
 use bog_core::data::{MarketSnapshot, SnapshotBuilder};
 use bog_core::engine::{Engine, Executor, Strategy};
 use bog_core::execution::{Fill, OrderId, Side};
+use bog_core::orderbook::L2OrderBook;
 use rust_decimal_macros::dec;
 
 struct ScenarioStrategy;
@@ -10,18 +11,22 @@ struct ScenarioStrategy;
 impl Strategy for ScenarioStrategy {
     fn calculate(
         &mut self,
-        snapshot: &MarketSnapshot,
+        book: &L2OrderBook,
         position: &Position,
     ) -> Option<Signal> {
-        let price = snapshot.best_bid_price;
+        let bid = book.best_bid_price();
+        let ask = book.best_ask_price();
         let qty = position.get_quantity();
 
-        if price == 10_000_000_000_000 && qty == 0 {
-            Some(Signal::take_position(CoreSide::Buy, 1_000_000_000))
-        } else if price == 20_000_000_000_000 && qty > 0 {
-            Some(Signal::take_position(CoreSide::Sell, 1_000_000_000))
-        } else if price == 20_001_000_000_000 && qty == 0 {
-             Some(Signal::take_position(CoreSide::Buy, 1_000_000_000))
+        if bid == 10_000_000_000_000 && qty == 0 {
+            // Buy 1.0 @ 10k (using QuoteBid to specify price)
+            Some(Signal::quote_bid(10_000_000_000_000, 1_000_000_000))
+        } else if bid == 20_000_000_000_000 && qty > 0 {
+            // Sell 1.0 @ 20k (using QuoteAsk to specify price)
+            Some(Signal::quote_ask(20_000_000_000_000, 1_000_000_000))
+        } else if bid == 20_001_000_000_000 && qty == 0 {
+             // Buy 1.0 @ 20.001k
+             Some(Signal::quote_bid(20_001_000_000_000, 1_000_000_000))
         } else {
             None
         }
@@ -45,18 +50,19 @@ impl InstantExecutor {
 
 impl Executor for InstantExecutor {
     fn execute(&mut self, signal: Signal, _position: &Position) -> Result<()> {
-        if let SignalAction::TakePosition = signal.action {
-             let fill = Fill::new(
-                OrderId::new_random(),
-                match signal.side {
-                    CoreSide::Buy => Side::Buy,
-                    CoreSide::Sell => Side::Sell,
-                },
-                rust_decimal::Decimal::from(signal.bid_price) / rust_decimal::Decimal::from(1_000_000_000),
-                rust_decimal::Decimal::from(signal.size) / rust_decimal::Decimal::from(1_000_000_000),
-            );
-            self.fills.push(fill);
-        }
+        let (price, side) = match signal.action {
+            SignalAction::QuoteBid => (signal.bid_price, Side::Buy),
+            SignalAction::QuoteAsk => (signal.ask_price, Side::Sell),
+            _ => return Ok(()),
+        };
+
+        let fill = Fill::new(
+            OrderId::new_random(),
+            side,
+            rust_decimal::Decimal::from(price) / rust_decimal::Decimal::from(1_000_000_000),
+            rust_decimal::Decimal::from(signal.size) / rust_decimal::Decimal::from(1_000_000_000),
+        );
+        self.fills.push(fill);
         Ok(())
     }
 
@@ -88,7 +94,9 @@ fn test_drawdown_includes_unrealized_pnl() -> Result<()> {
     let mut engine = Engine::new(strategy, executor);
 
     // 1. Buy 1 BTC @ $10k
+    let t0 = 1_000_000_000_000; // Arbitrary start time
     let s1 = SnapshotBuilder::new()
+        .timestamp(t0)
         .best_bid(10_000_000_000_000, 1_000_000_000)
         .best_ask(10_000_000_000_000, 1_000_000_000)
         .build();
@@ -96,7 +104,10 @@ fn test_drawdown_includes_unrealized_pnl() -> Result<()> {
     assert_eq!(engine.position().get_quantity(), 1_000_000_000);
 
     // 2. Sell 1 BTC @ $20k (Realize $10k profit)
+    // Advance time to pass rate limiter (e.g., +1 second)
+    let t1 = t0 + 1_000_000_000; 
     let s2 = SnapshotBuilder::new()
+        .timestamp(t1)
         .best_bid(20_000_000_000_000, 1_000_000_000)
         .best_ask(20_000_000_000_000, 1_000_000_000)
         .build();
@@ -104,7 +115,9 @@ fn test_drawdown_includes_unrealized_pnl() -> Result<()> {
     assert_eq!(engine.position().get_quantity(), 0);
     
     // 3. Re-enter Buy 1 BTC @ $20,001
+    let t2 = t1 + 1_000_000_000;
     let s3 = SnapshotBuilder::new()
+        .timestamp(t2)
         .best_bid(20_001_000_000_000, 1_000_000_000)
         .best_ask(20_001_000_000_000, 1_000_000_000)
         .build();
@@ -118,7 +131,9 @@ fn test_drawdown_includes_unrealized_pnl() -> Result<()> {
     // Drawdown: $10,000 - (-$9,001) = $19,001
     // Allowed Drawdown (5% of Peak): $500
     
+    let t3 = t2 + 1_000_000_000;
     let s4 = SnapshotBuilder::new()
+        .timestamp(t3)
         .best_bid(1_000_000_000_000, 1_000_000_000)
         .best_ask(1_000_000_000_000, 1_000_000_000)
         .build();

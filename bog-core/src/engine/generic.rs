@@ -118,6 +118,7 @@ use crate::config::{
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
+use crate::orderbook::L2OrderBook;
 use crate::risk::circuit_breaker::{BreakerState, CircuitBreaker};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
@@ -135,9 +136,9 @@ pub trait Strategy {
     /// Implementers should mark this #[inline(always)]
     ///
     /// # Arguments
-    /// * `snapshot` - Current market data snapshot
+    /// * `book` - Current L2 orderbook state
     /// * `position` - Current position for inventory-aware quoting
-    fn calculate(&mut self, snapshot: &MarketSnapshot, position: &Position) -> Option<Signal>;
+    fn calculate(&mut self, book: &L2OrderBook, position: &Position) -> Option<Signal>;
 
     /// Strategy name for logging
     fn name(&self) -> &'static str;
@@ -256,6 +257,9 @@ pub struct Engine<S: Strategy, E: Executor> {
     /// Position state (cache-aligned)
     position: Position,
 
+    /// L2 Orderbook state (persistent)
+    book: L2OrderBook,
+
     /// Hot data (cache-aligned, frequently accessed)
     hot: HotData,
 
@@ -296,6 +300,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             strategy,
             executor,
             position: Position::new(),
+            book: L2OrderBook::new(0), // Initialized with 0, updated on first tick
             hot: HotData::new(),
             circuit_breaker: CircuitBreaker::new(),
             shutdown: Arc::new(AtomicBool::new(false)),
@@ -364,6 +369,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // Always drain executor fills before making trading decisions to avoid
         // leaving pending fills unprocessed when we early-return.
         self.drain_executor_fills()?;
+
+        // Sync internal orderbook state (always keep it updated)
+        self.book.sync_from_snapshot(snapshot);
 
         // Early return if market hasn't changed (optimization)
         // Measured: ~2ns for this check
@@ -489,7 +497,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
         // Calculate trading signal (hot path)
         // Measured: ~17ns for SimpleSpread
-        if let Some(signal) = self.strategy.calculate(snapshot, &self.position) {
+        if let Some(signal) = self.strategy.calculate(&self.book, &self.position) {
             // DAILY LOSS LIMIT CHECK
             // Must be checked before any execution logic
             if self.position.get_realized_pnl() < -MAX_DAILY_LOSS {
@@ -969,7 +977,7 @@ mod tests {
     impl Strategy for MockStrategy {
         fn calculate(
             &mut self,
-            _snapshot: &MarketSnapshot,
+            _book: &L2OrderBook,
             _position: &Position,
         ) -> Option<Signal> {
             self.call_count += 1;
@@ -1036,7 +1044,7 @@ mod tests {
     impl Strategy for NoopStrategy {
         fn calculate(
             &mut self,
-            _snapshot: &MarketSnapshot,
+            _book: &L2OrderBook,
             _position: &Position,
         ) -> Option<Signal> {
             None
@@ -1222,7 +1230,7 @@ mod tests {
         impl Strategy for AlwaysQuoteStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 // Quote 1.0
@@ -1300,7 +1308,7 @@ mod tests {
         impl Strategy for TakePositionStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 Some(Signal::take_position(Side::Buy, MAX_ORDER_SIZE))
@@ -1342,7 +1350,7 @@ mod tests {
         impl Strategy for ShortTakeStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 Some(Signal::take_position(Side::Sell, MAX_ORDER_SIZE))
@@ -1382,7 +1390,7 @@ mod tests {
         impl Strategy for QuoteStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 Some(Signal::quote_both(
@@ -1440,7 +1448,7 @@ mod tests {
         impl Strategy for QuoteStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 Some(Signal::quote_both(
@@ -1490,7 +1498,7 @@ mod tests {
         impl Strategy for QuoteStrategy {
             fn calculate(
                 &mut self,
-                _snapshot: &MarketSnapshot,
+                _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
                 Some(Signal::quote_both(

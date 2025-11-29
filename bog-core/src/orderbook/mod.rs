@@ -153,7 +153,7 @@ pub mod l2_book;
 pub mod stub;
 
 // Use L2OrderBook as the primary implementation
-pub use l2_book::{L2OrderBook as OrderBook, QueuePosition, DEPTH_LEVELS};
+pub use l2_book::{L2OrderBook, L2OrderBook as OrderBook, QueuePosition, DEPTH_LEVELS};
 
 // Re-export stub utility types (still needed for our order tracking)
 pub use stub::{OrderInfo, OrderSide, OurOrders};
