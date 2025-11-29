@@ -646,6 +646,27 @@ impl Executor for ProductionExecutor {
     fn execution_mode(&self) -> ExecutionMode {
         self.mode
     }
+
+    fn get_open_exposure(&self) -> (i64, i64) {
+        let mut long_exposure = 0i64;
+        let mut short_exposure = 0i64;
+
+        for entry in self.orders.iter() {
+            let state = entry.value();
+            if state.order.is_active() {
+                let remaining = state.order.remaining_size();
+                let remaining_u64 = (remaining * Decimal::from(1_000_000_000))
+                    .to_u64()
+                    .unwrap_or(0);
+
+                match state.order.side {
+                    super::Side::Buy => long_exposure += remaining_u64 as i64,
+                    super::Side::Sell => short_exposure += remaining_u64 as i64,
+                }
+            }
+        }
+        (long_exposure, short_exposure)
+    }
 }
 
 impl Drop for ProductionExecutor {

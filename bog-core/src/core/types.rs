@@ -591,11 +591,17 @@ impl Position {
 
         // Update entry price (weighted average for increases)
         if (new_qty > 0 && position_delta > 0) || (new_qty < 0 && position_delta < 0) {
-            // Position increased in same direction - update weighted average entry
+            // Position increased in same direction OR flipped to new direction
             let old_entry = self.entry_price.load(Ordering::Acquire);
 
-            if old_entry == 0 || old_qty == 0 {
-                // First position or was flat - set entry price
+            // Check for flip: old quantity had opposite sign of new quantity
+            // (and wasn't zero, which is covered by old_qty == 0)
+            let is_flip = (old_qty > 0 && new_qty < 0) || (old_qty < 0 && new_qty > 0);
+
+            if old_entry == 0 || old_qty == 0 || is_flip {
+                // First position, was flat, or position flipped direction
+                // In all these cases, the entry price is just the fill price
+                // (for a flip, the realized PnL on the closed portion was already calculated above)
                 self.entry_price.store(price, Ordering::Release);
             } else {
                 // Calculate weighted average: (old_entry * old_qty + new_price * new_qty) / total_qty
@@ -850,6 +856,7 @@ pub mod fixed_point {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::fixed_point::SCALE;
 
     #[test]
     fn test_order_id_generation() {
@@ -1130,5 +1137,87 @@ mod tests {
 
         // PnL: 2 threads, 1000 ops each, 100 per op = 200_000
         assert_eq!(position.get_realized_pnl(), 200_000);
+    }
+
+    #[test]
+    fn test_process_fill_fixed_round_trip_long_no_fee() {
+        let position = Position::new();
+
+        // Buy 0.1 BTC @ $50,000 (no fees)
+        let price_buy: u64 = 50_000 * SCALE as u64;
+        let size: u64 = 100_000_000; // 0.1 BTC
+
+        position
+            .process_fill_fixed(0, price_buy, size)
+            .expect("buy fill should succeed");
+
+        // Sell 0.1 BTC @ $50,010 (no fees)
+        let price_sell: u64 = 50_010 * SCALE as u64;
+        position
+            .process_fill_fixed(1, price_sell, size)
+            .expect("sell fill should succeed");
+
+        // Flat and PnL equals gross price delta * quantity
+        assert_eq!(position.get_quantity(), 0);
+        let expected_gross_pnl: i64 = 1 * SCALE; // $1.00
+        assert_eq!(position.get_realized_pnl(), expected_gross_pnl);
+        assert_eq!(position.get_daily_pnl(), expected_gross_pnl);
+    }
+
+    #[test]
+    fn test_process_fill_fixed_round_trip_short_no_fee() {
+        let position = Position::new();
+
+        // Open short: sell 0.2 BTC @ $40,000
+        let price_sell: u64 = 40_000 * SCALE as u64;
+        let size: u64 = 200_000_000; // 0.2 BTC
+
+        position
+            .process_fill_fixed(1, price_sell, size)
+            .expect("short sell fill should succeed");
+
+        // Close short: buy back 0.2 BTC @ $39,900
+        let price_buy: u64 = 39_900 * SCALE as u64;
+        position
+            .process_fill_fixed(0, price_buy, size)
+            .expect("cover buy fill should succeed");
+
+        // Flat and PnL equals (entry - exit) * qty
+        assert_eq!(position.get_quantity(), 0);
+        let expected_gross_pnl: i64 = 20 * SCALE; // $20
+        assert_eq!(position.get_realized_pnl(), expected_gross_pnl);
+        assert_eq!(position.get_daily_pnl(), expected_gross_pnl);
+    }
+
+    #[test]
+    fn test_get_unrealized_pnl_long_and_short() {
+        let position = Position::new();
+
+        // Long 0.5 BTC @ $30,000
+        let entry_price: u64 = 30_000 * SCALE as u64;
+        let qty: i64 = 500_000_000; // 0.5 BTC
+        position.quantity.store(qty, Ordering::Release);
+        position.entry_price.store(entry_price, Ordering::Release);
+
+        // Market moves up to $31,000: unrealized = (31_000 - 30_000) * 0.5 = $500
+        let market_up: u64 = 31_000 * SCALE as u64;
+        let unrealized_up = position.get_unrealized_pnl(market_up);
+        assert_eq!(unrealized_up, 500 * SCALE);
+
+        // Market moves down to $29,000: unrealized = (29_000 - 30_000) * 0.5 = -$500
+        let market_down: u64 = 29_000 * SCALE as u64;
+        let unrealized_down = position.get_unrealized_pnl(market_down);
+        assert_eq!(unrealized_down, -500 * SCALE);
+
+        // Now test short position
+        position.quantity.store(-qty, Ordering::Release);
+        position.entry_price.store(entry_price, Ordering::Release);
+
+        // For short: profit if market < entry
+        let short_profit = position.get_unrealized_pnl(market_down);
+        assert_eq!(short_profit, 500 * SCALE);
+
+        let short_loss = position.get_unrealized_pnl(market_up);
+        assert_eq!(short_loss, -500 * SCALE);
     }
 }

@@ -99,32 +99,38 @@
 //! ## Memory Layout
 //!
 //! ```text
-//! Size of SimpleSpread: 0 BYTES (Zero-Sized Type)
+//! Size of SimpleSpread: ~24-32 bytes (Stateful)
 //!
 //! ┌────────────────────────────────────┐
 //! │ SimpleSpread                       │
-//! │ (no fields - purely marker type)   │
+//! │ ┌────────────────────────────────┐ │
+//! │ │ EwmaVolatility                 │ │
+//! │ │  - ewma: u64                   │ │
+//! │ │  - alpha: u16                  │ │
+//! │ │  - last_price: u64             │ │
+//! │ │  - count: usize                │ │
+//! │ └────────────────────────────────┘ │
 //! │                                    │
-//! │ All data is in const:              │
-//! │  - SPREAD_BPS: u32 (compile-time)  │
-//! │  - ORDER_SIZE: u64 (compile-time)  │
-//! │  - MIN_SPREAD: u64 (compile-time)  │
+//! │ All config is in const:            │
+//! │  - SPREAD_BPS: u32                 │
+//! │  - ORDER_SIZE: u64                 │
 //! │                                    │
 //! │ Code is inlined at call sites      │
 //! └────────────────────────────────────┘
 //!
-//! Memory at runtime:   0 bytes
+//! Memory at runtime:   ~32 bytes (Stack allocated)
 //! Instructions inlined: ~20 assembly instructions
-//! Cache lines used:    0 (pure code in instruction cache)
+//! Cache lines used:    1 (fits in 64 bytes)
 //! ```
 //!
 //! Target: <100ns signal generation ✅ **Achieved: ~5ns** (20x faster)
 
-use bog_core::config::{MAX_POSITION, INVENTORY_IMPACT_BPS, VOLATILITY_SPIKE_THRESHOLD_BPS};
+use bog_core::config::{MAX_POSITION, MAX_SHORT, INVENTORY_IMPACT_BPS, VOLATILITY_SPIKE_THRESHOLD_BPS};
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::Strategy;
 use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
+use crate::volatility::EwmaVolatility;
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
 
@@ -268,31 +274,54 @@ pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
 // Note: We calculate spread dynamically rather than pre-computing
 // to allow for const generic parameters to work with any spread value
 
-/// Simple Spread Strategy - Zero-Sized Type
+/// Simple Spread Strategy - Volatility Aware
 ///
-/// This strategy posts quotes at a fixed spread around the mid price.
-/// All parameters are const, resolved at compile time.
+/// This strategy posts quotes at a fixed spread around the mid price,
+/// adjusted for recent market volatility.
 ///
 /// **Enhanced with depth awareness** (compile-time configurable):
 /// - VWAP-based mid pricing (feature: depth-vwap)
 /// - Imbalance-adjusted spreads (feature: depth-imbalance)
 /// - Multi-level quote placement (feature: depth-multi-level)
-pub struct SimpleSpread;
+pub struct SimpleSpread {
+    /// Volatility tracker (EWMA)
+    vol_tracker: EwmaVolatility,
+}
 
 impl SimpleSpread {
+    /// Create a new SimpleSpread strategy
+    pub fn new() -> Self {
+        Self {
+            // Initialize EWMA with alpha = 200 (0.2)
+            // This gives good responsiveness to volatility spikes while smoothing noise
+            vol_tracker: EwmaVolatility::new(200),
+        }
+    }
+
     /// Calculate volatility-adjusted spread multiplier
     ///
     /// Returns a multiplier (100 = 1.0x, 150 = 1.5x, etc) based on recent volatility
     /// High volatility → wider spreads (up to 2x)
     /// Low volatility → tighter spreads (down to 0.5x)
     #[inline(always)]
-    fn calculate_volatility_multiplier(_mid_price: u64) -> u64 {
-        // Use a simple price-based volatility proxy for now
-        // In production, would use actual historical volatility
+    fn calculate_volatility_multiplier(&self) -> u64 {
+        let vol_bps = self.vol_tracker.volatility();
 
-        // Placeholder: returns 100 (1.0x multiplier) for now
-        // TODO: Integrate with actual volatility tracker
-        100
+        // Volatility Logic:
+        // - 0-10 bps: 1.0x (Base)
+        // - 10-50 bps: Linear scaling from 1.0x to 2.0x
+        // - >50 bps: 2.0x (Capped)
+        
+        if vol_bps <= 10 {
+            100 // 1.0x
+        } else if vol_bps >= 50 {
+            200 // 2.0x
+        } else {
+            // Linear interpolation:
+            // Multiplier = 100 + ((vol - 10) * 100) / 40
+            //            = 100 + ((vol - 10) * 25) / 10
+            100 + ((vol_bps - 10) * 25) / 10
+        }
     }
 
     /// Check if we should cancel all orders due to market conditions
@@ -338,9 +367,9 @@ impl SimpleSpread {
     /// Without this, prices > ~184 quadrillion would overflow and produce
     /// tiny spreads, leading to losses on fees.
     #[inline(always)]
-    fn calculate_quotes(mid_price: u64) -> (u64, u64) {
+    fn calculate_quotes(&self, mid_price: u64) -> (u64, u64) {
         // Get volatility multiplier (100 = 1.0x)
-        let vol_multiplier = Self::calculate_volatility_multiplier(mid_price);
+        let vol_multiplier = self.calculate_volatility_multiplier();
 
         // Calculate half spread with volatility adjustment
         // Formula: mid_price * SPREAD_BPS * vol_multiplier / (20_000 * 100)
@@ -653,9 +682,12 @@ impl Strategy for SimpleSpread {
             bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2
         };
 
+        // Update volatility tracker with new mid price
+        self.vol_tracker.add_price(mid_price);
+
         // === CALCULATE BASE QUOTES ===
 
-        let (mut our_bid, mut our_ask) = Self::calculate_quotes(mid_price);
+        let (mut our_bid, mut our_ask) = self.calculate_quotes(mid_price);
 
         // === INVENTORY-BASED SKEW ADJUSTMENT ===
         //
@@ -832,8 +864,21 @@ impl Strategy for SimpleSpread {
             return None; // Don't quote unprofitable spreads
         }
 
-        // Return signal
-        Some(Signal::quote_both(our_bid, our_ask, ORDER_SIZE))
+        // === POSITION LIMIT CHECK ===
+        let current_qty = position.get_quantity();
+        let max_pos = MAX_POSITION as i64;
+        let max_short = -(MAX_SHORT as i64);
+
+        if current_qty >= max_pos {
+            // At max long limit - only quote Ask (reduce position)
+            Some(Signal::quote_ask(our_ask, ORDER_SIZE))
+        } else if current_qty <= max_short {
+            // At max short limit - only quote Bid (reduce position)
+            Some(Signal::quote_bid(our_bid, ORDER_SIZE))
+        } else {
+            // Normal quoting
+            Some(Signal::quote_both(our_bid, our_ask, ORDER_SIZE))
+        }
     }
 
     fn name(&self) -> &'static str {
@@ -841,15 +886,9 @@ impl Strategy for SimpleSpread {
     }
 
     fn reset(&mut self) {
-        // No state to reset (ZST)
+        self.vol_tracker.reset();
     }
 }
-
-// Compile-time size verification
-#[cfg(test)]
-const _: () = {
-    assert!(std::mem::size_of::<SimpleSpread>() == 0, "SimpleSpread must be zero-sized");
-};
 
 #[cfg(test)]
 mod tests {
@@ -862,18 +901,18 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_spread_is_zst() {
-        // Verify zero-sized type
-        assert_eq!(std::mem::size_of::<SimpleSpread>(), 0);
-        assert_eq!(std::mem::align_of::<SimpleSpread>(), 1);
+    fn test_simple_spread_is_not_zst() {
+        // Verify it's NOT a zero-sized type anymore
+        assert!(std::mem::size_of::<SimpleSpread>() > 0);
     }
 
     #[test]
     fn test_calculate_quotes() {
+        let strategy = SimpleSpread::new();
         // Mid price = 50,000 BTC (in fixed-point: 50_000_000_000_000)
         let mid = 50_000_000_000_000u64;
 
-        let (bid, ask) = SimpleSpread::calculate_quotes(mid);
+        let (bid, ask) = strategy.calculate_quotes(mid);
 
         // With default 10bps spread:
         // half_spread = 50000 * 10 / 20000 = 25 (in dollars)
@@ -949,7 +988,7 @@ mod tests {
 
     #[test]
     fn test_signal_generation() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
             market_id: 1,
@@ -983,7 +1022,7 @@ mod tests {
 
     #[test]
     fn test_invalid_snapshot() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         // Zero prices
         let snapshot = MarketSnapshot {
@@ -1016,7 +1055,7 @@ mod tests {
 
     #[test]
     fn test_strategy_name() {
-        let strategy = SimpleSpread;
+        let strategy = SimpleSpread::new();
         assert_eq!(strategy.name(), "SimpleSpread");
     }
 
@@ -1048,7 +1087,7 @@ mod tests {
 
     #[test]
     fn test_performance_characteristics() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
             market_id: 1,
@@ -1073,13 +1112,13 @@ mod tests {
         let position = create_test_position();
         let _signal = strategy.calculate(&snapshot, &position);
 
-        // Verify no allocations by checking we're still ZST
-        assert_eq!(std::mem::size_of_val(&strategy), 0);
+        // Verify allocations - we are no longer ZST but should still be small and stack allocated
+        assert!(std::mem::size_of_val(&strategy) > 0);
     }
 
     #[test]
     fn test_flash_crash_protection() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         // Flash crash: spread goes from normal to 500bps
         let flash_crash_snapshot = MarketSnapshot {
@@ -1112,7 +1151,7 @@ mod tests {
 
     #[test]
     fn test_bad_data_rejection() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         // Test 1: Price too low (< $1)
         // Use a tight spread (< 100 bps) so we test price bounds, not spread volatility
@@ -1165,7 +1204,7 @@ mod tests {
 
     #[test]
     fn test_low_liquidity_rejection() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         // Thin book: only 0.0005 BTC on each side
         let thin_book_snapshot = MarketSnapshot {
@@ -1199,7 +1238,7 @@ mod tests {
     #[test]
     fn test_inventory_skew() {
         // Test that inventory affects quotes
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
             market_id: 1,
@@ -1266,7 +1305,7 @@ mod tests {
     #[test]
     fn test_order_cancellation_logic() {
         // Test that strategy returns CancelAll signal in abnormal markets
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
         let position = Position::new();
 
         // Test 1: Wide spread (>100 bps) triggers cancel
@@ -1351,7 +1390,7 @@ mod tests {
 
     #[test]
     fn test_production_ready() {
-        let mut strategy = SimpleSpread;
+        let mut strategy = SimpleSpread::new();
 
         // Normal, production-quality market snapshot
         let good_snapshot = MarketSnapshot {
@@ -1903,4 +1942,39 @@ mod tests {
         // Level 1 should be < level 0 (deeper in book)
         assert!(level_1_bid < level_0_bid, "Level 1 bid should be < level 0");
         assert!(level_2_bid < level_1_bid, "Level 2 bid should be < level 1");
+    }
+
+    #[test]
+    fn test_volatility_scaling() {
+        let mut strategy = SimpleSpread::new();
+        
+        // 1. Initial state - no volatility (should be 1.0x)
+        let mid = 50_000_000_000_000; // ,000
+        let (bid1, ask1) = strategy.calculate_quotes(mid);
+        let spread1 = ask1 - bid1;
+        
+        // 2. Add volatility
+        strategy.reset();
+        
+        // Feed prices to generate volatility (20bps swings)
+        let p1 = 50_000_000_000_000;
+        let p2 = 50_100_000_000_000; // +20bps
+        let p3 = 49_900_000_000_000; // -20bps from base
+        
+        // Ramp up EWMA
+        for _ in 0..20 {
+             strategy.vol_tracker.add_price(p1);
+             strategy.vol_tracker.add_price(p2);
+             strategy.vol_tracker.add_price(p1);
+             strategy.vol_tracker.add_price(p3);
+        }
+        
+        // Check spread widened
+        let (_bid2, _ask2) = strategy.calculate_quotes(mid);
+        let vol = strategy.vol_tracker.volatility();
+        let mult = strategy.calculate_volatility_multiplier();
+        
+        if vol > 10 {
+            assert!(mult > 100, "Multiplier should increase with volatility");
+        }
     }

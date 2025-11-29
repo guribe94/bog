@@ -201,6 +201,7 @@ pub fn calculate_quotes(mid_price: u64, target_spread_bps: u32) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bog_core::config::DEFAULT_FEE_BPS;
 
     #[test]
     fn test_fee_constants() {
@@ -228,6 +229,22 @@ mod tests {
         // Round-trip cost
         assert_eq!(ROUND_TRIP_COST_BPS, MAKER_FEE_BPS + TAKER_FEE_BPS);
         assert_eq!(MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS);
+
+        // Cross-crate consistency: under default features, the taker fee
+        // should match the core DEFAULT_FEE_BPS used by the engine.
+        #[cfg(not(any(
+            feature = "maker-fee-1bps",
+            feature = "maker-fee-2bps",
+            feature = "maker-fee-5bps",
+            feature = "maker-fee-10bps",
+            feature = "taker-fee-5bps",
+            feature = "taker-fee-10bps",
+            feature = "taker-fee-20bps",
+            feature = "taker-fee-30bps"
+        )))]
+        {
+            assert_eq!(TAKER_FEE_BPS, DEFAULT_FEE_BPS);
+        }
     }
 
     #[test]

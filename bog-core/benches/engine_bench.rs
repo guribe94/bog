@@ -38,7 +38,7 @@ fn bench_engine_tick_processing(c: &mut Criterion) {
     // Target: <1μs (1000ns)
     group.significance_level(0.01).sample_size(10000);
 
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let executor = SimulatedExecutor::new_default();
     let mut engine = Engine::new(strategy, executor);
     let snapshot = create_market_snapshot(0);
@@ -57,7 +57,7 @@ fn bench_strategy_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("strategy_calculation");
     group.significance_level(0.01).sample_size(10000);
 
-    let mut strategy = SimpleSpread;
+    let mut strategy = SimpleSpread::new();
     let snapshot = create_market_snapshot(0);
     let position = Position::new();
 

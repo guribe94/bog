@@ -12,7 +12,7 @@ use anyhow::Result;
 #[test]
 fn test_engine_with_simple_spread() -> Result<()> {
     // Create strategy and executor
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let executor = SimulatedExecutor::new_default();
 
     // Create engine
@@ -44,7 +44,7 @@ fn test_engine_with_simple_spread() -> Result<()> {
 /// Test engine with multiple ticks
 #[test]
 fn test_engine_multiple_ticks() -> Result<()> {
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let executor = SimulatedExecutor::new_default();
     let mut engine = Engine::new(strategy, executor);
 
@@ -86,7 +86,7 @@ fn test_engine_multiple_ticks() -> Result<()> {
 /// Test that engine respects market change detection
 #[test]
 fn test_engine_market_change_detection() -> Result<()> {
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let executor = SimulatedExecutor::new_default();
     let mut engine = Engine::new(strategy, executor);
 
@@ -115,17 +115,17 @@ fn test_engine_market_change_detection() -> Result<()> {
     Ok(())
 }
 
-/// Test strategy compilation - verify zero-sized type
+/// Test strategy compilation - verify non-zero-sized type
 #[test]
-fn test_strategy_is_zero_sized() {
-    let strategy = SimpleSpread;
-    assert_eq!(std::mem::size_of_val(&strategy), 0);
+fn test_strategy_is_not_zero_sized() {
+    let strategy = SimpleSpread::new();
+    assert!(std::mem::size_of_val(&strategy) > 0);
 }
 
 /// Test executor stats tracking
 #[test]
 fn test_executor_stats() -> Result<()> {
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let mut executor = SimulatedExecutor::new_default();
 
     let position = Position::new();
@@ -150,7 +150,7 @@ fn test_executor_stats() -> Result<()> {
 fn test_tick_processing_latency() -> Result<()> {
     use std::time::Instant;
 
-    let strategy = SimpleSpread;
+    let strategy = SimpleSpread::new();
     let executor = SimulatedExecutor::new_default();
     let mut engine = Engine::new(strategy, executor);
 

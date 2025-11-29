@@ -507,6 +507,29 @@ impl Executor for SimulatedExecutor {
     fn dropped_fill_count(&self) -> u64 {
         self.dropped_fills
     }
+
+    fn get_open_exposure(&self) -> (i64, i64) {
+        let mut long_exposure = 0i64;
+        let mut short_exposure = 0i64;
+
+        for wrapper in self.orders.values() {
+            if wrapper.is_active() {
+                let order = wrapper.to_legacy();
+                let remaining = order.remaining_size();
+                
+                // Convert to fixed-point i64
+                let remaining_u64 = (remaining * Decimal::from(1_000_000_000))
+                    .to_u64()
+                    .unwrap_or(0);
+                
+                match order.side {
+                    Side::Buy => long_exposure += remaining_u64 as i64,
+                    Side::Sell => short_exposure += remaining_u64 as i64,
+                }
+            }
+        }
+        (long_exposure, short_exposure)
+    }
 }
 
 /// More realistic fill simulator (for future enhancement)

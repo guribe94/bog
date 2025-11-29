@@ -48,7 +48,8 @@
 //!
 //! 1. **Zero-Sized Types (ZSTs)** - Strategies contain no data
 //!    ```rust,ignore
-//!    assert_eq!(std::mem::size_of::<SimpleSpread>(), 0);
+//!    // NOTE: SimpleSpread is now stateful (volatility tracking)
+//!    // assert_eq!(std::mem::size_of::<SimpleSpread>(), 0);
 //!    ```
 //!
 //! 2. **Compile-Time Parameters** - All configuration via Cargo features
@@ -73,8 +74,8 @@
 //! use bog_strategies::SimpleSpread;
 //! use bog_core::prelude::*;
 //!
-//! // Create strategy (0 bytes, compiles to pure code)
-//! let mut strategy = SimpleSpread;
+//! // Create strategy (Stateful with volatility tracking)
+//! let mut strategy = SimpleSpread::new();
 //!
 //! // Calculate signal from market data
 //! # use bog_core::data::MarketSnapshot;
@@ -123,7 +124,7 @@
 //! And are used with `Engine<S: Strategy, E: Executor>`:
 //!
 //! ```rust,ignore
-//! let strategy = SimpleSpread;
+//! let strategy = SimpleSpread::new();
 //! let executor = SimulatedExecutor::new_default();
 //! let engine = Engine::new(strategy, executor);
 //! ```

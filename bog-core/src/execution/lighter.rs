@@ -1,6 +1,7 @@
 use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus};
 use super::order_bridge::OrderStateWrapper;
 use anyhow::{anyhow, Result};
+use rust_decimal::prelude::ToPrimitive;
 use std::collections::HashMap;
 use tracing::{info, warn};
 
@@ -129,6 +130,29 @@ impl Executor for LighterExecutor {
 
     fn execution_mode(&self) -> ExecutionMode {
         self.mode
+    }
+
+    fn get_open_exposure(&self) -> (i64, i64) {
+        let mut long_exposure = 0i64;
+        let mut short_exposure = 0i64;
+
+        for wrapper in self.orders.values() {
+            if wrapper.is_active() {
+                let order = wrapper.to_legacy();
+                let remaining = order.remaining_size();
+                
+                // Convert to fixed-point i64
+                let remaining_u64 = (remaining * rust_decimal::Decimal::from(1_000_000_000))
+                    .to_u64()
+                    .unwrap_or(0);
+                
+                match order.side {
+                    super::Side::Buy => long_exposure += remaining_u64 as i64,
+                    super::Side::Sell => short_exposure += remaining_u64 as i64,
+                }
+            }
+        }
+        (long_exposure, short_exposure)
     }
 }
 

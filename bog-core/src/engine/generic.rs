@@ -174,6 +174,15 @@ pub trait Executor {
 
     /// Executor name for logging
     fn name(&self) -> &'static str;
+
+    /// Get total open exposure (long, short) in fixed-point
+    ///
+    /// Returns tuple of (long_exposure, short_exposure):
+    /// - long_exposure: Sum of remaining size for all open Buy orders
+    /// - short_exposure: Sum of remaining size for all open Sell orders
+    ///
+    /// Used for conservative pre-trade risk checks.
+    fn get_open_exposure(&self) -> (i64, i64);
 }
 
 /// Cache-aligned hot data (64 bytes)
@@ -435,74 +444,74 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             // Check if the signal would breach position limits BEFORE execution
             let current_qty = self.position.get_quantity();
 
+            // Get open exposure from executor (conservative risk check)
+            let (open_long_exposure, open_short_exposure) = self.executor.get_open_exposure();
+
             // Validate based on signal action
             let would_breach = match signal.action {
                 crate::core::SignalAction::QuoteBoth => {
-                    // Check both sides - worst case if either side fills
-                    // Use checked arithmetic to prevent overflow
-                    let if_bid_fills = match current_qty.checked_add(signal.size as i64) {
-                        Some(pos) => pos,
-                        None => {
-                            tracing::error!("Position overflow detected on bid fill calculation");
-                            return Ok(()); // Skip signal on overflow
-                        }
-                    };
-                    let if_ask_fills = match current_qty.checked_sub(signal.size as i64) {
-                        Some(pos) => pos,
-                        None => {
-                            tracing::error!("Position underflow detected on ask fill calculation");
-                            return Ok(()); // Skip signal on underflow
-                        }
-                    };
+                    // Check both sides
+                    // 1. Check Long side: Current + Open Long + New Buy
+                    let potential_long = current_qty
+                        .checked_add(open_long_exposure)
+                        .and_then(|x| x.checked_add(signal.size as i64));
+                        
+                    // 2. Check Short side: Current - Open Short - New Sell
+                    let potential_short = current_qty
+                        .checked_sub(open_short_exposure)
+                        .and_then(|x| x.checked_sub(signal.size as i64));
 
-                    if_bid_fills > MAX_POSITION || if_ask_fills < -MAX_SHORT
+                    match (potential_long, potential_short) {
+                        (Some(l), Some(s)) => l > MAX_POSITION || s < -MAX_SHORT,
+                        _ => true // Overflow is a breach
+                    }
                 },
                 crate::core::SignalAction::QuoteBid => {
                     // Would increase position (buying)
-                    let new_position = match current_qty.checked_add(signal.size as i64) {
-                        Some(pos) => pos,
-                        None => {
-                            tracing::error!("Position overflow detected on bid quote");
-                            return Ok(()); // Skip signal on overflow
-                        }
-                    };
-                    new_position > MAX_POSITION
+                    // Risk: Current + Open Long + New Buy
+                    let potential_long = current_qty
+                        .checked_add(open_long_exposure)
+                        .and_then(|x| x.checked_add(signal.size as i64));
+                        
+                    match potential_long {
+                        Some(pos) => pos > MAX_POSITION,
+                        None => true // Overflow
+                    }
                 },
                 crate::core::SignalAction::QuoteAsk => {
                     // Would decrease position (selling)
-                    let new_position = match current_qty.checked_sub(signal.size as i64) {
-                        Some(pos) => pos,
-                        None => {
-                            tracing::error!("Position underflow detected on ask quote");
-                            return Ok(()); // Skip signal on underflow
-                        }
-                    };
-                    new_position < -MAX_SHORT
+                    // Risk: Current - Open Short - New Sell
+                    let potential_short = current_qty
+                        .checked_sub(open_short_exposure)
+                        .and_then(|x| x.checked_sub(signal.size as i64));
+                        
+                    match potential_short {
+                        Some(pos) => pos < -MAX_SHORT,
+                        None => true // Underflow
+                    }
                 },
                 crate::core::SignalAction::TakePosition => {
-                    // TakePosition is aggressive order - determine side from bid/ask price
-                    // If bid_price > 0, we're buying (crossing the spread)
-                    // If ask_price > 0, we're selling
+                    // TakePosition is aggressive order
                     if signal.bid_price > 0 {
-                        // Buying - would increase position
-                        let new_position = match current_qty.checked_add(signal.size as i64) {
-                            Some(pos) => pos,
-                            None => {
-                                tracing::error!("Position overflow detected on take position (buy)");
-                                return Ok(()); // Skip signal on overflow
-                            }
-                        };
-                        new_position > MAX_POSITION
+                        // Buying
+                        let potential_long = current_qty
+                            .checked_add(open_long_exposure)
+                            .and_then(|x| x.checked_add(signal.size as i64));
+                        
+                        match potential_long {
+                            Some(pos) => pos > MAX_POSITION,
+                            None => true
+                        }
                     } else if signal.ask_price > 0 {
-                        // Selling - would decrease position
-                        let new_position = match current_qty.checked_sub(signal.size as i64) {
-                            Some(pos) => pos,
-                            None => {
-                                tracing::error!("Position underflow detected on take position (sell)");
-                                return Ok(()); // Skip signal on underflow
-                            }
-                        };
-                        new_position < -MAX_SHORT
+                        // Selling
+                        let potential_short = current_qty
+                            .checked_sub(open_short_exposure)
+                            .and_then(|x| x.checked_sub(signal.size as i64));
+                            
+                        match potential_short {
+                            Some(pos) => pos < -MAX_SHORT,
+                            None => true
+                        }
                     } else {
                         false  // No valid price, won't execute
                     }
@@ -513,8 +522,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
             if would_breach {
                 tracing::warn!(
-                    "Pre-trade limit check failed: current_qty={}, signal_size={}, action={:?} would breach limits",
-                    current_qty, signal.size, signal.action
+                    "Pre-trade limit check failed: current_qty={}, open_long={}, open_short={}, signal_size={}, action={:?} would breach limits",
+                    current_qty, open_long_exposure, open_short_exposure, signal.size, signal.action
                 );
                 // Skip this signal to prevent position limit breach
                 return Ok(());
@@ -903,6 +912,10 @@ mod tests {
         fn dropped_fill_count(&self) -> u64 {
             0
         }
+
+        fn get_open_exposure(&self) -> (i64, i64) {
+            (0, 0)
+        }
     }
 
     #[test]
@@ -978,5 +991,62 @@ mod tests {
         // Price changed - returns true
         assert!(hot.market_changed(100, 106));
         assert!(hot.market_changed(101, 106));
+    }
+
+    #[test]
+    fn test_pre_trade_risk_with_open_exposure() {
+        // Define Mock Strategy
+        struct AlwaysQuoteStrategy;
+        impl Strategy for AlwaysQuoteStrategy {
+            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+                // Quote 1.0
+                Some(Signal::quote_both(50000, 50001, 1_000_000_000))
+            }
+            fn name(&self) -> &'static str { "AlwaysQuote" }
+        }
+
+        // Define Mock Executor with Exposure
+        struct ExposureMockExecutor {
+            long_exposure: i64,
+            short_exposure: i64,
+        }
+
+        impl Executor for ExposureMockExecutor {
+            fn execute(&mut self, _signal: Signal, _position: &Position) -> Result<()> { Ok(()) }
+            fn cancel_all(&mut self) -> Result<()> { Ok(()) }
+            fn name(&self) -> &'static str { "ExposureMock" }
+            fn get_fills(&mut self) -> Vec<crate::execution::Fill> { Vec::new() }
+            fn dropped_fill_count(&self) -> u64 { 0 }
+            fn get_open_exposure(&self) -> (i64, i64) {
+                (self.long_exposure, self.short_exposure)
+            }
+        }
+
+        use crate::config::MAX_POSITION;
+        
+        // Setup Engine with high exposure
+        let strategy = AlwaysQuoteStrategy;
+        let executor = ExposureMockExecutor { 
+            long_exposure: MAX_POSITION, // Already at max exposure
+            short_exposure: 0 
+        }; 
+        let mut engine = Engine::new(strategy, executor);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(1)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        // Process tick
+        engine.process_tick(&snapshot, true).unwrap();
+        
+        // Should NOT execute because Open Long Exposure (MAX) + New Buy (1.0) > MAX
+        // Note: increment_signals() happens AFTER the risk check passes and calculate() returns Some.
+        // Wait, my code has increment_signals() AFTER the check.
+        // So if check fails, it returns Ok(()) early, and signal_count is NOT incremented.
+        assert_eq!(engine.stats().signals_generated, 0, "Should skip execution due to risk limits");
     }
 }

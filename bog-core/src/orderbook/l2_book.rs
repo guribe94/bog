@@ -58,6 +58,10 @@ pub struct L2OrderBook {
 
     /// Timestamp of last update (for staleness detection)
     pub last_update_ns: u64,
+
+    /// Flag indicating if depth levels (1-9) might be stale
+    /// True if last update was incremental (only level 0 updated)
+    pub depth_stale: bool,
 }
 
 impl L2OrderBook {
@@ -71,6 +75,7 @@ impl L2OrderBook {
             ask_sizes: [0; DEPTH_LEVELS],
             last_sequence: 0,
             last_update_ns: 0,
+            depth_stale: true, // Initially stale until full snapshot
         }
     }
 
@@ -114,6 +119,7 @@ impl L2OrderBook {
 
         self.last_sequence = snapshot.sequence;
         self.last_update_ns = snapshot.exchange_timestamp_ns;
+        self.depth_stale = false; // Full rebuild guarantees fresh depth
     }
 
     /// Incremental update of top-of-book only
@@ -139,6 +145,7 @@ impl L2OrderBook {
 
         self.last_sequence = snapshot.sequence;
         self.last_update_ns = snapshot.exchange_timestamp_ns;
+        self.depth_stale = true; // Depth levels (1-9) not updated, potentially stale
     }
 
     /// Get best bid price (level 0)

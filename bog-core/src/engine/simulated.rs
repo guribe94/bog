@@ -322,11 +322,11 @@ impl Executor for SimulatedExecutor {
             };
 
             // Create Fill with timestamp and fee
-            // TODO: Make fee configurable - hardcoded to 0.02% (2bps) taker fee for now
-            const FEE_RATE: &str = "0.0002";
-            let fee = Decimal::from_str_exact(FEE_RATE)
-                .ok()
-                .map(|rate| size * rate);
+            // Fee is charged in quote currency as a percentage of notional.
+            let notional = price * size;
+            let fee_rate = Decimal::from(crate::config::DEFAULT_FEE_BPS)
+                / Decimal::from(10_000u32);
+            let fee = Some(notional * fee_rate);
 
             // Convert core::OrderId to execution::OrderId
             let order_id_str = format!("{:032x}", pooled_fill.order_id.0);
@@ -351,6 +351,12 @@ impl Executor for SimulatedExecutor {
 
     fn name(&self) -> &'static str {
         "SimulatedExecutor"
+    }
+
+    fn get_open_exposure(&self) -> (i64, i64) {
+        // In zero-overhead simulation, orders are filled immediately
+        // so there is no open exposure.
+        (0, 0)
     }
 }
 
@@ -387,6 +393,7 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::prelude::FromPrimitive;
 
     #[test]
     fn test_pooled_order_size() {
@@ -502,6 +509,43 @@ mod tests {
         assert_eq!(stats.total_orders, 2); // Bid + Ask
         assert_eq!(stats.total_fills, 2);
         assert_eq!(stats.total_volume, 200_000_000); // 0.1 + 0.1 BTC
+    }
+
+    #[test]
+    fn test_executor_fee_amount_matches_config_bps() {
+        let mut executor = SimulatedExecutor::new_default();
+        let position = Position::new();
+
+        // Single bid quote
+        let price_fixed: u64 = 50_000_000_000_000; // $50,000
+        let size_fixed: u64 = 100_000_000; // 0.1 BTC
+        let signal = Signal::quote_bid(price_fixed, size_fixed);
+
+        executor.execute(signal, &position).unwrap();
+
+        let fills = executor.get_fills();
+        assert_eq!(fills.len(), 1);
+
+        let fill = &fills[0];
+        let notional = fill.notional();
+
+        // Expected fee = notional * DEFAULT_FEE_BPS / 10_000
+        let fee_rate = rust_decimal::Decimal::from(crate::config::DEFAULT_FEE_BPS)
+            / rust_decimal::Decimal::from(10_000u32);
+        let expected_fee = notional * fee_rate;
+
+        let actual_fee = fill.fee.expect("fee should be present");
+
+        // Allow for tiny rounding differences
+        let diff = (expected_fee - actual_fee).abs();
+        let epsilon = rust_decimal::Decimal::from_f64(0.0000001).unwrap();
+        assert!(
+            diff <= epsilon,
+            "fee mismatch: expected {}, got {}, diff {}",
+            expected_fee,
+            actual_fee,
+            diff
+        );
     }
 
     #[test]

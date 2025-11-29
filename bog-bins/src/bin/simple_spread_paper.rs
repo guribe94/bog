@@ -107,8 +107,8 @@ fn main() -> Result<()> {
     info!("  - Spread: {} bps", ((initial_snapshot.best_ask_price - initial_snapshot.best_bid_price) * 10_000) / initial_snapshot.best_bid_price);
     info!("  - Is Full Snapshot: {}", initial_snapshot.is_full_snapshot());
 
-    // Create strategy (zero-sized type - 0 bytes!)
-    let strategy = SimpleSpread;
+    // Create strategy (non-zero sized type with volatility state)
+    let strategy = SimpleSpread::new();
     info!("Strategy: SimpleSpread (size: {} bytes)", std::mem::size_of_val(&strategy));
     info!("  - Target Spread: {} bps", SPREAD_BPS);
     info!("  - Order Size: {} (fixed-point)", ORDER_SIZE);

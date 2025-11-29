@@ -107,4 +107,8 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
     fn dropped_fill_count(&self) -> u64 {
         self.executor.dropped_fill_count()
     }
+
+    fn get_open_exposure(&self) -> (i64, i64) {
+        self.executor.get_open_exposure()
+    }
 }

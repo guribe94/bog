@@ -31,8 +31,8 @@ fn main() -> Result<()> {
     // Setup performance (CPU pinning, real-time priority)
     setup_performance(args.cpu_core, args.realtime)?;
 
-    // Create strategy (zero-sized type - 0 bytes!)
-    let strategy = SimpleSpread;
+    // Create strategy (non-zero sized type with volatility state)
+    let strategy = SimpleSpread::new();
     tracing::info!("Strategy size: {} bytes", std::mem::size_of_val(&strategy));
 
     // Create executor with default configuration

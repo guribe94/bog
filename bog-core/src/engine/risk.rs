@@ -16,40 +16,12 @@ use anyhow::{anyhow, Result};
 // ===== CONST RISK LIMITS FROM CARGO FEATURES =====
 
 /// Maximum long position (fixed-point, 9 decimals)
-/// Default: 1.0 BTC
-#[cfg(not(any(
-    feature = "max-position-half",
-    feature = "max-position-one",
-    feature = "max-position-five"
-)))]
-pub const MAX_POSITION: i64 = 1_000_000_000; // 1.0 BTC
-
-#[cfg(feature = "max-position-half")]
-pub const MAX_POSITION: i64 = 500_000_000; // 0.5 BTC
-
-#[cfg(feature = "max-position-one")]
-pub const MAX_POSITION: i64 = 1_000_000_000; // 1.0 BTC
-
-#[cfg(feature = "max-position-five")]
-pub const MAX_POSITION: i64 = 5_000_000_000; // 5.0 BTC
+/// Delegated to `crate::config::MAX_POSITION` to ensure a single source of truth.
+pub const MAX_POSITION: i64 = crate::config::MAX_POSITION;
 
 /// Maximum short position (fixed-point, 9 decimals)
-/// Default: 1.0 BTC
-#[cfg(not(any(
-    feature = "max-short-half",
-    feature = "max-short-one",
-    feature = "max-short-five"
-)))]
-pub const MAX_SHORT: i64 = 1_000_000_000; // 1.0 BTC
-
-#[cfg(feature = "max-short-half")]
-pub const MAX_SHORT: i64 = 500_000_000;
-
-#[cfg(feature = "max-short-one")]
-pub const MAX_SHORT: i64 = 1_000_000_000;
-
-#[cfg(feature = "max-short-five")]
-pub const MAX_SHORT: i64 = 5_000_000_000;
+/// Delegated to `crate::config::MAX_SHORT` to ensure a single source of truth.
+pub const MAX_SHORT: i64 = crate::config::MAX_SHORT;
 
 /// Maximum order size (fixed-point, 9 decimals)
 /// Default: 0.5 BTC
@@ -88,22 +60,8 @@ pub const MIN_ORDER_SIZE: u64 = 10_000_000;
 pub const MIN_ORDER_SIZE: u64 = 100_000_000;
 
 /// Maximum daily loss (fixed-point, 9 decimals)
-/// Default: 1000 USD
-#[cfg(not(any(
-    feature = "max-daily-loss-100",
-    feature = "max-daily-loss-1000",
-    feature = "max-daily-loss-10000"
-)))]
-pub const MAX_DAILY_LOSS: i64 = 1_000_000_000_000; // 1000 USD
-
-#[cfg(feature = "max-daily-loss-100")]
-pub const MAX_DAILY_LOSS: i64 = 100_000_000_000;
-
-#[cfg(feature = "max-daily-loss-1000")]
-pub const MAX_DAILY_LOSS: i64 = 1_000_000_000_000;
-
-#[cfg(feature = "max-daily-loss-10000")]
-pub const MAX_DAILY_LOSS: i64 = 10_000_000_000_000;
+/// Delegated to `crate::config::MAX_DAILY_LOSS` to ensure consistency.
+pub const MAX_DAILY_LOSS: i64 = crate::config::MAX_DAILY_LOSS;
 
 // ===== INLINE RISK VALIDATION =====
 

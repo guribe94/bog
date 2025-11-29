@@ -172,6 +172,15 @@ pub trait Executor: Send {
     /// Get execution mode
     fn execution_mode(&self) -> ExecutionMode;
 
+    /// Get total open exposure (long, short) in fixed-point
+    ///
+    /// Returns tuple of (long_exposure, short_exposure):
+    /// - long_exposure: Sum of remaining size for all open Buy orders
+    /// - short_exposure: Sum of remaining size for all open Sell orders
+    ///
+    /// Used for conservative pre-trade risk checks.
+    fn get_open_exposure(&self) -> (i64, i64);
+
     /// Get the count of fills that were dropped due to queue overflow
     /// (Default implementation returns 0 for backends that don't support this)
     fn dropped_fill_count(&self) -> u64 {
