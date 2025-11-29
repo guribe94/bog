@@ -26,20 +26,30 @@
 /// - `maker-fee-10bps`
 pub const MAKER_FEE_BPS: u32 = {
     #[cfg(feature = "maker-fee-10bps")]
-    { 10 }
+    {
+        10
+    }
     #[cfg(feature = "maker-fee-5bps")]
-    { 5 }
+    {
+        5
+    }
     #[cfg(feature = "maker-fee-2bps")]
-    { 2 }
+    {
+        2
+    }
     #[cfg(feature = "maker-fee-1bps")]
-    { 1 }
+    {
+        1
+    }
     #[cfg(not(any(
         feature = "maker-fee-1bps",
         feature = "maker-fee-2bps",
         feature = "maker-fee-5bps",
         feature = "maker-fee-10bps"
     )))]
-    { 0 } // Lighter default: 0.2 bps rounds to 0
+    {
+        0
+    } // Lighter default: 0.2 bps rounds to 0
 };
 
 /// Taker fee in basis points (fee paid when taking liquidity / getting filled)
@@ -54,20 +64,30 @@ pub const MAKER_FEE_BPS: u32 = {
 /// - `taker-fee-30bps`
 pub const TAKER_FEE_BPS: u32 = {
     #[cfg(feature = "taker-fee-30bps")]
-    { 30 }
+    {
+        30
+    }
     #[cfg(feature = "taker-fee-20bps")]
-    { 20 }
+    {
+        20
+    }
     #[cfg(feature = "taker-fee-10bps")]
-    { 10 }
+    {
+        10
+    }
     #[cfg(feature = "taker-fee-5bps")]
-    { 5 }
+    {
+        5
+    }
     #[cfg(not(any(
         feature = "taker-fee-5bps",
         feature = "taker-fee-10bps",
         feature = "taker-fee-20bps",
         feature = "taker-fee-30bps"
     )))]
-    { 2 } // Lighter default
+    {
+        2
+    } // Lighter default
 };
 
 /// Total round-trip cost in basis points

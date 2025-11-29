@@ -64,11 +64,7 @@ impl fmt::Display for OverflowError {
                 )
             }
             OverflowError::TradeCountOverflow { old } => {
-                write!(
-                    f,
-                    "Trade count overflow: {} trades (limit: u32::MAX)",
-                    old
-                )
+                write!(f, "Trade count overflow: {} trades (limit: u32::MAX)", old)
             }
         }
     }
@@ -125,7 +121,11 @@ impl fmt::Display for ConversionError {
                     if *positive { "positive" } else { "negative" }
                 )
             }
-            ConversionError::PrecisionLoss { original, converted, error_bps } => {
+            ConversionError::PrecisionLoss {
+                original,
+                converted,
+                error_bps,
+            } => {
                 write!(
                     f,
                     "Precision loss too high: {} → {} (error: {} bps)",
@@ -202,11 +202,14 @@ mod tests {
 
     #[test]
     fn test_position_error_from_overflow() {
-        let overflow = OverflowError::QuantityOverflow { old: 100, delta: 200 };
+        let overflow = OverflowError::QuantityOverflow {
+            old: 100,
+            delta: 200,
+        };
         let pos_err: PositionError = overflow.into();
 
         match pos_err {
-            PositionError::Overflow(_) => {},
+            PositionError::Overflow(_) => {}
             _ => panic!("Expected Overflow variant"),
         }
     }

@@ -141,24 +141,24 @@
 //!
 //! See [Performance Report](../PERFORMANCE_REPORT.md) for detailed benchmarks.
 
-pub mod simple_spread;
-pub mod inventory_based;
-pub mod volatility;
 pub mod fees;
+pub mod inventory_based;
+pub mod simple_spread;
+pub mod volatility;
 
 // Test utilities (only available in test builds)
 #[cfg(test)]
 pub mod test_helpers;
 
 // Re-export strategies for convenience
-pub use simple_spread::SimpleSpread;
 pub use inventory_based::InventoryBased;
+pub use simple_spread::SimpleSpread;
 
 // Re-export volatility estimators
-pub use volatility::{RollingVolatility, EwmaVolatility, ParkinsonVolatility};
+pub use volatility::{EwmaVolatility, ParkinsonVolatility, RollingVolatility};
 
 // Re-export fee configuration
 pub use fees::{
-    MAKER_FEE_BPS, TAKER_FEE_BPS, ROUND_TRIP_COST_BPS, MIN_PROFITABLE_SPREAD_BPS,
-    calculate_fee, calculate_required_spread, calculate_quotes,
+    calculate_fee, calculate_quotes, calculate_required_spread, MAKER_FEE_BPS,
+    MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS, TAKER_FEE_BPS,
 };

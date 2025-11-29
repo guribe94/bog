@@ -399,8 +399,7 @@ mod tests {
 
     #[test]
     fn test_connected_to_disconnected() {
-        let conn = ConnectionDisconnected::new("test-ws".to_string())
-            .connect();
+        let conn = ConnectionDisconnected::new("test-ws".to_string()).connect();
 
         let conn = conn.disconnect();
         assert!(!conn.is_operational());
@@ -468,12 +467,10 @@ mod tests {
         let conn = ConnectionDisconnected::new("test-ws".to_string());
 
         let failed = match conn.retry(1) {
-            RetryResult::Reconnecting(r) => {
-                match r.attempt_failed() {
-                    ReconnectResult::Failed(f) => f,
-                    _ => panic!(),
-                }
-            }
+            RetryResult::Reconnecting(r) => match r.attempt_failed() {
+                ReconnectResult::Failed(f) => f,
+                _ => panic!(),
+            },
             _ => panic!(),
         };
 

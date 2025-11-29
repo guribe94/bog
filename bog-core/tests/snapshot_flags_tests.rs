@@ -19,7 +19,7 @@ fn create_test_snapshot(sequence: u64, is_full: bool) -> MarketSnapshot {
         .market_id(1)
         .sequence(sequence)
         .timestamp(1_000_000_000_000)
-        .best_bid(50_000_000_000_000, 1_000_000_000)  // $50,000, 1.0 BTC
+        .best_bid(50_000_000_000_000, 1_000_000_000) // $50,000, 1.0 BTC
         .best_ask(50_010_000_000_000, 1_000_000_000); // $50,010, 1.0 BTC
 
     if is_full {
@@ -30,9 +30,9 @@ fn create_test_snapshot(sequence: u64, is_full: bool) -> MarketSnapshot {
         let mut ask_sizes = Vec::with_capacity(ORDERBOOK_DEPTH);
 
         for i in 0..ORDERBOOK_DEPTH {
-            bid_prices.push(50_000_000_000_000 - (i as u64 + 1) * 10_000_000_000);  // $10 decrements
+            bid_prices.push(50_000_000_000_000 - (i as u64 + 1) * 10_000_000_000); // $10 decrements
             bid_sizes.push((1_000_000_000 * (ORDERBOOK_DEPTH - i) as u64) / ORDERBOOK_DEPTH as u64);
-            ask_prices.push(50_010_000_000_000 + (i as u64) * 10_000_000_000);  // $10 increments
+            ask_prices.push(50_010_000_000_000 + (i as u64) * 10_000_000_000); // $10 increments
             ask_sizes.push((1_000_000_000 * (ORDERBOOK_DEPTH - i) as u64) / ORDERBOOK_DEPTH as u64);
         }
 
@@ -68,8 +68,16 @@ fn test_snapshot_flag_full_set() {
 
     // Verify all levels are populated in a full snapshot
     for i in 0..10 {
-        assert!(full_snapshot.bid_prices[i] > 0, "Bid price {} should be non-zero", i);
-        assert!(full_snapshot.ask_prices[i] > 0, "Ask price {} should be non-zero", i);
+        assert!(
+            full_snapshot.bid_prices[i] > 0,
+            "Bid price {} should be non-zero",
+            i
+        );
+        assert!(
+            full_snapshot.ask_prices[i] > 0,
+            "Ask price {} should be non-zero",
+            i
+        );
     }
 }
 
@@ -133,14 +141,12 @@ fn test_full_snapshot_triggers_rebuild() {
     // Verify all 10 bid levels are from the snapshot (not old values)
     for i in 0..10 {
         assert_eq!(
-            orderbook.bid_prices[i],
-            full_snapshot.bid_prices[i],
+            orderbook.bid_prices[i], full_snapshot.bid_prices[i],
             "Bid price {} not updated from full snapshot",
             i
         );
         assert_eq!(
-            orderbook.bid_sizes[i],
-            full_snapshot.bid_sizes[i],
+            orderbook.bid_sizes[i], full_snapshot.bid_sizes[i],
             "Bid size {} not updated from full snapshot",
             i
         );
@@ -149,14 +155,12 @@ fn test_full_snapshot_triggers_rebuild() {
     // Verify all 10 ask levels are from the snapshot
     for i in 0..10 {
         assert_eq!(
-            orderbook.ask_prices[i],
-            full_snapshot.ask_prices[i],
+            orderbook.ask_prices[i], full_snapshot.ask_prices[i],
             "Ask price {} not updated from full snapshot",
             i
         );
         assert_eq!(
-            orderbook.ask_sizes[i],
-            full_snapshot.ask_sizes[i],
+            orderbook.ask_sizes[i], full_snapshot.ask_sizes[i],
             "Ask size {} not updated from full snapshot",
             i
         );
@@ -164,7 +168,10 @@ fn test_full_snapshot_triggers_rebuild() {
 
     // Verify sequence and timestamp updated
     assert_eq!(orderbook.last_sequence, full_snapshot.sequence);
-    assert_eq!(orderbook.last_update_ns, full_snapshot.exchange_timestamp_ns);
+    assert_eq!(
+        orderbook.last_update_ns,
+        full_snapshot.exchange_timestamp_ns
+    );
 
     // Verify no stale data remains (old values 1000, 999, 2000, 2999 are gone)
     assert_ne!(orderbook.bid_prices[0], 1000);
@@ -189,24 +196,40 @@ fn test_incremental_update_preserves_depth() {
     orderbook.sync_from_snapshot(&full_snapshot);
 
     // Save the deep levels (2-9) for later comparison
-    let saved_bid_levels: Vec<_> = (1..10).map(|i| (orderbook.bid_prices[i], orderbook.bid_sizes[i])).collect();
-    let saved_ask_levels: Vec<_> = (1..10).map(|i| (orderbook.ask_prices[i], orderbook.ask_sizes[i])).collect();
+    let saved_bid_levels: Vec<_> = (1..10)
+        .map(|i| (orderbook.bid_prices[i], orderbook.bid_sizes[i]))
+        .collect();
+    let saved_ask_levels: Vec<_> = (1..10)
+        .map(|i| (orderbook.ask_prices[i], orderbook.ask_sizes[i]))
+        .collect();
 
     // Create an incremental update with different top-of-book
     let mut incremental = create_test_snapshot(101, false);
-    incremental.best_bid_price = 50_001_000_000_000;  // Changed
-    incremental.best_bid_size = 2_000_000_000;        // Changed
-    incremental.best_ask_price = 50_009_000_000_000;  // Changed
-    incremental.best_ask_size = 3_000_000_000;        // Changed
+    incremental.best_bid_price = 50_001_000_000_000; // Changed
+    incremental.best_bid_size = 2_000_000_000; // Changed
+    incremental.best_ask_price = 50_009_000_000_000; // Changed
+    incremental.best_ask_size = 3_000_000_000; // Changed
 
     // Apply incremental update
     orderbook.sync_from_snapshot(&incremental);
 
     // Verify top-of-book (level 0) was updated
-    assert_eq!(orderbook.bid_prices[0], incremental.best_bid_price, "Best bid price not updated");
-    assert_eq!(orderbook.bid_sizes[0], incremental.best_bid_size, "Best bid size not updated");
-    assert_eq!(orderbook.ask_prices[0], incremental.best_ask_price, "Best ask price not updated");
-    assert_eq!(orderbook.ask_sizes[0], incremental.best_ask_size, "Best ask size not updated");
+    assert_eq!(
+        orderbook.bid_prices[0], incremental.best_bid_price,
+        "Best bid price not updated"
+    );
+    assert_eq!(
+        orderbook.bid_sizes[0], incremental.best_bid_size,
+        "Best bid size not updated"
+    );
+    assert_eq!(
+        orderbook.ask_prices[0], incremental.best_ask_price,
+        "Best ask price not updated"
+    );
+    assert_eq!(
+        orderbook.ask_sizes[0], incremental.best_ask_size,
+        "Best ask size not updated"
+    );
 
     // Verify deeper levels (1-9) were preserved
     for i in 1..10 {
@@ -263,8 +286,16 @@ fn test_full_snapshot_after_incremental() {
     for i in 0..10 {
         assert_eq!(orderbook.bid_prices[i], full_snapshot.bid_prices[i]);
         assert_eq!(orderbook.ask_prices[i], full_snapshot.ask_prices[i]);
-        assert!(orderbook.bid_prices[i] > 0, "Level {} should be populated", i);
-        assert!(orderbook.ask_prices[i] > 0, "Level {} should be populated", i);
+        assert!(
+            orderbook.bid_prices[i] > 0,
+            "Level {} should be populated",
+            i
+        );
+        assert!(
+            orderbook.ask_prices[i] > 0,
+            "Level {} should be populated",
+            i
+        );
     }
 }
 
@@ -306,8 +337,16 @@ fn test_incremental_after_full() {
         assert_eq!(orderbook.ask_prices[0], incremental.best_ask_price);
 
         // Verify deep levels unchanged
-        assert_eq!(orderbook.bid_prices[9], saved_bid_9, "Deep bid changed at seq {}", seq);
-        assert_eq!(orderbook.ask_prices[9], saved_ask_9, "Deep ask changed at seq {}", seq);
+        assert_eq!(
+            orderbook.bid_prices[9], saved_bid_9,
+            "Deep bid changed at seq {}",
+            seq
+        );
+        assert_eq!(
+            orderbook.ask_prices[9], saved_ask_9,
+            "Deep ask changed at seq {}",
+            seq
+        );
     }
 }
 
@@ -333,7 +372,7 @@ fn test_multiple_incremental_updates() {
         let mut incremental = create_test_snapshot(seq, false);
 
         // Simulate realistic price movement
-        let price_offset = ((seq - 1000) as i64 - 100) * 100_000_000;  // Oscillate around mid
+        let price_offset = ((seq - 1000) as i64 - 100) * 100_000_000; // Oscillate around mid
         incremental.best_bid_price = (50_000_000_000_000 as i64 + price_offset) as u64;
         incremental.best_ask_price = (50_010_000_000_000 as i64 + price_offset) as u64;
 
@@ -351,21 +390,33 @@ fn test_multiple_incremental_updates() {
     }
 
     // After many incrementals, deep levels should still be from original full snapshot
-    assert_eq!(orderbook.bid_prices[5], initial_deep_bid, "Deep bid changed without full snapshot");
-    assert_eq!(orderbook.ask_prices[5], initial_deep_ask, "Deep ask changed without full snapshot");
+    assert_eq!(
+        orderbook.bid_prices[5], initial_deep_bid,
+        "Deep bid changed without full snapshot"
+    );
+    assert_eq!(
+        orderbook.ask_prices[5], initial_deep_ask,
+        "Deep ask changed without full snapshot"
+    );
 
     // Now receive a new full snapshot - deep levels should update
     let mut new_full_snapshot = create_test_snapshot(2000, true);
-    
+
     // Change deep levels to ensure we can detect the update
     new_full_snapshot.bid_prices[5] -= 1_000_000_000;
     new_full_snapshot.ask_prices[5] += 1_000_000_000;
-    
+
     orderbook.sync_from_snapshot(&new_full_snapshot);
 
     // Verify deep levels are now different
-    assert_ne!(orderbook.bid_prices[5], initial_deep_bid, "Deep bid not updated by new full snapshot");
-    assert_ne!(orderbook.ask_prices[5], initial_deep_ask, "Deep ask not updated by new full snapshot");
+    assert_ne!(
+        orderbook.bid_prices[5], initial_deep_bid,
+        "Deep bid not updated by new full snapshot"
+    );
+    assert_ne!(
+        orderbook.ask_prices[5], initial_deep_ask,
+        "Deep ask not updated by new full snapshot"
+    );
 
     // All levels should match the new snapshot
     for i in 0..10 {
@@ -393,10 +444,16 @@ fn test_orderbook_state_after_rebuild() {
     assert!(mid_price > 0, "Mid price should be positive");
 
     let spread_bps = orderbook.spread_bps();
-    assert!(spread_bps > 0 && spread_bps < 1000, "Spread should be reasonable");
+    assert!(
+        spread_bps > 0 && spread_bps < 1000,
+        "Spread should be reasonable"
+    );
 
     let imbalance = orderbook.imbalance();
-    assert!(imbalance >= -100 && imbalance <= 100, "Imbalance should be in range");
+    assert!(
+        imbalance >= -100 && imbalance <= 100,
+        "Imbalance should be in range"
+    );
 
     // Apply incremental update
     let incremental = create_test_snapshot(101, false);
@@ -404,7 +461,10 @@ fn test_orderbook_state_after_rebuild() {
 
     // State should still be valid
     let new_mid_price = orderbook.mid_price();
-    assert!(new_mid_price > 0, "Mid price should remain positive after incremental");
+    assert!(
+        new_mid_price > 0,
+        "Mid price should remain positive after incremental"
+    );
 
     // Apply another full snapshot
     let new_full = create_test_snapshot(200, true);
@@ -503,8 +563,8 @@ fn test_crossed_orderbook_snapshot() {
 
     // Create a crossed snapshot (bid > ask - invalid)
     let mut crossed_snapshot = create_test_snapshot(100, true);
-    crossed_snapshot.best_bid_price = 50_020_000_000_000;  // $50,020
-    crossed_snapshot.best_ask_price = 50_010_000_000_000;  // $50,010 - CROSSED!
+    crossed_snapshot.best_bid_price = 50_020_000_000_000; // $50,020
+    crossed_snapshot.best_ask_price = 50_010_000_000_000; // $50,010 - CROSSED!
     crossed_snapshot.bid_prices[0] = crossed_snapshot.best_bid_price;
     crossed_snapshot.ask_prices[0] = crossed_snapshot.best_ask_price;
 
@@ -514,7 +574,10 @@ fn test_crossed_orderbook_snapshot() {
     // Verify the crossed state was stored
     assert_eq!(orderbook.bid_prices[0], crossed_snapshot.best_bid_price);
     assert_eq!(orderbook.ask_prices[0], crossed_snapshot.best_ask_price);
-    assert!(orderbook.bid_prices[0] > orderbook.ask_prices[0], "Crossed state preserved");
+    assert!(
+        orderbook.bid_prices[0] > orderbook.ask_prices[0],
+        "Crossed state preserved"
+    );
 
     // The circuit breaker or validator should catch this, not the orderbook itself
     // Orderbook is just a data structure, validation is a separate concern

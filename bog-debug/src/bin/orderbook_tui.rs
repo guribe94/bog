@@ -140,9 +140,9 @@ fn ui(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Header
-            Constraint::Min(10),    // Orderbook
-            Constraint::Length(3),  // Footer
+            Constraint::Length(3), // Header
+            Constraint::Min(10),   // Orderbook
+            Constraint::Length(3), // Footer
         ])
         .split(f.area());
 
@@ -163,12 +163,26 @@ fn render_header(f: &mut Frame, area: Rect, app: &App) {
     let spread_usd = (mid as f64 * spread as f64 / 10_000.0) / 1_000_000_000.0;
 
     let status = if app.paused { "PAUSED" } else { "LIVE" };
-    let status_color = if app.paused { Color::Yellow } else { Color::Green };
+    let status_color = if app.paused {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
 
     let title = Line::from(vec![
-        Span::styled("BOG ORDERBOOK VIEWER", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "BOG ORDERBOOK VIEWER",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" | BTC/USD Market 1 | "),
-        Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     let info = Line::from(vec![
@@ -260,7 +274,9 @@ fn render_ladder(f: &mut Frame, area: Rect, app: &App) {
         Span::raw("─────"),
         Span::styled(
             format!(" MID: ${:.2} ", mid_decimal),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ),
         Span::raw("─────"),
     ]);
@@ -276,7 +292,9 @@ fn render_ladder(f: &mut Frame, area: Rect, app: &App) {
             Span::styled("BID ", Style::default().fg(Color::Green)),
             Span::styled(
                 format!("{:>10.2}", price_decimal),
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(bar, Style::default().fg(Color::Green)),
@@ -324,9 +342,12 @@ fn render_metrics(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let text = vec![
-        Line::from(vec![
-            Span::styled("MARKET DEPTH", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "MARKET DEPTH",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::raw("Bid Levels: "),
@@ -337,23 +358,36 @@ fn render_metrics(f: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!("{}", ask_depth), Style::default().fg(Color::Red)),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("IMBALANCE", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
-        Line::from(vec![
-            Span::styled(imbalance_text, Style::default().fg(imbalance_color)),
-        ]),
+        Line::from(vec![Span::styled(
+            "IMBALANCE",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![Span::styled(
+            imbalance_text,
+            Style::default().fg(imbalance_color),
+        )]),
         Line::from(vec![
             Span::raw("Value: "),
-            Span::styled(format!("{:+}", imbalance), Style::default().fg(imbalance_color)),
+            Span::styled(
+                format!("{:+}", imbalance),
+                Style::default().fg(imbalance_color),
+            ),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled("STATISTICS", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        ]),
+        Line::from(vec![Span::styled(
+            "STATISTICS",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(vec![
             Span::raw("Updates: "),
-            Span::styled(format!("{}", app.tick_count), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", app.tick_count),
+                Style::default().fg(Color::White),
+            ),
         ]),
     ];
 
@@ -425,10 +459,14 @@ fn create_mock_snapshot(tick: u64) -> MarketSnapshot {
 
     // Fill in 10 levels
     for i in 0..10 {
-        snapshot.bid_prices[i] = snapshot.best_bid_price.saturating_sub((i as u64 + 1) * 10_000_000_000);
+        snapshot.bid_prices[i] = snapshot
+            .best_bid_price
+            .saturating_sub((i as u64 + 1) * 10_000_000_000);
         snapshot.bid_sizes[i] = 500_000_000 + (i as u64 * 100_000_000);
 
-        snapshot.ask_prices[i] = snapshot.best_ask_price.saturating_add((i as u64 + 1) * 10_000_000_000);
+        snapshot.ask_prices[i] = snapshot
+            .best_ask_price
+            .saturating_add((i as u64 + 1) * 10_000_000_000);
         snapshot.ask_sizes[i] = 800_000_000 + (i as u64 * 150_000_000);
     }
 

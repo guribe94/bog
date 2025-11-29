@@ -1,5 +1,5 @@
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 // Re-export Huginn types
 pub use huginn::shm::{ConsumerStats, MarketSnapshot};
@@ -107,9 +107,7 @@ pub mod conversions {
     /// Convert Decimal to u64 fixed-point
     #[inline]
     pub fn decimal_to_u64(price: Decimal) -> u64 {
-        (price * Decimal::from(1_000_000_000))
-            .to_u64()
-            .unwrap_or(0)
+        (price * Decimal::from(1_000_000_000)).to_u64().unwrap_or(0)
     }
 }
 

@@ -105,34 +105,13 @@ pub struct RiskLimits {
 /// Risk violation types
 #[derive(Debug, Clone)]
 pub enum RiskViolation {
-    OrderSizeTooSmall {
-        size: Decimal,
-        min: Decimal,
-    },
-    OrderSizeTooLarge {
-        size: Decimal,
-        max: Decimal,
-    },
-    PositionLimitExceeded {
-        projected: Decimal,
-        limit: Decimal,
-    },
-    ShortLimitExceeded {
-        projected: Decimal,
-        limit: Decimal,
-    },
-    TooManyOutstandingOrders {
-        current: usize,
-        max: usize,
-    },
-    DailyLossLimitBreached {
-        daily_pnl: Decimal,
-        limit: Decimal,
-    },
-    DrawdownLimitBreached {
-        drawdown_pct: f64,
-        limit: f64,
-    },
+    OrderSizeTooSmall { size: Decimal, min: Decimal },
+    OrderSizeTooLarge { size: Decimal, max: Decimal },
+    PositionLimitExceeded { projected: Decimal, limit: Decimal },
+    ShortLimitExceeded { projected: Decimal, limit: Decimal },
+    TooManyOutstandingOrders { current: usize, max: usize },
+    DailyLossLimitBreached { daily_pnl: Decimal, limit: Decimal },
+    DrawdownLimitBreached { drawdown_pct: f64, limit: f64 },
 }
 
 impl fmt::Display for RiskViolation {
@@ -166,11 +145,7 @@ impl fmt::Display for RiskViolation {
                 )
             }
             RiskViolation::DailyLossLimitBreached { daily_pnl, limit } => {
-                write!(
-                    f,
-                    "Daily PnL {} breaches loss limit {}",
-                    daily_pnl, limit
-                )
+                write!(f, "Daily PnL {} breaches loss limit {}", daily_pnl, limit)
             }
             RiskViolation::DrawdownLimitBreached {
                 drawdown_pct,

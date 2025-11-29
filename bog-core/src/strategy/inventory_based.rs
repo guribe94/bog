@@ -2,8 +2,8 @@ use super::{Signal, Strategy, StrategyState, StrategyStats};
 use crate::data::MarketSnapshot;
 use crate::execution::Fill;
 use crate::orderbook::OrderBookManager;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use tracing::{debug, info};
 
 /// Inventory-based market making strategy (Avellaneda-Stoikov model)
@@ -75,8 +75,7 @@ impl InventoryBasedStrategy {
             .to_f64()
             .unwrap_or(0.0);
 
-        let adjustment =
-            q * self.risk_aversion * self.volatility.powi(2) * self.time_horizon_secs;
+        let adjustment = q * self.risk_aversion * self.volatility.powi(2) * self.time_horizon_secs;
 
         let adjustment_decimal = Decimal::try_from(adjustment).unwrap_or(Decimal::ZERO);
 
@@ -281,13 +280,7 @@ mod tests {
 
     #[test]
     fn test_reservation_price() {
-        let mut strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let mut strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         let mid_price = dec!(50000);
 
@@ -308,13 +301,7 @@ mod tests {
 
     #[test]
     fn test_optimal_spread() {
-        let strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         let spread = strategy.calculate_optimal_spread();
         assert!(spread > Decimal::ZERO);
@@ -322,13 +309,7 @@ mod tests {
 
     #[test]
     fn test_signal_generation() {
-        let mut strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let mut strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         let mut orderbook = OrderBookManager::new(1);
         let snapshot = create_test_snapshot(50000.0, 50010.0);
@@ -353,13 +334,7 @@ mod tests {
 
     #[test]
     fn test_inventory_adjustment() {
-        let mut strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let mut strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         let mut orderbook = OrderBookManager::new(1);
         let snapshot = create_test_snapshot(50000.0, 50010.0);
@@ -399,13 +374,7 @@ mod tests {
 
     #[test]
     fn test_high_inventory_risk() {
-        let mut strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let mut strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         assert!(!strategy.is_inventory_risk_high());
 
@@ -416,13 +385,7 @@ mod tests {
 
     #[test]
     fn test_paused_strategy() {
-        let mut strategy = InventoryBasedStrategy::new(
-            dec!(0),
-            0.1,
-            dec!(0.1),
-            0.02,
-            300.0,
-        );
+        let mut strategy = InventoryBasedStrategy::new(dec!(0), 0.1, dec!(0.1), 0.02, 300.0);
 
         strategy.pause();
 

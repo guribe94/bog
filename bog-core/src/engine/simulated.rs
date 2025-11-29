@@ -8,9 +8,9 @@
 //!
 //! Target: <200ns per execution
 
-use super::Executor;
 use super::risk;
-use crate::core::{OrderId, Position, Signal, SignalAction, Side as CoreSide};
+use super::Executor;
+use crate::core::{OrderId, Position, Side as CoreSide, Signal, SignalAction};
 use crate::execution::{Fill, Side as ExecutionSide};
 use crate::perf::pools::ObjectPool;
 use anyhow::Result;
@@ -28,9 +28,9 @@ use std::sync::Arc;
 pub struct PooledOrder {
     pub id: OrderId,
     pub side: OrderSide,
-    pub price: u64,         // Fixed-point, 9 decimals
-    pub size: u64,          // Fixed-point, 9 decimals
-    pub filled_size: u64,   // Fixed-point, 9 decimals
+    pub price: u64,       // Fixed-point, 9 decimals
+    pub size: u64,        // Fixed-point, 9 decimals
+    pub filled_size: u64, // Fixed-point, 9 decimals
     pub status: OrderStatusBits,
 }
 
@@ -68,8 +68,8 @@ impl PooledOrder {
 pub struct PooledFill {
     pub order_id: OrderId,
     pub side: OrderSide,
-    pub price: u64,  // Fixed-point, 9 decimals
-    pub size: u64,   // Fixed-point, 9 decimals
+    pub price: u64, // Fixed-point, 9 decimals
+    pub size: u64,  // Fixed-point, 9 decimals
 }
 
 impl PooledFill {
@@ -204,8 +204,7 @@ impl SimulatedExecutor {
 
         // Update metrics
         self.total_fills.fetch_add(1, Ordering::Relaxed);
-        self.total_volume
-            .fetch_add(fill_size, Ordering::Relaxed);
+        self.total_volume.fetch_add(fill_size, Ordering::Relaxed);
 
         fill
     }
@@ -324,21 +323,14 @@ impl Executor for SimulatedExecutor {
             // Create Fill with timestamp and fee
             // Fee is charged in quote currency as a percentage of notional.
             let notional = price * size;
-            let fee_rate = Decimal::from(crate::config::DEFAULT_FEE_BPS)
-                / Decimal::from(10_000u32);
+            let fee_rate = Decimal::from(crate::config::DEFAULT_FEE_BPS) / Decimal::from(10_000u32);
             let fee = Some(notional * fee_rate);
 
             // Convert core::OrderId to execution::OrderId
             let order_id_str = format!("{:032x}", pooled_fill.order_id.0);
             let execution_order_id = crate::execution::OrderId::new(order_id_str);
 
-            let fill = Fill::new_with_fee(
-                execution_order_id,
-                side,
-                price,
-                size,
-                fee,
-            );
+            let fill = Fill::new_with_fee(execution_order_id, side, price, size, fee);
 
             fills.push(fill);
         }

@@ -25,7 +25,11 @@ fn test_connect_to_real_huginn_shared_memory() -> Result<()> {
     let feed = MarketFeed::connect(market_id);
 
     // Verify connection succeeded
-    assert!(feed.is_ok(), "Failed to connect to Huginn: {:?}", feed.err());
+    assert!(
+        feed.is_ok(),
+        "Failed to connect to Huginn: {:?}",
+        feed.err()
+    );
 
     let mut feed = feed?;
 
@@ -64,10 +68,25 @@ fn test_receive_real_market_snapshots() -> Result<()> {
             snapshots_received += 1;
 
             // Verify snapshot has valid data
-            assert!(snapshot.sequence > 0, "Invalid sequence: {}", snapshot.sequence);
-            assert!(snapshot.best_bid_price > 0, "Invalid bid price: {}", snapshot.best_bid_price);
-            assert!(snapshot.best_ask_price > 0, "Invalid ask price: {}", snapshot.best_ask_price);
-            assert!(snapshot.best_ask_price > snapshot.best_bid_price, "Crossed book!");
+            assert!(
+                snapshot.sequence > 0,
+                "Invalid sequence: {}",
+                snapshot.sequence
+            );
+            assert!(
+                snapshot.best_bid_price > 0,
+                "Invalid bid price: {}",
+                snapshot.best_bid_price
+            );
+            assert!(
+                snapshot.best_ask_price > 0,
+                "Invalid ask price: {}",
+                snapshot.best_ask_price
+            );
+            assert!(
+                snapshot.best_ask_price > snapshot.best_bid_price,
+                "Crossed book!"
+            );
 
             // Verify sequence numbers increment
             if last_sequence > 0 {
@@ -146,7 +165,11 @@ fn test_gap_detection_with_real_data() -> Result<()> {
                 info!("Gap detected! Size: {} messages", gap_size);
 
                 // Verify gap size is reasonable
-                assert!(gap_size > 0 && gap_size < 1_000_000, "Unreasonable gap size: {}", gap_size);
+                assert!(
+                    gap_size > 0 && gap_size < 1_000_000,
+                    "Unreasonable gap size: {}",
+                    gap_size
+                );
 
                 // In production, we would trigger recovery here
                 // feed.recover_from_gap(Duration::from_secs(10))?;
@@ -274,10 +297,7 @@ fn test_wait_for_initial_snapshot() -> Result<()> {
 
     info!(
         "Got initial snapshot in {:?}: seq={}, bid={}, ask={}",
-        elapsed,
-        initial.sequence,
-        initial.best_bid_price,
-        initial.best_ask_price
+        elapsed, initial.sequence, initial.best_bid_price, initial.best_ask_price
     );
 
     // Verify we got a valid snapshot
@@ -343,14 +363,8 @@ fn test_full_snapshot_has_complete_orderbook() -> Result<()> {
     );
 
     // Should have at least some depth (market dependent)
-    assert!(
-        populated_bid_levels > 0,
-        "No bid levels in full snapshot"
-    );
-    assert!(
-        populated_ask_levels > 0,
-        "No ask levels in full snapshot"
-    );
+    assert!(populated_bid_levels > 0, "No bid levels in full snapshot");
+    assert!(populated_ask_levels > 0, "No ask levels in full snapshot");
 
     Ok(())
 }

@@ -6,9 +6,9 @@
 //! Critical for paper trading accuracy and production safety.
 
 use anyhow::{anyhow, Result};
-use std::sync::atomic::{AtomicU64, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tracing::{error, warn, info, debug};
+use tracing::{debug, error, info, warn};
 
 /// Position reconciliation configuration
 pub struct ReconciliationConfig {
@@ -30,9 +30,9 @@ impl Default for ReconciliationConfig {
     fn default() -> Self {
         Self {
             reconcile_every_n_fills: 1000,
-            max_position_mismatch: 1_000_000,  // 0.001 BTC
+            max_position_mismatch: 1_000_000, // 0.001 BTC
             halt_on_mismatch: true,
-            auto_correct_threshold: 100_000,   // 0.0001 BTC
+            auto_correct_threshold: 100_000, // 0.0001 BTC
         }
     }
 }
@@ -102,11 +102,7 @@ impl PositionReconciler {
     ///
     /// - `Ok(drift)` - The position drift detected (can be 0)
     /// - `Err` - If mismatch exceeds threshold and halt_on_mismatch is true
-    pub fn reconcile(
-        &self,
-        internal_position: i64,
-        executor_position: i64,
-    ) -> Result<i64> {
+    pub fn reconcile(&self, internal_position: i64, executor_position: i64) -> Result<i64> {
         // Reset fill counter
         self.fills_since_last_check.store(0, Ordering::Relaxed);
 
@@ -114,7 +110,8 @@ impl PositionReconciler {
         let drift = (internal_position - executor_position).abs();
 
         // Update stats
-        self.total_drift_detected.fetch_add(drift, Ordering::Relaxed);
+        self.total_drift_detected
+            .fetch_add(drift, Ordering::Relaxed);
 
         // Update max drift if needed
         let mut max_drift = self.max_drift_detected.load(Ordering::Relaxed);
@@ -136,7 +133,8 @@ impl PositionReconciler {
                 "Position reconciliation successful: internal={}, executor={}",
                 internal_position, executor_position
             );
-            self.successful_reconciliations.fetch_add(1, Ordering::Relaxed);
+            self.successful_reconciliations
+                .fetch_add(1, Ordering::Relaxed);
             return Ok(0);
         }
 
@@ -146,7 +144,8 @@ impl PositionReconciler {
                 "Small position drift detected: {} (internal={}, executor={}). Auto-correcting.",
                 drift, internal_position, executor_position
             );
-            self.successful_reconciliations.fetch_add(1, Ordering::Relaxed);
+            self.successful_reconciliations
+                .fetch_add(1, Ordering::Relaxed);
             return Ok(drift);
         }
 
@@ -171,7 +170,8 @@ impl PositionReconciler {
                 "Position drift within tolerance: {} (internal={}, executor={})",
                 drift, internal_position, executor_position
             );
-            self.successful_reconciliations.fetch_add(1, Ordering::Relaxed);
+            self.successful_reconciliations
+                .fetch_add(1, Ordering::Relaxed);
         }
 
         Ok(drift)
@@ -179,7 +179,10 @@ impl PositionReconciler {
 
     /// Force a reconciliation (reset counter)
     pub fn force_reconciliation(&self) {
-        self.fills_since_last_check.store(self.config.reconcile_every_n_fills as u64, Ordering::Relaxed);
+        self.fills_since_last_check.store(
+            self.config.reconcile_every_n_fills as u64,
+            Ordering::Relaxed,
+        );
     }
 
     /// Get reconciliation statistics
@@ -264,7 +267,7 @@ mod tests {
     #[test]
     fn test_reconciliation_small_drift() {
         let mut config = ReconciliationConfig::default();
-        config.auto_correct_threshold = 1_000_000;  // 0.001 BTC
+        config.auto_correct_threshold = 1_000_000; // 0.001 BTC
 
         let reconciler = PositionReconciler::with_config(config);
 
@@ -281,7 +284,7 @@ mod tests {
     #[test]
     fn test_reconciliation_large_drift() {
         let mut config = ReconciliationConfig::default();
-        config.max_position_mismatch = 1_000_000;  // 0.001 BTC
+        config.max_position_mismatch = 1_000_000; // 0.001 BTC
         config.halt_on_mismatch = true;
 
         let reconciler = PositionReconciler::with_config(config);

@@ -4,12 +4,16 @@
 //! alerting system, and integration with the execution layer for
 //! comprehensive monitoring.
 
+pub mod alert_rules;
+pub mod alerts;
 pub mod metrics;
 pub mod server;
-pub mod alerts;
-pub mod alert_rules;
 
-pub use metrics::{MetricsRegistry, TradingMetrics, PerformanceMetrics, RiskMetrics, SystemMetrics};
-pub use server::{MetricsServer, MetricsServerConfig};
-pub use alerts::{Alert, AlertCategory, AlertId, AlertManager, AlertManagerConfig, AlertOutput, AlertSeverity};
 pub use alert_rules::{AlertRule, RuleContext, RuleEngine};
+pub use alerts::{
+    Alert, AlertCategory, AlertId, AlertManager, AlertManagerConfig, AlertOutput, AlertSeverity,
+};
+pub use metrics::{
+    MetricsRegistry, PerformanceMetrics, RiskMetrics, SystemMetrics, TradingMetrics,
+};
+pub use server::{MetricsServer, MetricsServerConfig};

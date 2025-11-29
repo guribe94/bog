@@ -1,6 +1,6 @@
 use crate::data::MarketSnapshot;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 
 /// Stub OrderBook implementation for Phase 1

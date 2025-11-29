@@ -7,8 +7,10 @@
 // - Cold start initialization: <1s
 // - High frequency tick processing: 100k+ ticks
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use bog_core::resilience::{GapDetector, StaleDataBreaker, StaleDataConfig, FeedHealth, HealthConfig};
+use bog_core::resilience::{
+    FeedHealth, GapDetector, HealthConfig, StaleDataBreaker, StaleDataConfig,
+};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::time::Duration;
 
 // ============================================================================

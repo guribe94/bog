@@ -112,6 +112,10 @@ pub const DEFAULT_FEE_BPS: u32 = 2;
 #[cfg(feature = "fee-5bps")]
 pub const DEFAULT_FEE_BPS: u32 = 5;
 
+/// Exchange tick size (price increment) in fixed-point (9 decimals)
+/// Default: $0.01
+pub const TICK_SIZE: u64 = 10_000_000;
+
 // ===== PERFORMANCE TUNING =====
 
 /// Maximum fill batch size to process per tick

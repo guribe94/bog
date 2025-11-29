@@ -39,7 +39,10 @@ fn test_cold_start_initialization() -> Result<()> {
 
     // Verify initialization complete within timeout
     let elapsed = start.elapsed();
-    assert!(elapsed < Duration::from_secs(1), "Cold start should complete in <1s");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "Cold start should complete in <1s"
+    );
 
     Ok(())
 }
@@ -192,7 +195,10 @@ fn test_multiple_gaps_in_session() -> Result<()> {
         assert_eq!(detector.check(seq), 0);
     }
 
-    assert!(!detector.gap_detected(), "No gap should be detected after recovery");
+    assert!(
+        !detector.gap_detected(),
+        "No gap should be detected after recovery"
+    );
 
     Ok(())
 }
@@ -386,7 +392,11 @@ fn test_orders_cleared_on_restart() -> Result<()> {
     }
 
     // Verify orders cleared
-    assert_eq!(open_orders.len(), 0, "All orders should be cleared on restart");
+    assert_eq!(
+        open_orders.len(),
+        0,
+        "All orders should be cleared on restart"
+    );
 
     // Reset to new state
     detector.reset_at_sequence(10);
@@ -431,7 +441,10 @@ fn test_wraparound_at_u64_max() -> Result<()> {
     assert_eq!(detector.check(2), 0);
     assert_eq!(detector.check(3), 0);
 
-    assert!(!detector.gap_detected(), "No gaps should be detected during wraparound");
+    assert!(
+        !detector.gap_detected(),
+        "No gaps should be detected during wraparound"
+    );
 
     Ok(())
 }
@@ -662,10 +675,7 @@ fn test_timeout_during_snapshot_recovery() -> Result<()> {
     let elapsed = start.elapsed();
 
     // Verify timeout occurred
-    assert!(
-        elapsed >= timeout_duration,
-        "Timeout simulation failed"
-    );
+    assert!(elapsed >= timeout_duration, "Timeout simulation failed");
 
     // System can retry - reset and try again
     detector.reset_at_sequence(200);
@@ -711,7 +721,10 @@ fn test_corrupted_snapshot_rejection() -> Result<()> {
     let snapshot_is_valid = true;
     if snapshot_is_valid {
         detector.reset_at_sequence(200);
-        assert!(!detector.gap_detected(), "Gap should be resolved with valid snapshot");
+        assert!(
+            !detector.gap_detected(),
+            "Gap should be resolved with valid snapshot"
+        );
     }
 
     Ok(())
@@ -753,7 +766,11 @@ fn test_network_interruption_recovery() -> Result<()> {
 
     // Verify recovery
     assert!(breaker.is_fresh());
-    assert_eq!(detector.check(501), 0, "Trading should resume after reconnection");
+    assert_eq!(
+        detector.check(501),
+        0,
+        "Trading should resume after reconnection"
+    );
 
     Ok(())
 }

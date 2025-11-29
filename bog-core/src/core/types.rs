@@ -6,9 +6,9 @@
 //! - Cache-line alignment
 //! - Minimal memory footprint
 
+use crate::core::errors::OverflowError;
 use std::fmt;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
-use crate::core::errors::OverflowError;
 
 /// Unique identifier for an order
 ///
@@ -44,8 +44,8 @@ impl OrderId {
     /// Keeping simple implementation for better pipeline performance.
     #[inline]
     pub fn generate() -> Self {
-        use std::time::SystemTime;
         use rand::Rng;
+        use std::time::SystemTime;
 
         thread_local! {
             static COUNTER: std::cell::Cell<u32> = std::cell::Cell::new(0);
@@ -69,7 +69,10 @@ impl OrderId {
             if next < val {
                 // Counter wrapped around!
                 // In production, this should trigger alerts
-                eprintln!("CRITICAL: OrderId counter wraparound detected! Old: {}, New: {}", val, next);
+                eprintln!(
+                    "CRITICAL: OrderId counter wraparound detected! Old: {}, New: {}",
+                    val, next
+                );
                 // Could also panic here in debug mode:
                 // debug_assert!(false, "OrderId counter wraparound!");
             }
@@ -391,7 +394,8 @@ impl Position {
     #[inline(always)]
     pub fn update_quantity_checked(&self, delta: i64) -> Result<i64, OverflowError> {
         let old = self.quantity.load(Ordering::Acquire);
-        let new = old.checked_add(delta)
+        let new = old
+            .checked_add(delta)
             .ok_or(OverflowError::QuantityOverflow { old, delta })?;
 
         self.quantity.store(new, Ordering::Release);
@@ -407,7 +411,8 @@ impl Position {
     #[inline(always)]
     pub fn update_realized_pnl_checked(&self, delta: i64) -> Result<(), OverflowError> {
         let old = self.realized_pnl.load(Ordering::Acquire);
-        let new = old.checked_add(delta)
+        let new = old
+            .checked_add(delta)
             .ok_or(OverflowError::RealizedPnlOverflow { old, delta })?;
 
         self.realized_pnl.store(new, Ordering::Release);
@@ -423,7 +428,8 @@ impl Position {
     #[inline(always)]
     pub fn update_daily_pnl_checked(&self, delta: i64) -> Result<(), OverflowError> {
         let old = self.daily_pnl.load(Ordering::Acquire);
-        let new = old.checked_add(delta)
+        let new = old
+            .checked_add(delta)
             .ok_or(OverflowError::DailyPnlOverflow { old, delta })?;
 
         self.daily_pnl.store(new, Ordering::Release);
@@ -441,7 +447,8 @@ impl Position {
     #[inline(always)]
     pub fn increment_trades_checked(&self) -> Result<u32, OverflowError> {
         let old = self.trade_count.load(Ordering::Acquire);
-        let new = old.checked_add(1)
+        let new = old
+            .checked_add(1)
             .ok_or(OverflowError::TradeCountOverflow { old })?;
 
         self.trade_count.store(new, Ordering::Release);
@@ -533,9 +540,9 @@ impl Position {
         // Calculate position delta based on side
         // Buy (0) increases position, Sell (1) decreases position
         let position_delta = if order_side == 0 {
-            size_i64  // Buy: increase position
+            size_i64 // Buy: increase position
         } else {
-            -size_i64  // Sell: decrease position
+            -size_i64 // Sell: decrease position
         };
 
         // Get current position before update
@@ -545,9 +552,9 @@ impl Position {
         let pnl = if (old_qty > 0 && position_delta < 0) || (old_qty < 0 && position_delta > 0) {
             // We're reducing or reversing position - calculate PnL
             let closing_qty = if position_delta.abs() > old_qty.abs() {
-                old_qty.abs()  // Closing entire position
+                old_qty.abs() // Closing entire position
             } else {
-                position_delta.abs()  // Partial close
+                position_delta.abs() // Partial close
             };
 
             // Get current average entry price
@@ -570,10 +577,10 @@ impl Position {
 
                 gross_pnl
             } else {
-                0  // No entry price set, no PnL
+                0 // No entry price set, no PnL
             }
         } else {
-            0  // Not closing, no realized PnL
+            0 // Not closing, no realized PnL
         };
 
         // Calculate fee for the entire fill (always paid)
@@ -595,8 +602,13 @@ impl Position {
         };
 
         // Update position quantity with overflow check
-        let new_qty = old_qty.checked_add(position_delta)
-            .ok_or(OverflowError::QuantityOverflow { old: old_qty, delta: position_delta })?;
+        let new_qty =
+            old_qty
+                .checked_add(position_delta)
+                .ok_or(OverflowError::QuantityOverflow {
+                    old: old_qty,
+                    delta: position_delta,
+                })?;
 
         self.quantity.store(new_qty, Ordering::Release);
 
@@ -814,7 +826,9 @@ pub mod fixed_point {
 
         // Check for infinity
         if value.is_infinite() {
-            return Err(ConversionError::Infinite { positive: value > 0.0 });
+            return Err(ConversionError::Infinite {
+                positive: value > 0.0,
+            });
         }
 
         // Check range
@@ -897,7 +911,8 @@ mod tests {
         let counter = id.counter();
 
         // Reconstruct and verify
-        let reconstructed = ((timestamp as u128) << 64) | ((random_part as u128) << 32) | (counter as u128);
+        let reconstructed =
+            ((timestamp as u128) << 64) | ((random_part as u128) << 32) | (counter as u128);
         assert_eq!(id.as_u128(), reconstructed);
     }
 
@@ -1007,7 +1022,7 @@ mod tests {
             let handle = thread::spawn(move || {
                 for _ in 0..100 {
                     pos.update_realized_pnl(1_000_000); // +$0.001
-                    pos.update_daily_pnl(500_000);      // +$0.0005
+                    pos.update_daily_pnl(500_000); // +$0.0005
                 }
             });
             handles.push(handle);
@@ -1019,7 +1034,7 @@ mod tests {
 
         // Verify totals
         assert_eq!(position.get_realized_pnl(), 500_000_000); // 5 * 100 * 1M
-        assert_eq!(position.get_daily_pnl(), 250_000_000);    // 5 * 100 * 500K
+        assert_eq!(position.get_daily_pnl(), 250_000_000); // 5 * 100 * 500K
     }
 
     #[test]
@@ -1251,8 +1266,8 @@ mod tests {
             .process_fill_fixed_with_fee(0, price, size, fee_bps)
             .expect("fee-calculation fill should succeed");
 
-        let expected_fee = ((price as u128 * size as u128 * fee_bps as u128)
-            / (10_000 * SCALE as u128)) as i64;
+        let expected_fee =
+            ((price as u128 * size as u128 * fee_bps as u128) / (10_000 * SCALE as u128)) as i64;
         assert_eq!(position.get_realized_pnl(), -expected_fee);
         assert_eq!(position.get_daily_pnl(), -expected_fee);
         assert_eq!(position.get_quantity(), size as i64);
@@ -1273,8 +1288,8 @@ mod tests {
             .process_fill_fixed_with_fee(1, price, size, fee_bps)
             .expect("sell fill should succeed");
 
-        let fee_per_leg = ((price as u128 * size as u128 * fee_bps as u128)
-            / (10_000 * SCALE as u128)) as i64;
+        let fee_per_leg =
+            ((price as u128 * size as u128 * fee_bps as u128) / (10_000 * SCALE as u128)) as i64;
         let expected = -(fee_per_leg * 2);
         assert_eq!(position.get_realized_pnl(), expected);
         assert_eq!(position.get_daily_pnl(), expected);
@@ -1303,8 +1318,7 @@ mod tests {
 
         let closed_qty = one_btc as i64;
         let price_diff = sell_price as i64 - buy_price as i64;
-        let gross_profit =
-            ((price_diff as i128 * closed_qty as i128) / SCALE as i128) as i64;
+        let gross_profit = ((price_diff as i128 * closed_qty as i128) / SCALE as i128) as i64;
         let entry_fee = ((buy_price as u128 * one_btc as u128 * fee_bps as u128)
             / (10_000 * SCALE as u128)) as i64;
         let flip_fee = ((sell_price as u128 * (one_btc * 2) as u128 * fee_bps as u128)

@@ -34,8 +34,8 @@
 //!     .with_depth(&bid_prices, &bid_sizes, &ask_prices, &ask_sizes);
 //! ```
 
-use huginn::shm::MarketSnapshot;
 use super::constants::{ORDERBOOK_DEPTH, PADDING_SIZE};
+use huginn::shm::MarketSnapshot;
 
 /// Builder for MarketSnapshot with zero hardcoded values
 ///
@@ -152,13 +152,13 @@ impl SnapshotBuilder {
             best_bid_size: self.best_bid_size,
             best_ask_price: self.best_ask_price,
             best_ask_size: self.best_ask_size,
-            bid_prices: [0; ORDERBOOK_DEPTH],  // NO HARDCODING
-            bid_sizes: [0; ORDERBOOK_DEPTH],   // NO HARDCODING
-            ask_prices: [0; ORDERBOOK_DEPTH],  // NO HARDCODING
-            ask_sizes: [0; ORDERBOOK_DEPTH],   // NO HARDCODING
+            bid_prices: [0; ORDERBOOK_DEPTH], // NO HARDCODING
+            bid_sizes: [0; ORDERBOOK_DEPTH],  // NO HARDCODING
+            ask_prices: [0; ORDERBOOK_DEPTH], // NO HARDCODING
+            ask_sizes: [0; ORDERBOOK_DEPTH],  // NO HARDCODING
             snapshot_flags: self.snapshot_flags,
             dex_type: self.dex_type,
-            _padding: [0; PADDING_SIZE],       // NO HARDCODING
+            _padding: [0; PADDING_SIZE], // NO HARDCODING
         }
     }
 
@@ -276,8 +276,7 @@ pub fn create_realistic_depth_snapshot(mid_price: u64, spread_bps: u64) -> Marke
         ask_sizes.push(1_000_000_000);
     }
 
-    SnapshotBuilder::new()
-        .with_depth(&bid_prices, &bid_sizes, &ask_prices, &ask_sizes)
+    SnapshotBuilder::new().with_depth(&bid_prices, &bid_sizes, &ask_prices, &ask_sizes)
 }
 
 #[cfg(test)]
@@ -335,9 +334,12 @@ mod tests {
         let ask_prices = vec![100_100_000_000, 100_200_000_000];
         let ask_sizes = vec![1_000_000_000, 2_000_000_000];
 
-        let snapshot = SnapshotBuilder::new()
-            .market_id(1)
-            .with_depth(&bid_prices, &bid_sizes, &ask_prices, &ask_sizes);
+        let snapshot = SnapshotBuilder::new().market_id(1).with_depth(
+            &bid_prices,
+            &bid_sizes,
+            &ask_prices,
+            &ask_sizes,
+        );
 
         // Verify depth data copied correctly
         assert_eq!(snapshot.bid_prices[0], 100_000_000_000);
@@ -360,7 +362,7 @@ mod tests {
     fn test_realistic_depth_snapshot() {
         let snapshot = create_realistic_depth_snapshot(
             100_000_000_000_000, // $100k
-            10,                   // 10 bps
+            10,                  // 10 bps
         );
 
         // Verify it's a full snapshot

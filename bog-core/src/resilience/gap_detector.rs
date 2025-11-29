@@ -234,8 +234,8 @@ mod tests {
 
         detector.check(u64::MAX - 2);
         let gap = detector.check(5); // Gap across wraparound
-                                      // Gap = (u64::MAX - (u64::MAX - 2)) + 5 = 2 + 5 = 7
-                                      // Messages: u64::MAX-1, u64::MAX, 0, 1, 2, 3, 4 = 7 messages
+                                     // Gap = (u64::MAX - (u64::MAX - 2)) + 5 = 2 + 5 = 7
+                                     // Messages: u64::MAX-1, u64::MAX, 0, 1, 2, 3, 4 = 7 messages
 
         assert_eq!(gap, 7);
         assert!(detector.gap_detected());

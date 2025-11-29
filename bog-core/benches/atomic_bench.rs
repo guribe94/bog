@@ -10,8 +10,8 @@
 //! 3. **Checked vs Unchecked** - Overhead of overflow protection
 //! 4. **Contention Scenarios** - Multi-threaded performance
 
+use bog_core::core::{OrderId, Position};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use bog_core::core::{Position, OrderId};
 use std::sync::Arc;
 use std::thread;
 

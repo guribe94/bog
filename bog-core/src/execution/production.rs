@@ -10,7 +10,7 @@
 //! **NOTE**: This is a production-quality STUB for testing and development.
 //! Real exchange integration should be added later while maintaining this interface.
 
-use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus};
+use super::{ExecutionMode, Executor, Fill, Order, OrderId, OrderStatus};
 use crate::monitoring::MetricsRegistry;
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
@@ -74,7 +74,9 @@ impl OrderState {
         // Check status consistency
         match self.order.status {
             OrderStatus::Filled => total_filled >= self.order.size,
-            OrderStatus::PartiallyFilled => total_filled > Decimal::ZERO && total_filled < self.order.size,
+            OrderStatus::PartiallyFilled => {
+                total_filled > Decimal::ZERO && total_filled < self.order.size
+            }
             _ => true,
         }
     }
@@ -104,10 +106,7 @@ impl JournalEntry {
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_millis() as u64;
 
-        Self {
-            timestamp,
-            event,
-        }
+        Self { timestamp, event }
     }
 }
 
@@ -154,10 +153,9 @@ impl ExecutionMetrics {
         self.fills_received.fetch_add(1, Ordering::Relaxed);
         // Convert to cents and store (avoiding float atomics)
         // Use saturating conversion - overflow means huge volume, cap at u64::MAX cents
-        let notional_cents = (notional * Decimal::from(100))
-            .to_u64()
-            .unwrap_or(u64::MAX);
-        self.total_volume.fetch_add(notional_cents, Ordering::Relaxed);
+        let notional_cents = (notional * Decimal::from(100)).to_u64().unwrap_or(u64::MAX);
+        self.total_volume
+            .fetch_add(notional_cents, Ordering::Relaxed);
     }
 
     pub fn record_order_cancelled(&self) {
@@ -331,7 +329,9 @@ impl ProductionExecutor {
 
             // Set fill rate
             if submitted > 0 {
-                prom.trading().fill_rate.set(fills as f64 / submitted as f64);
+                prom.trading()
+                    .fill_rate
+                    .set(fills as f64 / submitted as f64);
             }
 
             // Note: volume_total is a Counter, incremented in simulate_fill()
@@ -369,7 +369,8 @@ impl ProductionExecutor {
         let reader = BufReader::new(file);
 
         let mut stats = RecoveryStats::default();
-        let mut order_states: std::collections::HashMap<OrderId, OrderState> = std::collections::HashMap::new();
+        let mut order_states: std::collections::HashMap<OrderId, OrderState> =
+            std::collections::HashMap::new();
 
         for line in reader.lines() {
             stats.journal_entries += 1;
@@ -492,12 +493,17 @@ impl ProductionExecutor {
 
         // Record to Prometheus
         if let Some(prom) = &self.prometheus_metrics {
-            let side = if matches!(order.side, super::Side::Buy) { "buy" } else { "sell" };
-            prom.trading().fills_total.with_label_values(&["market", side]).inc();
+            let side = if matches!(order.side, super::Side::Buy) {
+                "buy"
+            } else {
+                "sell"
+            };
+            prom.trading()
+                .fills_total
+                .with_label_values(&["market", side])
+                .inc();
             // Use saturating conversion for volume - overflow means extremely large trade
-            let volume = fill.notional()
-                .to_f64()
-                .unwrap_or(f64::MAX);
+            let volume = fill.notional().to_f64().unwrap_or(f64::MAX);
             prom.trading().volume_total.inc_by(volume);
         }
 
@@ -554,8 +560,15 @@ impl Executor for ProductionExecutor {
 
         // Record to Prometheus
         if let Some(prom) = &self.prometheus_metrics {
-            let side = if matches!(order.side, super::Side::Buy) { "buy" } else { "sell" };
-            prom.trading().orders_total.with_label_values(&["market", side, "limit"]).inc();
+            let side = if matches!(order.side, super::Side::Buy) {
+                "buy"
+            } else {
+                "sell"
+            };
+            prom.trading()
+                .orders_total
+                .with_label_values(&["market", side, "limit"])
+                .inc();
         }
 
         // Update order status
@@ -609,7 +622,10 @@ impl Executor for ProductionExecutor {
 
                 // Record to Prometheus
                 if let Some(prom) = &self.prometheus_metrics {
-                    prom.trading().cancellations_total.with_label_values(&["market"]).inc();
+                    prom.trading()
+                        .cancellations_total
+                        .with_label_values(&["market"])
+                        .inc();
                 }
 
                 self.journal_event(JournalEvent::OrderCancel(order_id.clone()));
@@ -617,7 +633,10 @@ impl Executor for ProductionExecutor {
                 debug!("Order {} cancelled", order_id);
                 Ok(())
             } else {
-                warn!("Cannot cancel order {} - not active (status: {:?})", order_id, order_state.order.status);
+                warn!(
+                    "Cannot cancel order {} - not active (status: {:?})",
+                    order_id, order_state.order.status
+                );
                 Err(anyhow!("Order {} is not active", order_id))
             }
         } else {
@@ -632,7 +651,9 @@ impl Executor for ProductionExecutor {
     }
 
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus> {
-        self.orders.get(order_id).map(|entry| entry.value().order.status)
+        self.orders
+            .get(order_id)
+            .map(|entry| entry.value().order.status)
     }
 
     fn get_active_orders(&self) -> Vec<&Order> {
@@ -666,6 +687,21 @@ impl Executor for ProductionExecutor {
             }
         }
         (long_exposure, short_exposure)
+    }
+
+    fn cancel_all_orders(&mut self) -> Result<()> {
+        let mut active_ids = Vec::new();
+        for entry in self.orders.iter() {
+            if entry.value().order.is_active() {
+                active_ids.push(entry.key().clone());
+            }
+        }
+
+        for order_id in active_ids {
+            self.cancel_order(&order_id)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -715,7 +751,10 @@ mod tests {
 
         // Check metrics
         assert_eq!(executor.metrics.orders_submitted.load(Ordering::Relaxed), 1);
-        assert_eq!(executor.metrics.orders_acknowledged.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            executor.metrics.orders_acknowledged.load(Ordering::Relaxed),
+            1
+        );
         assert_eq!(executor.metrics.fills_received.load(Ordering::Relaxed), 1);
 
         // Check fill was created
@@ -757,6 +796,32 @@ mod tests {
 
         // Check metrics
         assert_eq!(executor.metrics.orders_cancelled.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn test_cancel_all_orders() {
+        let config = ProductionExecutorConfig {
+            enable_journal: false,
+            instant_fills: false,
+            ..Default::default()
+        };
+        let mut executor = ProductionExecutor::new(config);
+
+        let order1 = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
+        let order2 = Order::limit(Side::Sell, dec!(50010), dec!(0.2));
+        let id1 = executor.place_order(order1).unwrap();
+        let id2 = executor.place_order(order2).unwrap();
+
+        executor.cancel_all_orders().unwrap();
+
+        assert_eq!(
+            executor.get_order_status(&id1),
+            Some(OrderStatus::Cancelled)
+        );
+        assert_eq!(
+            executor.get_order_status(&id2),
+            Some(OrderStatus::Cancelled)
+        );
     }
 
     #[test]
@@ -866,7 +931,7 @@ mod tests {
 
         // Create executor with recovery enabled
         let config = ProductionExecutorConfig {
-            enable_journal: false,  // Don't write during recovery
+            enable_journal: false, // Don't write during recovery
             journal_path: journal_path.clone(),
             recover_on_startup: true,
             validate_recovery: true,
@@ -882,7 +947,10 @@ mod tests {
 
         // Check order exists
         assert!(executor.get_order_status(&order_id).is_some());
-        assert_eq!(executor.get_order_status(&order_id).unwrap(), OrderStatus::Filled);
+        assert_eq!(
+            executor.get_order_status(&order_id).unwrap(),
+            OrderStatus::Filled
+        );
     }
 
     #[test]
@@ -920,7 +988,10 @@ mod tests {
         let executor = ProductionExecutor::new(config);
 
         // Verify cancelled state
-        assert_eq!(executor.get_order_status(&order_id).unwrap(), OrderStatus::Cancelled);
+        assert_eq!(
+            executor.get_order_status(&order_id).unwrap(),
+            OrderStatus::Cancelled
+        );
         assert_eq!(executor.metrics.orders_cancelled.load(Ordering::Relaxed), 1);
     }
 
@@ -956,4 +1027,3 @@ mod tests {
         assert!(metrics_text.contains("bog_trading_volume"));
     }
 }
-

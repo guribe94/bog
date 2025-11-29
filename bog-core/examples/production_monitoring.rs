@@ -33,7 +33,11 @@ fn main() -> Result<()> {
     println!("   ✓ Created metrics registry with 30+ metrics");
 
     // Simulate some initial metric values
-    metrics.trading().orders_total.with_label_values(&["BTC-USD", "buy", "limit"]).inc();
+    metrics
+        .trading()
+        .orders_total
+        .with_label_values(&["BTC-USD", "buy", "limit"])
+        .inc();
     metrics.trading().volume_total.inc_by(50000.0);
     metrics.performance().ticks_per_second.set(1000.0);
     metrics.risk().position_btc.set(0.5);
@@ -64,8 +68,8 @@ fn main() -> Result<()> {
                 timeout_ms: 5000,
             },
         ],
-        rate_limit_secs: 60,      // 1 minute between same alerts
-        auto_resolve_secs: 300,   // 5 minutes auto-resolve
+        rate_limit_secs: 60,    // 1 minute between same alerts
+        auto_resolve_secs: 300, // 5 minutes auto-resolve
         enable_aggregation: false,
     };
 
@@ -81,7 +85,10 @@ fn main() -> Result<()> {
     println!("📋 Setting up alert rules...");
 
     let rule_engine = RuleEngine::new(alert_manager.clone()).with_default_rules();
-    println!("   ✓ Added {} production alert rules:", rule_engine.rule_count());
+    println!(
+        "   ✓ Added {} production alert rules:",
+        rule_engine.rule_count()
+    );
     println!("     - Position limit: 1.0 BTC (Critical)");
     println!("     - Daily loss limit: $1,000 (Critical)");
     println!("     - Huginn connection: 5s grace (Critical)");

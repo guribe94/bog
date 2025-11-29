@@ -68,10 +68,17 @@ fn print_pretty(book: &OrderBook, max_levels: usize) -> Result<()> {
 
     println!();
     println!("╔══════════════════════════════════════════════════════════╗");
-    println!("║          BTC/USD ORDERBOOK (Market {})                  ║", book.market_id);
+    println!(
+        "║          BTC/USD ORDERBOOK (Market {})                  ║",
+        book.market_id
+    );
     println!("╠══════════════════════════════════════════════════════════╣");
-    println!("║  Sequence: {}  │  Depth: {}x{}                     ║",
-        book.last_sequence, book.bid_depth(), book.ask_depth());
+    println!(
+        "║  Sequence: {}  │  Depth: {}x{}                     ║",
+        book.last_sequence,
+        book.bid_depth(),
+        book.ask_depth()
+    );
     println!("╚══════════════════════════════════════════════════════════╝");
     println!();
 
@@ -90,7 +97,10 @@ fn print_pretty(book: &OrderBook, max_levels: usize) -> Result<()> {
 
     println!();
     println!("    ─────────────────────────────────────────");
-    println!("     MID: ${:.2}  │  Spread: {}bps (${:.2})", mid_decimal, spread, spread_usd);
+    println!(
+        "     MID: ${:.2}  │  Spread: {}bps (${:.2})",
+        mid_decimal, spread, spread_usd
+    );
     println!("    ─────────────────────────────────────────");
     println!();
 
@@ -107,7 +117,11 @@ fn print_pretty(book: &OrderBook, max_levels: usize) -> Result<()> {
     }
 
     println!();
-    println!("Imbalance: {:+3} {}", imbalance, imbalance_description(imbalance));
+    println!(
+        "Imbalance: {:+3} {}",
+        imbalance,
+        imbalance_description(imbalance)
+    );
     println!();
 
     Ok(())
@@ -117,8 +131,13 @@ fn print_compact(book: &OrderBook, max_levels: usize) -> Result<()> {
     let mid = Decimal::from(book.mid_price()) / Decimal::from(1_000_000_000);
     let spread = book.spread_bps();
 
-    println!("BTC/USD  Mid: ${:.2}  Spread: {}bps  Depth: {}x{}",
-        mid, spread, book.bid_depth(), book.ask_depth());
+    println!(
+        "BTC/USD  Mid: ${:.2}  Spread: {}bps  Depth: {}x{}",
+        mid,
+        spread,
+        book.bid_depth(),
+        book.ask_depth()
+    );
 
     let bid_levels = book.bid_levels();
     let ask_levels = book.ask_levels();

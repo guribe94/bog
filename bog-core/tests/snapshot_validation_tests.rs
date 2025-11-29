@@ -24,8 +24,8 @@ mod validation_rules {
 
         let valid = Snapshot {
             sequence: 100,
-            bid_price: 50_000_000_000,  // $50,000
-            ask_price: 50_005_000_000,  // $50,005
+            bid_price: 50_000_000_000, // $50,000
+            ask_price: 50_005_000_000, // $50,005
             timestamp_ns: 1_000_000_000,
         };
 

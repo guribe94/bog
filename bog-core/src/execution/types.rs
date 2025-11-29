@@ -322,12 +322,7 @@ mod tests {
 
     #[test]
     fn test_fill_calculations() {
-        let fill = Fill::new(
-            OrderId::new_random(),
-            Side::Buy,
-            dec!(50000),
-            dec!(0.1),
-        );
+        let fill = Fill::new(OrderId::new_random(), Side::Buy, dec!(50000), dec!(0.1));
 
         assert_eq!(fill.notional(), dec!(5000)); // 50000 * 0.1
         assert_eq!(fill.position_change(), dec!(0.1)); // Buy increases position
@@ -336,12 +331,7 @@ mod tests {
 
     #[test]
     fn test_fill_sell() {
-        let fill = Fill::new(
-            OrderId::new_random(),
-            Side::Sell,
-            dec!(50000),
-            dec!(0.1),
-        );
+        let fill = Fill::new(OrderId::new_random(), Side::Sell, dec!(50000), dec!(0.1));
 
         assert_eq!(fill.position_change(), dec!(-0.1)); // Sell decreases position
         assert_eq!(fill.cash_flow(), dec!(5000)); // Sell increases cash

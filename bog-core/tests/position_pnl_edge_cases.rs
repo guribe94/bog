@@ -20,8 +20,12 @@ fn test_pnl_percentage_with_zero_position_value() {
     // 3. Overflow in calculations
 
     // Set quantity but corrupt the entry price
-    position.quantity.store(1_000_000_000, std::sync::atomic::Ordering::Release); // 1 BTC
-    position.entry_price.store(0, std::sync::atomic::Ordering::Release); // Corrupted!
+    position
+        .quantity
+        .store(1_000_000_000, std::sync::atomic::Ordering::Release); // 1 BTC
+    position
+        .entry_price
+        .store(0, std::sync::atomic::Ordering::Release); // Corrupted!
 
     // Now if we try to calculate PnL percentage, it would divide by zero
     // position_value = quantity * entry_price = 1BTC * 0 = 0
@@ -46,8 +50,12 @@ fn test_position_extreme_values() {
     let max_price = u64::MAX / 1_000_000_000; // Max that fits in fixed point
 
     // This should not panic or overflow
-    position.quantity.store(max_qty, std::sync::atomic::Ordering::Release);
-    position.entry_price.store(max_price, std::sync::atomic::Ordering::Release);
+    position
+        .quantity
+        .store(max_qty, std::sync::atomic::Ordering::Release);
+    position
+        .entry_price
+        .store(max_price, std::sync::atomic::Ordering::Release);
 
     // Calculate PnL at current price
     let current_price = max_price / 2; // Price dropped by half
@@ -64,8 +72,12 @@ fn test_position_value_edge_cases() {
     let position = Position::new();
 
     // Test case 1: Zero quantity, non-zero entry price
-    position.quantity.store(0, std::sync::atomic::Ordering::Release);
-    position.entry_price.store(50_000_000_000_000, std::sync::atomic::Ordering::Release);
+    position
+        .quantity
+        .store(0, std::sync::atomic::Ordering::Release);
+    position
+        .entry_price
+        .store(50_000_000_000_000, std::sync::atomic::Ordering::Release);
 
     // Position value should be 0, not cause issues
     let qty = position.get_quantity();
@@ -77,7 +89,9 @@ fn test_position_value_edge_cases() {
     assert_eq!(entry, 50_000_000_000_000);
 
     // Test case 2: Negative quantity (short position)
-    position.quantity.store(-1_000_000_000, std::sync::atomic::Ordering::Release);
+    position
+        .quantity
+        .store(-1_000_000_000, std::sync::atomic::Ordering::Release);
 
     // Should handle negative positions properly
     let qty = position.get_quantity();
@@ -91,13 +105,15 @@ fn test_position_fill_overflow_protection() {
 
     // Start with a large position
     let large_qty = i64::MAX / 2;
-    position.quantity.store(large_qty, std::sync::atomic::Ordering::Release);
+    position
+        .quantity
+        .store(large_qty, std::sync::atomic::Ordering::Release);
 
     // Try to add another large position (would overflow)
     // Use (i64::MAX / 2) + 100 to ensure it overflows
     let result = position.process_fill_fixed(
-        0, // Buy side
-        50_000_000_000_000, // Price
+        0,                           // Buy side
+        50_000_000_000_000,          // Price
         (i64::MAX / 2 + 100) as u64, // Size that would cause overflow
     );
 
@@ -142,9 +158,15 @@ fn test_corrupted_position_detection() {
     // - Positive quantity but negative PnL that doesn't make sense
     // - Or quantity that doesn't match fill history
 
-    position.quantity.store(1_000_000_000, std::sync::atomic::Ordering::Release);
-    position.entry_price.store(50_000_000_000_000, std::sync::atomic::Ordering::Release);
-    position.realized_pnl.store(i64::MIN, std::sync::atomic::Ordering::Release); // Corrupted
+    position
+        .quantity
+        .store(1_000_000_000, std::sync::atomic::Ordering::Release);
+    position
+        .entry_price
+        .store(50_000_000_000_000, std::sync::atomic::Ordering::Release);
+    position
+        .realized_pnl
+        .store(i64::MIN, std::sync::atomic::Ordering::Release); // Corrupted
 
     // Getting metrics should detect inconsistency
     let realized = position.get_realized_pnl();

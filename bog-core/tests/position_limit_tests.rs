@@ -3,8 +3,8 @@
 //! These tests verify that position limits are enforced AFTER fills are processed,
 //! not just before orders are placed.
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_position_limit_enforced_after_fill() {
@@ -47,7 +47,10 @@ fn test_short_limit_enforced_after_fill() {
     let new_position = current_position + fill_qty;
 
     // This would exceed the short limit
-    assert!(new_position.abs() > max_short, "Short position should exceed limit");
+    assert!(
+        new_position.abs() > max_short,
+        "Short position should exceed limit"
+    );
     assert_eq!(new_position, Decimal::from_f64(-1.1).unwrap());
 
     // After Fix #5, RiskManager.update_position() will return Err
@@ -72,7 +75,10 @@ fn test_fills_within_limits_succeed() {
     let fill = Decimal::from_f64(0.3).unwrap();
     let new_position = current + fill;
 
-    assert!(new_position <= max_position, "Position should be within limits");
+    assert!(
+        new_position <= max_position,
+        "Position should be within limits"
+    );
 }
 
 #[test]
@@ -83,7 +89,7 @@ fn test_limit_check_at_boundary() {
     // Expected: Should reject (not allow > limit)
 
     let max_position = Decimal::from(1);
-    let current = Decimal::from(1);  // Exactly at limit
+    let current = Decimal::from(1); // Exactly at limit
     let fill = Decimal::from_f64(0.1).unwrap();
     let new_position = current + fill;
 
@@ -108,14 +114,17 @@ fn test_position_calculation_with_multiple_fills() {
     let mut position = Decimal::from(0);
 
     let fills = vec![
-        Decimal::from_f64(0.3).unwrap(),   // Buy
-        Decimal::from_f64(0.4).unwrap(),   // Buy
-        -Decimal::from_f64(0.2).unwrap(),  // Sell
+        Decimal::from_f64(0.3).unwrap(),  // Buy
+        Decimal::from_f64(0.4).unwrap(),  // Buy
+        -Decimal::from_f64(0.2).unwrap(), // Sell
     ];
 
     for fill in fills {
         position += fill;
-        assert!(position.abs() <= max_position, "Position should stay within limits");
+        assert!(
+            position.abs() <= max_position,
+            "Position should stay within limits"
+        );
     }
 
     assert_eq!(position, Decimal::from_f64(0.5).unwrap());

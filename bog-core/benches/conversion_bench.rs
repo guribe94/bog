@@ -15,8 +15,8 @@
 //! - Large values (1000.0)
 //! - Edge cases (near limits)
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use bog_core::data::conversions::*;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rust_decimal_macros::dec;
 
 fn decimal_to_u64_bench(c: &mut Criterion) {
@@ -149,7 +149,7 @@ fn decimal_roundtrip_bench(c: &mut Criterion) {
     });
 
     group.bench_function("roundtrip_0.123456789", |b| {
-        let original = dec!(0.123456789);  // 9 decimal places (limit)
+        let original = dec!(0.123456789); // 9 decimal places (limit)
         b.iter(|| {
             let u64_val = decimal_to_u64(black_box(original));
             u64_to_decimal(black_box(u64_val))

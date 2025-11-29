@@ -18,5 +18,8 @@ fn test_position_api_changed() {
     //
     // The core Position struct is now a simple atomic state holder
     // with update_quantity(), update_realized_pnl(), etc.
-    assert!(true, "Position API has changed - see Engine and RiskManager for fill processing");
+    assert!(
+        true,
+        "Position API has changed - see Engine and RiskManager for fill processing"
+    );
 }

@@ -312,11 +312,11 @@ pub mod core;
 // Public modules (legacy, being refactored)
 pub mod config;
 pub mod data;
-pub mod orderbook;
-pub mod strategy;
+pub mod engine; // NEW: Const generic engine
 pub mod execution;
+pub mod orderbook;
 pub mod risk;
-pub mod engine;  // NEW: Const generic engine
+pub mod strategy;
 pub mod utils;
 
 // Monitoring & Observability (NEW)
@@ -334,8 +334,7 @@ pub mod testing;
 
 // Re-export core types (new architecture)
 pub use core::{
-    OrderId, Position, Signal, SignalAction, Side, OrderType, OrderStatus,
-    fixed_point,
+    fixed_point, OrderId, OrderStatus, OrderType, Position, Side, Signal, SignalAction,
 };
 
 // Re-export legacy types (for backwards compatibility during refactor)
@@ -347,12 +346,12 @@ pub use risk::RiskManager;
 pub use engine::{Engine, EngineStats, Executor, Strategy};
 
 // Re-export error types
-pub use anyhow::{Result, Error};
+pub use anyhow::{Error, Result};
 
 /// Prelude for convenient imports
 pub mod prelude {
     // Core types
-    pub use crate::core::{OrderId, Position, Signal, SignalAction, Side, fixed_point};
+    pub use crate::core::{fixed_point, OrderId, Position, Side, Signal, SignalAction};
 
     // Engine
     pub use crate::engine::{Engine, EngineStats, Executor, Strategy};
@@ -361,8 +360,8 @@ pub mod prelude {
     pub use crate::data::{MarketFeed, MarketSnapshot};
 
     // Performance utilities
-    pub use crate::perf::{optimize_for_hft, pin_to_core, ObjectPool, Metrics};
+    pub use crate::perf::{optimize_for_hft, pin_to_core, Metrics, ObjectPool};
 
     // Error types
-    pub use crate::{Result, Error};
+    pub use crate::{Error, Result};
 }

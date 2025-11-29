@@ -26,8 +26,8 @@
 //! to safely record successes/failures and check state.
 
 use crate::core::circuit_breaker_fsm::{
-    ThreeStateClosed, ThreeStateBreakerState,
-    ThreeStateResult, ThreeStateOpenOrHalf, ThreeStateHalfOrClosed,
+    ThreeStateBreakerState, ThreeStateClosed, ThreeStateHalfOrClosed, ThreeStateOpenOrHalf,
+    ThreeStateResult,
 };
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -119,7 +119,7 @@ impl CircuitBreakerV2 {
             // If Open and timeout expired, transition to HalfOpen
             if let ThreeStateBreakerState::Open(open) = std::mem::replace(
                 &mut *state,
-                ThreeStateBreakerState::Closed(ThreeStateClosed::new_default())
+                ThreeStateBreakerState::Closed(ThreeStateClosed::new_default()),
             ) {
                 match open.check_timeout() {
                     ThreeStateOpenOrHalf::HalfOpen(half_open) => {
@@ -146,26 +146,26 @@ impl CircuitBreakerV2 {
 
         match std::mem::replace(
             &mut *state,
-            ThreeStateBreakerState::Closed(ThreeStateClosed::new_default())
+            ThreeStateBreakerState::Closed(ThreeStateClosed::new_default()),
         ) {
             ThreeStateBreakerState::Closed(closed) => {
                 *state = ThreeStateBreakerState::Closed(closed.record_success());
                 debug!("Circuit breaker: Success recorded in Closed state");
             }
-            ThreeStateBreakerState::HalfOpen(half_open) => {
-                match half_open.record_success() {
-                    ThreeStateHalfOrClosed::Closed(closed) => {
-                        info!("Circuit breaker: HALFOPEN → CLOSED (recovery successful)");
-                        *state = ThreeStateBreakerState::Closed(closed);
-                    }
-                    ThreeStateHalfOrClosed::HalfOpen(still_half) => {
-                        debug!("Circuit breaker: Success recorded in HalfOpen state ({}/{})",
-                               still_half.data().success_count,
-                               still_half.data().success_threshold);
-                        *state = ThreeStateBreakerState::HalfOpen(still_half);
-                    }
+            ThreeStateBreakerState::HalfOpen(half_open) => match half_open.record_success() {
+                ThreeStateHalfOrClosed::Closed(closed) => {
+                    info!("Circuit breaker: HALFOPEN → CLOSED (recovery successful)");
+                    *state = ThreeStateBreakerState::Closed(closed);
                 }
-            }
+                ThreeStateHalfOrClosed::HalfOpen(still_half) => {
+                    debug!(
+                        "Circuit breaker: Success recorded in HalfOpen state ({}/{})",
+                        still_half.data().success_count,
+                        still_half.data().success_threshold
+                    );
+                    *state = ThreeStateBreakerState::HalfOpen(still_half);
+                }
+            },
             ThreeStateBreakerState::Open(open) => {
                 // Restore Open state (successes ignored)
                 *state = ThreeStateBreakerState::Open(open);
@@ -179,22 +179,22 @@ impl CircuitBreakerV2 {
 
         match std::mem::replace(
             &mut *state,
-            ThreeStateBreakerState::Closed(ThreeStateClosed::new_default())
+            ThreeStateBreakerState::Closed(ThreeStateClosed::new_default()),
         ) {
-            ThreeStateBreakerState::Closed(closed) => {
-                match closed.record_failure() {
-                    ThreeStateResult::Open(open) => {
-                        warn!("Circuit breaker: CLOSED → OPEN (failure threshold exceeded)");
-                        *state = ThreeStateBreakerState::Open(open);
-                    }
-                    ThreeStateResult::Closed(still_closed) => {
-                        debug!("Circuit breaker: Failure recorded in Closed state ({}/{})",
-                               still_closed.data().failure_count,
-                               still_closed.data().failure_threshold);
-                        *state = ThreeStateBreakerState::Closed(still_closed);
-                    }
+            ThreeStateBreakerState::Closed(closed) => match closed.record_failure() {
+                ThreeStateResult::Open(open) => {
+                    warn!("Circuit breaker: CLOSED → OPEN (failure threshold exceeded)");
+                    *state = ThreeStateBreakerState::Open(open);
                 }
-            }
+                ThreeStateResult::Closed(still_closed) => {
+                    debug!(
+                        "Circuit breaker: Failure recorded in Closed state ({}/{})",
+                        still_closed.data().failure_count,
+                        still_closed.data().failure_threshold
+                    );
+                    *state = ThreeStateBreakerState::Closed(still_closed);
+                }
+            },
             ThreeStateBreakerState::HalfOpen(half_open) => {
                 warn!("Circuit breaker: HALFOPEN → OPEN (failure during recovery)");
                 *state = ThreeStateBreakerState::Open(half_open.record_failure());
@@ -245,9 +245,8 @@ impl CircuitBreakerV2 {
 
 // Re-export CircuitState for compatibility
 pub use crate::core::circuit_breaker_fsm::{
-    ThreeStateClosed as CircuitClosed,
+    ThreeStateClosed as CircuitClosed, ThreeStateHalfOpen as CircuitHalfOpen,
     ThreeStateOpen as CircuitOpen,
-    ThreeStateHalfOpen as CircuitHalfOpen,
 };
 
 /// Circuit state enum (for compatibility with old API)

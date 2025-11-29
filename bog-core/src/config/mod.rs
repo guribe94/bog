@@ -152,13 +152,13 @@
 //! - 🚧 Execution mode → Partial (still runtime in some places)
 //! - ✅ Metrics/monitoring → Runtime (appropriate for cold path)
 
-pub mod types;
-pub mod profiles;
 pub mod constants;
+pub mod profiles;
+pub mod types;
 
-pub use types::*;
-pub use profiles::{ConfigProfile, ProfileName};
 pub use constants::*;
+pub use profiles::{ConfigProfile, ProfileName};
+pub use types::*;
 
 use anyhow::Result;
 // TODO: Add config crate dependency for TOML file loading
@@ -249,9 +249,7 @@ impl Config {
             }
             "inventory_based" => {
                 if self.strategy.inventory_based.is_none() {
-                    anyhow::bail!(
-                        "inventory_based strategy selected but no parameters provided"
-                    );
+                    anyhow::bail!("inventory_based strategy selected but no parameters provided");
                 }
             }
             _ => unreachable!(),

@@ -232,7 +232,10 @@ mod epoch_configuration {
         let check_every_messages = 1000;
         let check_every_ms = 100;
 
-        assert!(check_every_messages > 0, "Message check frequency must be positive");
+        assert!(
+            check_every_messages > 0,
+            "Message check frequency must be positive"
+        );
         assert!(check_every_ms > 0, "Time check frequency must be positive");
     }
 
@@ -257,7 +260,10 @@ mod epoch_configuration {
         let epoch_checking_enabled = true;
         let epoch_checking_enabled = false; // Can be disabled
 
-        assert!(!epoch_checking_enabled, "Epoch checking should be disableable");
+        assert!(
+            !epoch_checking_enabled,
+            "Epoch checking should be disableable"
+        );
     }
 }
 

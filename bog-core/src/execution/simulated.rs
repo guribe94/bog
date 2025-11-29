@@ -1,9 +1,9 @@
-use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus, Side};
 use super::order_bridge::OrderStateWrapper;
+use super::{ExecutionMode, Executor, Fill, Order, OrderId, OrderStatus, Side};
 use anyhow::{anyhow, Result};
 use crossbeam::queue::ArrayQueue;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
@@ -240,7 +240,7 @@ impl SimulatedExecutor {
 
     /// Check if fill queue is approaching capacity
     pub fn is_fill_queue_near_capacity(&self) -> bool {
-        self.pending_fills.len() > (MAX_PENDING_FILLS * 3) / 4  // 75% threshold
+        self.pending_fills.len() > (MAX_PENDING_FILLS * 3) / 4 // 75% threshold
     }
 
     /// Simulate a fill for an order
@@ -251,14 +251,22 @@ impl SimulatedExecutor {
     /// # Safety
     /// Returns Err if fill conversion fails (size or price converts to 0 or overflows).
     /// This prevents position tracking from becoming inconsistent.
-    fn simulate_fill(&mut self, order_wrapper: &mut OrderStateWrapper, order_for_calc: &Order, _order_id: &OrderId) -> Result<Fill> {
+    fn simulate_fill(
+        &mut self,
+        order_wrapper: &mut OrderStateWrapper,
+        order_for_calc: &Order,
+        _order_id: &OrderId,
+    ) -> Result<Fill> {
         let remaining = order_for_calc.remaining_size();
 
         // Calculate fill size based on queue position and configuration
-        let fill_probability = self.queue_tracker.calculate_fill_probability(&order_for_calc.id);
+        let fill_probability = self
+            .queue_tracker
+            .calculate_fill_probability(&order_for_calc.id);
         let fill_size = if self.config.enable_partial_fills {
             // Partial fill based on queue position
-            let partial_size = remaining * Decimal::try_from(fill_probability).unwrap_or(Decimal::ONE);
+            let partial_size =
+                remaining * Decimal::try_from(fill_probability).unwrap_or(Decimal::ONE);
             partial_size.max(Decimal::ZERO)
         } else {
             // Complete fill (instant mode)
@@ -333,7 +341,8 @@ impl SimulatedExecutor {
         if let Err(e) = order_wrapper.apply_fill(fill_size_u64, fill_price_u64) {
             return Err(anyhow!(
                 "HALTING: Failed to apply fill to order state machine for order {}: {}",
-                order_for_calc.id, e
+                order_for_calc.id,
+                e
             ));
         }
 
@@ -516,12 +525,12 @@ impl Executor for SimulatedExecutor {
             if wrapper.is_active() {
                 let order = wrapper.to_legacy();
                 let remaining = order.remaining_size();
-                
+
                 // Convert to fixed-point i64
                 let remaining_u64 = (remaining * Decimal::from(1_000_000_000))
                     .to_u64()
                     .unwrap_or(0);
-                
+
                 match order.side {
                     Side::Buy => long_exposure += remaining_u64 as i64,
                     Side::Sell => short_exposure += remaining_u64 as i64,
@@ -559,8 +568,8 @@ impl RealisticSimulator {
     /// Calculate slippage for an order
     pub fn apply_slippage(&self, price: Decimal, side: Side) -> Decimal {
         // Convert basis points to decimal (safe: slippage_bps is small)
-        let slippage_decimal = Decimal::try_from(self.slippage_bps / 10000.0)
-            .unwrap_or(Decimal::ZERO);
+        let slippage_decimal =
+            Decimal::try_from(self.slippage_bps / 10000.0).unwrap_or(Decimal::ZERO);
         let slippage_factor = Decimal::from(1) + slippage_decimal;
 
         match side {
@@ -642,8 +651,8 @@ mod tests {
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(0.1)); // Position increases
-        // Cash flow = -(notional + fee) = -(5000 + 1) = -5001
-        // Fee: 5000 * 0.0002 = 1.0
+                                                       // Cash flow = -(notional + fee) = -(5000 + 1) = -5001
+                                                       // Fee: 5000 * 0.0002 = 1.0
         assert_eq!(fill.cash_flow(), dec!(-5001)); // Cash decreases (includes 2 bps fee)
 
         // Sell order
@@ -654,8 +663,8 @@ mod tests {
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(-0.1)); // Position decreases
-        // Cash flow = notional - fee = 5010 - 1.002 = 5008.998
-        // Fee: 5010 * 0.0002 = 1.002
+                                                        // Cash flow = notional - fee = 5010 - 1.002 = 5008.998
+                                                        // Fee: 5010 * 0.0002 = 1.002
         assert_eq!(fill.cash_flow(), dec!(5008.998)); // Cash increases (net of 2 bps fee)
     }
 

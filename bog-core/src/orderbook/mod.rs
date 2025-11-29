@@ -148,9 +148,9 @@
 //! from the main trading thread. For multi-threaded access, use separate
 //! OrderBook instances per thread or external synchronization.
 
-pub mod stub;
 pub mod depth;
 pub mod l2_book;
+pub mod stub;
 
 // Use L2OrderBook as the primary implementation
 pub use l2_book::{L2OrderBook as OrderBook, QueuePosition, DEPTH_LEVELS};
@@ -160,14 +160,13 @@ pub use stub::{OrderInfo, OrderSide, OurOrders};
 
 // Re-export depth calculation functions
 pub use depth::{
-    calculate_vwap, calculate_imbalance, calculate_liquidity,
-    mid_price, spread_bps, spread_bps_from_prices,
-    calculate_vwap_u64, calculate_imbalance_i64,
+    calculate_imbalance, calculate_imbalance_i64, calculate_liquidity, calculate_vwap,
+    calculate_vwap_u64, mid_price, spread_bps, spread_bps_from_prices,
 };
 
 use crate::data::MarketSnapshot;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use tracing::{debug, warn};
 
 /// OrderBook Manager - wraps orderbook with additional tracking
@@ -233,7 +232,8 @@ impl OrderBookManager {
         // Warn if orderbook is invalid
         if !self.orderbook.is_valid() {
             if self.orderbook.is_crossed() {
-                warn!("OrderBook is crossed! bid={}, ask={}",
+                warn!(
+                    "OrderBook is crossed! bid={}, ask={}",
                     self.orderbook.best_bid(),
                     self.orderbook.best_ask()
                 );
@@ -274,9 +274,7 @@ impl OrderBookManager {
     /// Note: L2OrderBook estimates queue position based on visible depth.
     /// Returns None if price is not in visible depth.
     pub fn queue_position(&self, is_bid: bool, price: Decimal) -> Option<QueuePosition> {
-        let price_u64 = (price * Decimal::from(1_000_000_000))
-            .to_u64()
-            .unwrap_or(0);
+        let price_u64 = (price * Decimal::from(1_000_000_000)).to_u64().unwrap_or(0);
         self.orderbook.estimate_queue_position(is_bid, price_u64)
     }
 
@@ -415,12 +413,7 @@ mod tests {
 
         let mut manager = OrderBookManager::new(1);
 
-        manager.add_our_order(
-            "order1".to_string(),
-            OrderSide::Bid,
-            dec!(50000),
-            dec!(0.5),
-        );
+        manager.add_our_order("order1".to_string(), OrderSide::Bid, dec!(50000), dec!(0.5));
 
         assert_eq!(manager.our_orders().count(), 1);
 

@@ -8,19 +8,17 @@
 //! maintaining backwards compatibility with the existing Executor trait.
 
 use crate::core::order_fsm::{
-    OrderPending, OrderState, OrderData, FillResult, FillResultOrError, PartialFillResultOrError,
+    FillResult, FillResultOrError, OrderData, OrderPending, OrderState, PartialFillResultOrError,
 };
-use crate::core::{OrderId as CoreOrderId, OrderType, Side, OrderStatus};
+use crate::core::{OrderId as CoreOrderId, OrderStatus, OrderType, Side};
 use crate::execution::types::{Order as LegacyOrder, OrderId as LegacyOrderId};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 
 /// Convert Decimal to u64 fixed-point (9 decimals)
 #[inline]
 fn decimal_to_u64(value: Decimal) -> u64 {
-    (value * Decimal::from(1_000_000_000))
-        .to_u64()
-        .unwrap_or(0)
+    (value * Decimal::from(1_000_000_000)).to_u64().unwrap_or(0)
 }
 
 /// Convert u64 fixed-point to Decimal
@@ -80,7 +78,13 @@ pub fn legacy_order_to_pending(order: &LegacyOrder) -> Result<OrderPending, Stri
         crate::execution::types::OrderType::PostOnly => OrderType::PostOnly,
     };
 
-    Ok(OrderPending::new_with_type(core_id, side, order_type, price_u64, quantity_u64))
+    Ok(OrderPending::new_with_type(
+        core_id,
+        side,
+        order_type,
+        price_u64,
+        quantity_u64,
+    ))
 }
 
 /// Convert OrderState back to legacy Order
@@ -170,9 +174,10 @@ impl OrderStateWrapper {
 
     /// Acknowledge the order (Pending → Open)
     pub fn acknowledge(&mut self) -> Result<(), String> {
-        match std::mem::replace(&mut self.state, OrderState::Pending(
-            OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)
-        )) {
+        match std::mem::replace(
+            &mut self.state,
+            OrderState::Pending(OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)),
+        ) {
             OrderState::Pending(pending) => {
                 self.state = OrderState::Open(pending.acknowledge());
                 Ok(())
@@ -190,10 +195,15 @@ impl OrderStateWrapper {
     /// - Fill quantity is zero
     /// - Fill price is zero
     /// - Fill quantity exceeds remaining
-    pub fn apply_fill(&mut self, fill_quantity_u64: u64, fill_price_u64: u64) -> Result<(), String> {
-        match std::mem::replace(&mut self.state, OrderState::Pending(
-            OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)
-        )) {
+    pub fn apply_fill(
+        &mut self,
+        fill_quantity_u64: u64,
+        fill_price_u64: u64,
+    ) -> Result<(), String> {
+        match std::mem::replace(
+            &mut self.state,
+            OrderState::Pending(OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)),
+        ) {
             OrderState::Open(open) => {
                 match open.fill(fill_quantity_u64, fill_price_u64) {
                     FillResultOrError::Ok(FillResult::Filled(filled)) => {
@@ -237,9 +247,10 @@ impl OrderStateWrapper {
 
     /// Cancel the order
     pub fn cancel(&mut self) -> Result<(), String> {
-        match std::mem::replace(&mut self.state, OrderState::Pending(
-            OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)
-        )) {
+        match std::mem::replace(
+            &mut self.state,
+            OrderState::Pending(OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)),
+        ) {
             OrderState::Open(open) => {
                 self.state = OrderState::Cancelled(open.cancel());
                 Ok(())
@@ -257,9 +268,10 @@ impl OrderStateWrapper {
 
     /// Reject the order (Pending → Rejected)
     pub fn reject(&mut self, reason: String) -> Result<(), String> {
-        match std::mem::replace(&mut self.state, OrderState::Pending(
-            OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)
-        )) {
+        match std::mem::replace(
+            &mut self.state,
+            OrderState::Pending(OrderPending::new(CoreOrderId::generate(), Side::Buy, 0, 0)),
+        ) {
             OrderState::Pending(pending) => {
                 self.state = OrderState::Rejected(pending.reject(reason));
                 Ok(())

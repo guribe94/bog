@@ -7,8 +7,8 @@
 //! - System health (connections, errors)
 
 use prometheus::{
-    Counter, Gauge, Histogram, HistogramOpts, HistogramVec, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
+    Counter, Gauge, Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry,
 };
 use std::sync::Arc;
 use tracing::info;
@@ -118,15 +118,13 @@ pub struct TradingMetrics {
 impl TradingMetrics {
     fn new(registry: &Registry) -> Result<Self, prometheus::Error> {
         let orders_total = IntCounterVec::new(
-            Opts::new("trading_orders_total", "Total number of orders submitted")
-                .namespace("bog"),
+            Opts::new("trading_orders_total", "Total number of orders submitted").namespace("bog"),
             &["market", "side", "type"],
         )?;
         registry.register(Box::new(orders_total.clone()))?;
 
         let fills_total = IntCounterVec::new(
-            Opts::new("trading_fills_total", "Total number of fills received")
-                .namespace("bog"),
+            Opts::new("trading_fills_total", "Total number of fills received").namespace("bog"),
             &["market", "side"],
         )?;
         registry.register(Box::new(fills_total.clone()))?;
@@ -157,12 +155,14 @@ impl TradingMetrics {
         )?;
         registry.register(Box::new(cancellations_total.clone()))?;
 
-        let fill_rate = Gauge::new("bog_trading_fill_rate", "Current order fill rate (0.0 to 1.0)")?;
+        let fill_rate = Gauge::new(
+            "bog_trading_fill_rate",
+            "Current order fill rate (0.0 to 1.0)",
+        )?;
         registry.register(Box::new(fill_rate.clone()))?;
 
         let orders_by_status = IntGaugeVec::new(
-            Opts::new("trading_orders_by_status", "Number of orders by status")
-                .namespace("bog"),
+            Opts::new("trading_orders_by_status", "Number of orders by status").namespace("bog"),
             &["status"],
         )?;
         registry.register(Box::new(orders_by_status.clone()))?;
@@ -214,7 +214,9 @@ impl PerformanceMetrics {
                 "Strategy calculation latency in nanoseconds",
             )
             .namespace("bog")
-            .buckets(vec![1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]),
+            .buckets(vec![
+                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
+            ]),
             &["strategy"],
         )?;
         registry.register(Box::new(strategy_latency_ns.clone()))?;
@@ -233,16 +235,22 @@ impl PerformanceMetrics {
                 "bog_performance_execution_latency_us",
                 "Order execution latency in microseconds",
             )
-            .buckets(vec![10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0]),
+            .buckets(vec![
+                10.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2500.0, 5000.0,
+            ]),
         )?;
         registry.register(Box::new(execution_latency_us.clone()))?;
 
-        let ticks_per_second =
-            Gauge::new("bog_performance_ticks_per_second", "Market ticks processed per second")?;
+        let ticks_per_second = Gauge::new(
+            "bog_performance_ticks_per_second",
+            "Market ticks processed per second",
+        )?;
         registry.register(Box::new(ticks_per_second.clone()))?;
 
-        let orders_per_second =
-            Gauge::new("bog_performance_orders_per_second", "Orders submitted per second")?;
+        let orders_per_second = Gauge::new(
+            "bog_performance_orders_per_second",
+            "Orders submitted per second",
+        )?;
         registry.register(Box::new(orders_per_second.clone()))?;
 
         Ok(Self {
@@ -287,8 +295,10 @@ impl RiskMetrics {
         )?;
         registry.register(Box::new(position_utilization.clone()))?;
 
-        let realized_pnl_usd =
-            Gauge::new("bog_risk_realized_pnl_usd", "Realized profit and loss in USD")?;
+        let realized_pnl_usd = Gauge::new(
+            "bog_risk_realized_pnl_usd",
+            "Realized profit and loss in USD",
+        )?;
         registry.register(Box::new(realized_pnl_usd.clone()))?;
 
         let unrealized_pnl_usd = Gauge::new(
@@ -301,8 +311,7 @@ impl RiskMetrics {
         registry.register(Box::new(daily_pnl_usd.clone()))?;
 
         let risk_violations_total = IntCounterVec::new(
-            Opts::new("risk_violations_total", "Total number of risk violations")
-                .namespace("bog"),
+            Opts::new("risk_violations_total", "Total number of risk violations").namespace("bog"),
             &["type"],
         )?;
         registry.register(Box::new(risk_violations_total.clone()))?;
@@ -311,10 +320,8 @@ impl RiskMetrics {
             Gauge::new("bog_risk_position_limit_btc", "Position limit in BTC")?;
         registry.register(Box::new(position_limit_btc.clone()))?;
 
-        let daily_loss_limit_usd = Gauge::new(
-            "bog_risk_daily_loss_limit_usd",
-            "Daily loss limit in USD",
-        )?;
+        let daily_loss_limit_usd =
+            Gauge::new("bog_risk_daily_loss_limit_usd", "Daily loss limit in USD")?;
         registry.register(Box::new(daily_loss_limit_usd.clone()))?;
 
         Ok(Self {
@@ -391,23 +398,20 @@ impl SystemMetrics {
         registry.register(Box::new(exchange_connected.clone()))?;
 
         let errors_total = IntCounterVec::new(
-            Opts::new("system_errors_total", "Total system errors")
-                .namespace("bog"),
+            Opts::new("system_errors_total", "Total system errors").namespace("bog"),
             &["component", "severity"],
         )?;
         registry.register(Box::new(errors_total.clone()))?;
 
-        let cpu_usage_percent =
-            Gauge::new("bog_system_cpu_usage_percent", "CPU usage percentage")?;
+        let cpu_usage_percent = Gauge::new("bog_system_cpu_usage_percent", "CPU usage percentage")?;
         registry.register(Box::new(cpu_usage_percent.clone()))?;
 
-        let memory_usage_bytes = IntGauge::new(
-            "bog_system_memory_usage_bytes",
-            "Memory usage in bytes",
-        )?;
+        let memory_usage_bytes =
+            IntGauge::new("bog_system_memory_usage_bytes", "Memory usage in bytes")?;
         registry.register(Box::new(memory_usage_bytes.clone()))?;
 
-        let uptime_seconds = IntGauge::new("bog_system_uptime_seconds", "System uptime in seconds")?;
+        let uptime_seconds =
+            IntGauge::new("bog_system_uptime_seconds", "System uptime in seconds")?;
         registry.register(Box::new(uptime_seconds.clone()))?;
 
         let overflow_errors_total = IntCounterVec::new(
@@ -475,8 +479,16 @@ mod tests {
         let registry = MetricsRegistry::new().unwrap();
 
         // Test trading metrics
-        registry.trading().orders_total.with_label_values(&["BTC-USD", "buy", "limit"]).inc();
-        registry.trading().fills_total.with_label_values(&["BTC-USD", "buy"]).inc();
+        registry
+            .trading()
+            .orders_total
+            .with_label_values(&["BTC-USD", "buy", "limit"])
+            .inc();
+        registry
+            .trading()
+            .fills_total
+            .with_label_values(&["BTC-USD", "buy"])
+            .inc();
         registry.trading().volume_total.inc_by(50000.0);
 
         let metrics = registry.registry().gather();
@@ -488,8 +500,15 @@ mod tests {
         let registry = MetricsRegistry::new().unwrap();
 
         // Test performance metrics
-        registry.performance().tick_to_trade_latency_ns.observe(27.5);
-        registry.performance().strategy_latency_ns.with_label_values(&["simple_spread"]).observe(5.0);
+        registry
+            .performance()
+            .tick_to_trade_latency_ns
+            .observe(27.5);
+        registry
+            .performance()
+            .strategy_latency_ns
+            .with_label_values(&["simple_spread"])
+            .observe(5.0);
         registry.performance().ticks_per_second.set(1000.0);
 
         let metrics = registry.registry().gather();
@@ -527,12 +546,28 @@ mod tests {
         let registry = MetricsRegistry::new().unwrap();
 
         // Test overflow error counters
-        registry.system().overflow_errors_total.with_label_values(&["quantity"]).inc();
-        registry.system().overflow_errors_total.with_label_values(&["pnl_realized"]).inc();
-        registry.system().overflow_errors_total.with_label_values(&["conversion"]).inc();
+        registry
+            .system()
+            .overflow_errors_total
+            .with_label_values(&["quantity"])
+            .inc();
+        registry
+            .system()
+            .overflow_errors_total
+            .with_label_values(&["pnl_realized"])
+            .inc();
+        registry
+            .system()
+            .overflow_errors_total
+            .with_label_values(&["conversion"])
+            .inc();
 
         // Test saturating operations counter
-        registry.system().saturated_operations_total.with_label_values(&["position_update"]).inc();
+        registry
+            .system()
+            .saturated_operations_total
+            .with_label_values(&["position_update"])
+            .inc();
 
         // Test fill queue metrics
         registry.system().fill_queue_depth.set(512);
@@ -542,12 +577,14 @@ mod tests {
         assert!(metrics.len() > 0);
 
         // Verify overflow metrics exist
-        let overflow_metric = metrics.iter()
+        let overflow_metric = metrics
+            .iter()
             .find(|m| m.get_name() == "bog_system_overflow_errors_total");
         assert!(overflow_metric.is_some());
 
         // Verify queue metrics exist
-        let queue_metric = metrics.iter()
+        let queue_metric = metrics
+            .iter()
             .find(|m| m.get_name() == "bog_system_fill_queue_depth");
         assert!(queue_metric.is_some());
     }

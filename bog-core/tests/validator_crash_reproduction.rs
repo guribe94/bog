@@ -20,16 +20,20 @@ fn test_depth_level_with_price_but_zero_size() {
     snapshot.sequence = 20481211;
     snapshot.best_bid_price = 819721900000;
     snapshot.best_ask_price = 819939800000;
-    snapshot.snapshot_flags = 0;  // INCREMENTAL snapshot
+    snapshot.snapshot_flags = 0; // INCREMENTAL snapshot
 
     // This is the problematic state: bid_prices[0] has a price but bid_sizes[0] is 0
     // This happened because the depth array had stale data from a previous full snapshot
-    snapshot.bid_prices[0] = 819700000000;  // Stale price from previous full snapshot
-    snapshot.bid_sizes[0] = 0;               // ZERO SIZE - stale/invalid data
+    snapshot.bid_prices[0] = 819700000000; // Stale price from previous full snapshot
+    snapshot.bid_sizes[0] = 0; // ZERO SIZE - stale/invalid data
 
     // AFTER FIX: This should PASS because depth validation is skipped for incremental snapshots
     let result = validator.validate(&snapshot);
-    assert!(result.is_ok(), "Incremental snapshot with stale depth data should pass validation: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Incremental snapshot with stale depth data should pass validation: {:?}",
+        result.err()
+    );
 }
 
 /// Test that empty depth levels (price=0, size=0) are valid
@@ -60,20 +64,24 @@ fn test_populated_depth_levels_are_valid() {
 
     // Populate depth with valid descending bid prices
     snapshot.bid_prices[0] = 819700000000;
-    snapshot.bid_sizes[0] = 100000000;  // 0.1 BTC
+    snapshot.bid_sizes[0] = 100000000; // 0.1 BTC
 
-    snapshot.bid_prices[1] = 819680000000;  // Lower price
-    snapshot.bid_sizes[1] = 200000000;  // 0.2 BTC
+    snapshot.bid_prices[1] = 819680000000; // Lower price
+    snapshot.bid_sizes[1] = 200000000; // 0.2 BTC
 
     // Populate depth with valid ascending ask prices
     snapshot.ask_prices[0] = 819950000000;
     snapshot.ask_sizes[0] = 100000000;
 
-    snapshot.ask_prices[1] = 819970000000;  // Higher price
+    snapshot.ask_prices[1] = 819970000000; // Higher price
     snapshot.ask_sizes[1] = 200000000;
 
     let result = validator.validate(&snapshot);
-    assert!(result.is_ok(), "Properly populated depth levels should be valid: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Properly populated depth levels should be valid: {:?}",
+        result.err()
+    );
 }
 
 /// Test that size>0 with price=0 also fails (consistency check)
@@ -104,7 +112,7 @@ fn test_sequence_gap_followed_by_invalid_snapshot() {
     // First snapshot: sequence 20481209 (incremental)
     let mut snapshot1 = create_valid_snapshot();
     snapshot1.sequence = 20481209;
-    snapshot1.snapshot_flags = 0;  // Incremental
+    snapshot1.snapshot_flags = 0; // Incremental
 
     let result1 = validator.validate(&snapshot1);
     assert!(result1.is_ok(), "First snapshot should be valid");
@@ -114,13 +122,17 @@ fn test_sequence_gap_followed_by_invalid_snapshot() {
     // Second snapshot: sequence 20481211 with stale depth data (incremental)
     let mut snapshot2 = create_valid_snapshot();
     snapshot2.sequence = 20481211;
-    snapshot2.snapshot_flags = 0;  // INCREMENTAL - this is key!
-    snapshot2.bid_prices[0] = 819700000000;  // Stale from previous full snapshot
-    snapshot2.bid_sizes[0] = 0;  // Invalid, but will be ignored
+    snapshot2.snapshot_flags = 0; // INCREMENTAL - this is key!
+    snapshot2.bid_prices[0] = 819700000000; // Stale from previous full snapshot
+    snapshot2.bid_sizes[0] = 0; // Invalid, but will be ignored
 
     // AFTER FIX: Should pass because depth validation is skipped for incremental snapshots
     let result2 = validator.validate(&snapshot2);
-    assert!(result2.is_ok(), "Incremental snapshot after gap should pass (depth not validated): {:?}", result2.err());
+    assert!(
+        result2.is_ok(),
+        "Incremental snapshot after gap should pass (depth not validated): {:?}",
+        result2.err()
+    );
 }
 
 /// Test that incremental snapshots DON'T validate depth arrays (THE FIX!)
@@ -130,16 +142,20 @@ fn test_incremental_snapshot_skips_depth_validation() {
 
     // Create an incremental snapshot (snapshot_flags = 0)
     let mut snapshot = create_valid_snapshot();
-    snapshot.snapshot_flags = 0;  // Incremental mode
+    snapshot.snapshot_flags = 0; // Incremental mode
 
     // Add invalid depth data (price but zero size)
     // This would normally fail validation, but should be IGNORED for incremental snapshots
     snapshot.bid_prices[0] = 819700000000;
-    snapshot.bid_sizes[0] = 0;  // Invalid, but should be skipped!
+    snapshot.bid_sizes[0] = 0; // Invalid, but should be skipped!
 
     // This should PASS because depth validation is skipped for incremental snapshots
     let result = validator.validate(&snapshot);
-    assert!(result.is_ok(), "Incremental snapshots should skip depth validation: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Incremental snapshots should skip depth validation: {:?}",
+        result.err()
+    );
 }
 
 /// Test that full snapshots DO validate depth arrays
@@ -149,15 +165,18 @@ fn test_full_snapshot_validates_depth() {
 
     // Create a full snapshot (snapshot_flags = 1)
     let mut snapshot = create_valid_snapshot();
-    snapshot.snapshot_flags = 1;  // Full snapshot mode
+    snapshot.snapshot_flags = 1; // Full snapshot mode
 
     // Add invalid depth data
     snapshot.bid_prices[0] = 819700000000;
-    snapshot.bid_sizes[0] = 0;  // Invalid!
+    snapshot.bid_sizes[0] = 0; // Invalid!
 
     // This should FAIL because depth validation is enabled for full snapshots
     let result = validator.validate(&snapshot);
-    assert!(result.is_err(), "Full snapshots should validate depth arrays");
+    assert!(
+        result.is_err(),
+        "Full snapshots should validate depth arrays"
+    );
 
     match result {
         Err(ValidationError::InvalidDepthLevel { level, reason }) => {
@@ -182,8 +201,8 @@ fn create_valid_snapshot() -> MarketSnapshot {
         .market_id(1000025)
         .sequence(1)
         .timestamp(now)
-        .best_bid(819721900000, 100000000)  // ~$819.72, 0.1 BTC
-        .best_ask(819939800000, 100000000)  // ~$819.94, 0.1 BTC
+        .best_bid(819721900000, 100000000) // ~$819.72, 0.1 BTC
+        .best_ask(819939800000, 100000000) // ~$819.94, 0.1 BTC
         .incremental_snapshot()
         .build()
 }

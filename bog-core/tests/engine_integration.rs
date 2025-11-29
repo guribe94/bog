@@ -69,12 +69,12 @@ fn test_position_accumulates_across_ticks() {
     // Simulate 10 ticks that should generate fills
     for i in 0..10 {
         let snapshot = create_test_snapshot(
-            1,                                                  // market_id
-            i as u64,                                           // sequence
-            50_000_000_000_000 + (i as u64 * 10_000_000_000),   // bid_price
-            50_002_000_000_000 + (i as u64 * 10_000_000_000),   // ask_price
-            1_000_000_000,                                      // bid_size
-            1_000_000_000,                                      // ask_size
+            1,                                                // market_id
+            i as u64,                                         // sequence
+            50_000_000_000_000 + (i as u64 * 10_000_000_000), // bid_price
+            50_002_000_000_000 + (i as u64 * 10_000_000_000), // ask_price
+            1_000_000_000,                                    // bid_size
+            1_000_000_000,                                    // ask_size
         );
 
         engine.process_tick(&snapshot, true).unwrap();
@@ -102,18 +102,24 @@ fn test_position_long_and_short() {
 
     // First tick
     let snapshot1 = create_test_snapshot(
-        1, 1,
-        50_000_000_000_000, 50_002_000_000_000,
-        1_000_000_000, 1_000_000_000,
+        1,
+        1,
+        50_000_000_000_000,
+        50_002_000_000_000,
+        1_000_000_000,
+        1_000_000_000,
     );
 
     engine.process_tick(&snapshot1, true).unwrap();
 
     // Second tick with different prices
     let snapshot2 = create_test_snapshot(
-        1, 2,
-        52_000_000_000_000, 52_002_000_000_000,
-        1_000_000_000, 1_000_000_000,
+        1,
+        2,
+        52_000_000_000_000,
+        52_002_000_000_000,
+        1_000_000_000,
+        1_000_000_000,
     );
 
     engine.process_tick(&snapshot2, true).unwrap();
@@ -127,36 +133,41 @@ fn test_position_long_and_short() {
 #[test]
 fn test_high_frequency_tick_processing() {
     use std::time::Instant;
-    
+
     let strategy = LongOnlyStrategy { tick_count: 0 };
     let executor = SimulatedExecutor::new(256, 1024);
-    
+
     let mut engine = Engine::new(strategy, executor);
-    
+
     let start = Instant::now();
-    
+
     // Process 1000 ticks rapidly
     for i in 0..1000 {
         let snapshot = create_test_snapshot(
-            1, i as u64,
+            1,
+            i as u64,
             50_000_000_000_000 + ((i % 100) as u64 * 10_000_000), // bid_price
             50_002_000_000_000 + ((i % 100) as u64 * 10_000_000), // ask_price
-            1_000_000_000, // bid_size
-            1_000_000_000, // ask_size
+            1_000_000_000,                                        // bid_size
+            1_000_000_000,                                        // ask_size
         );
-        
+
         engine.process_tick(&snapshot, true).unwrap();
     }
-    
+
     let duration = start.elapsed();
-    
+
     // Should complete quickly (< 100ms)
     assert!(duration.as_millis() < 100);
-    
+
     let position = engine.position();
-    
+
     // Position should be tracked correctly
     assert!(position.get_trade_count() > 0);
-    println!("Processed 1000 ticks in {:?}, position: {} satoshis, trades: {}", 
-             duration, position.get_quantity(), position.get_trade_count());
+    println!(
+        "Processed 1000 ticks in {:?}, position: {} satoshis, trades: {}",
+        duration,
+        position.get_quantity(),
+        position.get_trade_count()
+    );
 }

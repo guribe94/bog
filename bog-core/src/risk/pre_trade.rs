@@ -23,8 +23,8 @@
 
 use crate::resilience::KillSwitch;
 use anyhow::Result;
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use tracing::{debug, warn};
 
 /// Pre-trade validation result
@@ -52,7 +52,10 @@ pub enum PreTradeRejection {
     /// Exchange connection unhealthy
     ConnectionUnhealthy,
     /// Insufficient account balance
-    InsufficientBalance { required: Decimal, available: Decimal },
+    InsufficientBalance {
+        required: Decimal,
+        available: Decimal,
+    },
     /// Insufficient margin
     InsufficientMargin,
     /// Order size below exchange minimum
@@ -62,7 +65,11 @@ pub enum PreTradeRejection {
     /// Price not on valid tick
     InvalidTick { price: Decimal, tick_size: Decimal },
     /// Price too far from market (safety check)
-    PriceTooFarFromMarket { price: Decimal, mid: Decimal, max_distance_bps: u32 },
+    PriceTooFarFromMarket {
+        price: Decimal,
+        mid: Decimal,
+        max_distance_bps: u32,
+    },
 }
 
 impl std::fmt::Display for PreTradeRejection {
@@ -71,8 +78,15 @@ impl std::fmt::Display for PreTradeRejection {
             PreTradeRejection::KillSwitchActive => write!(f, "Kill switch active"),
             PreTradeRejection::TradingPaused => write!(f, "Trading paused"),
             PreTradeRejection::ConnectionUnhealthy => write!(f, "Exchange connection unhealthy"),
-            PreTradeRejection::InsufficientBalance { required, available } => {
-                write!(f, "Insufficient balance: need {}, have {}", required, available)
+            PreTradeRejection::InsufficientBalance {
+                required,
+                available,
+            } => {
+                write!(
+                    f,
+                    "Insufficient balance: need {}, have {}",
+                    required, available
+                )
             }
             PreTradeRejection::InsufficientMargin => write!(f, "Insufficient margin"),
             PreTradeRejection::SizeBelowMinimum { size, minimum } => {
@@ -84,7 +98,11 @@ impl std::fmt::Display for PreTradeRejection {
             PreTradeRejection::InvalidTick { price, tick_size } => {
                 write!(f, "Price {} not on tick size {}", price, tick_size)
             }
-            PreTradeRejection::PriceTooFarFromMarket { price, mid, max_distance_bps } => {
+            PreTradeRejection::PriceTooFarFromMarket {
+                price,
+                mid,
+                max_distance_bps,
+            } => {
                 write!(
                     f,
                     "Price {} too far from mid {} (max: {}bps)",
@@ -113,10 +131,10 @@ impl ExchangeRules {
     pub fn lighter_btc_usd() -> Self {
         use rust_decimal_macros::dec;
         Self {
-            min_order_size: dec!(0.001),    // 0.001 BTC minimum
-            max_order_size: dec!(10.0),      // 10 BTC maximum per order
-            tick_size: dec!(0.01),           // $0.01 tick size
-            max_price_distance_bps: 500,     // 5% from mid (safety check)
+            min_order_size: dec!(0.001), // 0.001 BTC minimum
+            max_order_size: dec!(10.0),  // 10 BTC maximum per order
+            tick_size: dec!(0.01),       // $0.01 tick size
+            max_price_distance_bps: 500, // 5% from mid (safety check)
         }
     }
 }
@@ -147,12 +165,7 @@ impl PreTradeValidator {
     /// Validate order before placement
     ///
     /// Performs all pre-trade checks and returns Allowed or Rejected.
-    pub fn validate(
-        &self,
-        price: Decimal,
-        size: Decimal,
-        mid_price: Decimal,
-    ) -> PreTradeResult {
+    pub fn validate(&self, price: Decimal, size: Decimal, mid_price: Decimal) -> PreTradeResult {
         // 1. Check kill switch
         if let Some(ref ks) = self.kill_switch {
             if ks.should_stop() {
@@ -167,7 +180,10 @@ impl PreTradeValidator {
 
         // 2. Size validation
         if size < self.rules.min_order_size {
-            warn!("Pre-trade check: Size below minimum ({} < {})", size, self.rules.min_order_size);
+            warn!(
+                "Pre-trade check: Size below minimum ({} < {})",
+                size, self.rules.min_order_size
+            );
             return PreTradeResult::Rejected(PreTradeRejection::SizeBelowMinimum {
                 size,
                 minimum: self.rules.min_order_size,
@@ -175,7 +191,10 @@ impl PreTradeValidator {
         }
 
         if size > self.rules.max_order_size {
-            warn!("Pre-trade check: Size above maximum ({} > {})", size, self.rules.max_order_size);
+            warn!(
+                "Pre-trade check: Size above maximum ({} > {})",
+                size, self.rules.max_order_size
+            );
             return PreTradeResult::Rejected(PreTradeRejection::SizeAboveMaximum {
                 size,
                 maximum: self.rules.max_order_size,
@@ -184,7 +203,10 @@ impl PreTradeValidator {
 
         // 3. Price tick validation
         if !self.is_on_tick(price) {
-            warn!("Pre-trade check: Price {} not on tick size {}", price, self.rules.tick_size);
+            warn!(
+                "Pre-trade check: Price {} not on tick size {}",
+                price, self.rules.tick_size
+            );
             return PreTradeResult::Rejected(PreTradeRejection::InvalidTick {
                 price,
                 tick_size: self.rules.tick_size,

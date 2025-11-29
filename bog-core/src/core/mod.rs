@@ -14,43 +14,41 @@
 //! - Minimal memory footprint
 //! - Compile-time state verification (zero runtime overhead)
 
-pub mod errors;
-pub mod signal;
-pub mod types;
-pub mod order_fsm;
 pub mod circuit_breaker_fsm;
-pub mod strategy_fsm;
 pub mod connection_fsm;
+pub mod errors;
+pub mod order_fsm;
+pub mod signal;
+pub mod strategy_fsm;
+pub mod types;
 
 // Re-export commonly used types
 pub use errors::{ConversionError, OverflowError, PositionError};
 pub use signal::{Signal, SignalAction};
-pub use types::{
-    fixed_point, OrderId, OrderStatus, OrderType, Position, Side,
-};
+pub use types::{fixed_point, OrderId, OrderStatus, OrderType, Position, Side};
 
 // Re-export order state machine types
 pub use order_fsm::{
-    OrderPending, OrderOpen, OrderPartiallyFilled, OrderFilled,
-    OrderCancelled, OrderRejected, OrderExpired, OrderState, FillResult, OrderData,
-    FillError, FillResultOrError, PartialFillResultOrError,
+    FillError, FillResult, FillResultOrError, OrderCancelled, OrderData, OrderExpired, OrderFilled,
+    OrderOpen, OrderPartiallyFilled, OrderPending, OrderRejected, OrderState,
+    PartialFillResultOrError,
 };
 
 // Re-export circuit breaker state machine types
 pub use circuit_breaker_fsm::{
-    BinaryNormal, BinaryHalted, BinaryBreakerState, HaltReason,
-    ThreeStateClosed, ThreeStateOpen, ThreeStateHalfOpen, ThreeStateBreakerState,
-    ThreeStateResult, ThreeStateOpenOrHalf, ThreeStateHalfOrClosed,
+    BinaryBreakerState, BinaryHalted, BinaryNormal, HaltReason, ThreeStateBreakerState,
+    ThreeStateClosed, ThreeStateHalfOpen, ThreeStateHalfOrClosed, ThreeStateOpen,
+    ThreeStateOpenOrHalf, ThreeStateResult,
 };
 
 // Re-export strategy state machine types
 pub use strategy_fsm::{
-    StrategyInitializing, StrategyActive, StrategyPaused, StrategyStopped,
-    StrategyState, StrategyData,
+    StrategyActive, StrategyData, StrategyInitializing, StrategyPaused, StrategyState,
+    StrategyStopped,
 };
 
 // Re-export connection state machine types
 pub use connection_fsm::{
-    ConnectionDisconnected, ConnectionConnected, ConnectionReconnecting, ConnectionFailed,
-    ConnectionState as ConnectionFsmState, ConnectionData, RetryResult, ReconnectResult,
+    ConnectionConnected, ConnectionData, ConnectionDisconnected, ConnectionFailed,
+    ConnectionReconnecting, ConnectionState as ConnectionFsmState, ReconnectResult, RetryResult,
 };

@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
-use tracing::{error, warn, info};
+use tracing::{error, info, warn};
 
 /// Alert severity levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -63,28 +63,28 @@ impl AlertType {
             AlertType::HighQueueDepth => AlertSeverity::Info,
 
             // Warning level
-            AlertType::DataStale |
-            AlertType::SpreadTooWide |
-            AlertType::LowLiquidity |
-            AlertType::HighLatency => AlertSeverity::Warning,
+            AlertType::DataStale
+            | AlertType::SpreadTooWide
+            | AlertType::LowLiquidity
+            | AlertType::HighLatency => AlertSeverity::Warning,
 
             // Error level
-            AlertType::DataGap |
-            AlertType::HuginnRestart |
-            AlertType::PositionDrift |
-            AlertType::OrderRejected |
-            AlertType::ExecutionFailed => AlertSeverity::Error,
+            AlertType::DataGap
+            | AlertType::HuginnRestart
+            | AlertType::PositionDrift
+            | AlertType::OrderRejected
+            | AlertType::ExecutionFailed => AlertSeverity::Error,
 
             // Critical level
-            AlertType::DataInvalid |
-            AlertType::OrderbookCrossed |
-            AlertType::PriceSpike |
-            AlertType::PositionLimitExceeded |
-            AlertType::UnexpectedFill |
-            AlertType::RecoveryFailed |
-            AlertType::CircuitBreakerTriggered |
-            AlertType::RiskLimitHit |
-            AlertType::MemoryPressure => AlertSeverity::Critical,
+            AlertType::DataInvalid
+            | AlertType::OrderbookCrossed
+            | AlertType::PriceSpike
+            | AlertType::PositionLimitExceeded
+            | AlertType::UnexpectedFill
+            | AlertType::RecoveryFailed
+            | AlertType::CircuitBreakerTriggered
+            | AlertType::RiskLimitHit
+            | AlertType::MemoryPressure => AlertSeverity::Critical,
         }
     }
 }
@@ -170,15 +170,15 @@ impl Default for AlertConfig {
 
         // Set per-severity rate limits
         let mut rate_limit_by_severity = HashMap::new();
-        rate_limit_by_severity.insert(AlertSeverity::Info, 20);       // 20 info alerts per minute
-        rate_limit_by_severity.insert(AlertSeverity::Warning, 15);    // 15 warnings per minute
-        rate_limit_by_severity.insert(AlertSeverity::Error, 10);      // 10 errors per minute
-        rate_limit_by_severity.insert(AlertSeverity::Critical, 100);  // 100 critical alerts (effectively unlimited)
+        rate_limit_by_severity.insert(AlertSeverity::Info, 20); // 20 info alerts per minute
+        rate_limit_by_severity.insert(AlertSeverity::Warning, 15); // 15 warnings per minute
+        rate_limit_by_severity.insert(AlertSeverity::Error, 10); // 10 errors per minute
+        rate_limit_by_severity.insert(AlertSeverity::Critical, 100); // 100 critical alerts (effectively unlimited)
 
         Self {
             enabled_alerts,
             severity_overrides: HashMap::new(),
-            rate_limit_per_minute: 10,  // Default fallback
+            rate_limit_per_minute: 10, // Default fallback
             rate_limit_by_severity,
             aggregation_window: Duration::from_secs(60),
             log_to_file: true,
@@ -249,7 +249,9 @@ impl AlertManager {
         }
 
         // Get severity (with overrides)
-        let severity = self.config.severity_overrides
+        let severity = self
+            .config
+            .severity_overrides
             .get(&alert_type)
             .copied()
             .unwrap_or_else(|| alert_type.default_severity());
@@ -276,7 +278,11 @@ impl AlertManager {
         // Check if we should halt trading
         if severity == AlertSeverity::Critical && self.config.halt_on_critical {
             self.trading_halted = true;
-            error!("🚨 CRITICAL ALERT: Trading halted due to {}: {}", alert_type.to_string(), message);
+            error!(
+                "🚨 CRITICAL ALERT: Trading halted due to {}: {}",
+                alert_type.to_string(),
+                message
+            );
         }
 
         Ok(())
@@ -288,13 +294,17 @@ impl AlertManager {
         let window_start = now - Duration::from_secs(60);
 
         // Get severity for this alert type
-        let severity = self.config.severity_overrides
+        let severity = self
+            .config
+            .severity_overrides
             .get(&alert_type)
             .copied()
             .unwrap_or_else(|| alert_type.default_severity());
 
         // Get the appropriate rate limit based on severity
-        let rate_limit = self.config.rate_limit_by_severity
+        let rate_limit = self
+            .config
+            .rate_limit_by_severity
             .get(&severity)
             .copied()
             .unwrap_or(self.config.rate_limit_per_minute);
@@ -309,7 +319,10 @@ impl AlertManager {
         if counts.len() >= rate_limit as usize {
             // Don't suppress critical alerts - just warn about rate
             if severity == AlertSeverity::Critical {
-                warn!("Critical alert rate high: {} alerts in last minute", counts.len());
+                warn!(
+                    "Critical alert rate high: {} alerts in last minute",
+                    counts.len()
+                );
                 // Still allow critical alerts through
             } else {
                 return false;
@@ -323,7 +336,8 @@ impl AlertManager {
 
     /// Log alert based on severity
     fn log_alert(&self, alert: &Alert) {
-        let context_str = alert.context
+        let context_str = alert
+            .context
             .iter()
             .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
@@ -331,16 +345,36 @@ impl AlertManager {
 
         match alert.severity {
             AlertSeverity::Info => {
-                info!("ℹ️ ALERT [{}]: {} | {}", alert.alert_type.to_string(), alert.message, context_str);
+                info!(
+                    "ℹ️ ALERT [{}]: {} | {}",
+                    alert.alert_type.to_string(),
+                    alert.message,
+                    context_str
+                );
             }
             AlertSeverity::Warning => {
-                warn!("⚠️ ALERT [{}]: {} | {}", alert.alert_type.to_string(), alert.message, context_str);
+                warn!(
+                    "⚠️ ALERT [{}]: {} | {}",
+                    alert.alert_type.to_string(),
+                    alert.message,
+                    context_str
+                );
             }
             AlertSeverity::Error => {
-                error!("❌ ALERT [{}]: {} | {}", alert.alert_type.to_string(), alert.message, context_str);
+                error!(
+                    "❌ ALERT [{}]: {} | {}",
+                    alert.alert_type.to_string(),
+                    alert.message,
+                    context_str
+                );
             }
             AlertSeverity::Critical => {
-                error!("🚨 CRITICAL [{}]: {} | {}", alert.alert_type.to_string(), alert.message, context_str);
+                error!(
+                    "🚨 CRITICAL [{}]: {} | {}",
+                    alert.alert_type.to_string(),
+                    alert.message,
+                    context_str
+                );
             }
         }
     }
@@ -357,7 +391,11 @@ impl AlertManager {
             AlertSeverity::Critical => self.stats.critical_count += 1,
         }
 
-        *self.stats.alerts_by_type.entry(alert.alert_type).or_insert(0) += 1;
+        *self
+            .stats
+            .alerts_by_type
+            .entry(alert.alert_type)
+            .or_insert(0) += 1;
     }
 
     /// Check if trading is halted
@@ -392,7 +430,8 @@ impl AlertManager {
     pub fn log_summary(&self) {
         info!("Alert Summary:");
         info!("  Total Alerts: {}", self.stats.total_alerts);
-        info!("  Info: {}, Warning: {}, Error: {}, Critical: {}",
+        info!(
+            "  Info: {}, Warning: {}, Error: {}, Critical: {}",
             self.stats.info_count,
             self.stats.warning_count,
             self.stats.error_count,
@@ -461,11 +500,13 @@ mod tests {
         let mut context = HashMap::new();
         context.insert("gap_size".to_string(), "100".to_string());
 
-        manager.raise_alert(
-            AlertType::DataGap,
-            "Sequence gap detected".to_string(),
-            context,
-        ).unwrap();
+        manager
+            .raise_alert(
+                AlertType::DataGap,
+                "Sequence gap detected".to_string(),
+                context,
+            )
+            .unwrap();
 
         assert_eq!(manager.stats().total_alerts, 1);
         assert_eq!(manager.stats().error_count, 1);
@@ -477,11 +518,13 @@ mod tests {
         config.halt_on_critical = true;
         let mut manager = AlertManager::new(config);
 
-        manager.raise_alert(
-            AlertType::DataInvalid,
-            "Invalid data detected".to_string(),
-            HashMap::new(),
-        ).unwrap();
+        manager
+            .raise_alert(
+                AlertType::DataInvalid,
+                "Invalid data detected".to_string(),
+                HashMap::new(),
+            )
+            .unwrap();
 
         assert!(manager.is_trading_halted());
     }
@@ -490,26 +533,32 @@ mod tests {
     fn test_rate_limiting() {
         let mut config = AlertConfig::default();
         // HighLatency has Warning severity, so we need to set that limit
-        config.rate_limit_by_severity.insert(AlertSeverity::Warning, 2);
+        config
+            .rate_limit_by_severity
+            .insert(AlertSeverity::Warning, 2);
         let mut manager = AlertManager::new(config);
 
         // First two alerts should succeed
         for i in 0..2 {
-            manager.raise_alert(
-                AlertType::HighLatency,
-                format!("High latency {}", i),
-                HashMap::new(),
-            ).unwrap();
+            manager
+                .raise_alert(
+                    AlertType::HighLatency,
+                    format!("High latency {}", i),
+                    HashMap::new(),
+                )
+                .unwrap();
         }
 
         assert_eq!(manager.stats().total_alerts, 2);
 
         // Third alert should be rate limited
-        manager.raise_alert(
-            AlertType::HighLatency,
-            "High latency 3".to_string(),
-            HashMap::new(),
-        ).unwrap();
+        manager
+            .raise_alert(
+                AlertType::HighLatency,
+                "High latency 3".to_string(),
+                HashMap::new(),
+            )
+            .unwrap();
 
         // Should still be 2 due to rate limiting
         assert_eq!(manager.stats().total_alerts, 2);

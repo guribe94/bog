@@ -177,7 +177,8 @@ impl CircuitBreaker {
     /// Transition to Closed state
     fn transition_to_closed(&self) {
         info!("Circuit breaker transitioning to CLOSED");
-        self.state.store(CircuitState::Closed as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::Closed as u8, Ordering::Release);
         self.failure_count.store(0, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
         *self.last_state_change.lock() = Instant::now();
@@ -186,7 +187,8 @@ impl CircuitBreaker {
     /// Transition to Open state
     fn transition_to_open(&self) {
         warn!("Circuit breaker TRIPPED - transitioning to OPEN");
-        self.state.store(CircuitState::Open as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::Open as u8, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
         *self.last_state_change.lock() = Instant::now();
     }
@@ -194,7 +196,8 @@ impl CircuitBreaker {
     /// Transition to HalfOpen state
     fn transition_to_half_open(&self) {
         debug!("Circuit breaker transitioning to HALF-OPEN (testing recovery)");
-        self.state.store(CircuitState::HalfOpen as u8, Ordering::Release);
+        self.state
+            .store(CircuitState::HalfOpen as u8, Ordering::Release);
         self.failure_count.store(0, Ordering::Release);
         self.success_count.store(0, Ordering::Release);
         *self.last_state_change.lock() = Instant::now();

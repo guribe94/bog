@@ -137,7 +137,10 @@ impl Strategy for InventoryBased {
 // Compile-time size verification
 #[cfg(test)]
 const _: () = {
-    assert!(std::mem::size_of::<InventoryBased>() == 0, "InventoryBased must be zero-sized");
+    assert!(
+        std::mem::size_of::<InventoryBased>() == 0,
+        "InventoryBased must be zero-sized"
+    );
 };
 
 #[cfg(test)]

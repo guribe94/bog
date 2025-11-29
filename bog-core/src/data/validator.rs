@@ -12,15 +12,40 @@ pub enum ValidationError {
     ZeroSequence,
     ZeroBidPrice,
     ZeroAskPrice,
-    OrderbookCrossed { bid: u64, ask: u64 },
-    OrderbookLocked { price: u64 },
-    SpreadTooWide { spread_bps: u64 },
-    SpreadTooNarrow { spread_bps: u64 },
-    StaleData { age_ns: u64, max_age_ns: u64 },
-    FutureTimestamp { timestamp_ns: u64, now_ns: u64 },
-    InvalidDepthLevel { level: usize, reason: String },
-    PriceSpike { change_bps: u64, max_bps: u64 },
-    LowLiquidity { total_bid_size: u64, total_ask_size: u64, min_size: u64 },
+    OrderbookCrossed {
+        bid: u64,
+        ask: u64,
+    },
+    OrderbookLocked {
+        price: u64,
+    },
+    SpreadTooWide {
+        spread_bps: u64,
+    },
+    SpreadTooNarrow {
+        spread_bps: u64,
+    },
+    StaleData {
+        age_ns: u64,
+        max_age_ns: u64,
+    },
+    FutureTimestamp {
+        timestamp_ns: u64,
+        now_ns: u64,
+    },
+    InvalidDepthLevel {
+        level: usize,
+        reason: String,
+    },
+    PriceSpike {
+        change_bps: u64,
+        max_bps: u64,
+    },
+    LowLiquidity {
+        total_bid_size: u64,
+        total_ask_size: u64,
+        min_size: u64,
+    },
     InvalidPrice,
 }
 
@@ -40,7 +65,11 @@ impl std::fmt::Display for ValidationError {
                 write!(f, "Spread too wide: {}bps", spread_bps)
             }
             ValidationError::SpreadTooNarrow { spread_bps } => {
-                write!(f, "Spread too narrow: {}bps (possible data error)", spread_bps)
+                write!(
+                    f,
+                    "Spread too narrow: {}bps (possible data error)",
+                    spread_bps
+                )
             }
             ValidationError::StaleData { age_ns, max_age_ns } => {
                 write!(
@@ -50,7 +79,10 @@ impl std::fmt::Display for ValidationError {
                     max_age_ns / 1_000_000
                 )
             }
-            ValidationError::FutureTimestamp { timestamp_ns, now_ns } => {
+            ValidationError::FutureTimestamp {
+                timestamp_ns,
+                now_ns,
+            } => {
                 write!(
                     f,
                     "Future timestamp: {} > {} (clock skew)",
@@ -60,10 +92,17 @@ impl std::fmt::Display for ValidationError {
             ValidationError::InvalidDepthLevel { level, reason } => {
                 write!(f, "Invalid depth level {}: {}", level, reason)
             }
-            ValidationError::PriceSpike { change_bps, max_bps } => {
+            ValidationError::PriceSpike {
+                change_bps,
+                max_bps,
+            } => {
                 write!(f, "Price spike: {}bps > max {}bps", change_bps, max_bps)
             }
-            ValidationError::LowLiquidity { total_bid_size, total_ask_size, min_size } => {
+            ValidationError::LowLiquidity {
+                total_bid_size,
+                total_ask_size,
+                min_size,
+            } => {
                 write!(
                     f,
                     "Low liquidity: bid={}, ask={} (min={})",
@@ -105,11 +144,11 @@ pub struct ValidationConfig {
 impl Default for ValidationConfig {
     fn default() -> Self {
         Self {
-            max_age_ns: 5_000_000_000,           // 5 seconds
-            max_spread_bps: 1000,                 // 10%
-            min_spread_bps: 1,                    // 0.01% (1bp minimum)
-            max_price_change_bps: 500,            // 5% per snapshot
-            min_total_liquidity: 100_000_000,     // 0.1 BTC in fixed-point
+            max_age_ns: 5_000_000_000,        // 5 seconds
+            max_spread_bps: 1000,             // 10%
+            min_spread_bps: 1,                // 0.01% (1bp minimum)
+            max_price_change_bps: 500,        // 5% per snapshot
+            min_total_liquidity: 100_000_000, // 0.1 BTC in fixed-point
             validate_depth: true,
             allow_locked: false,
         }
@@ -440,10 +479,7 @@ impl SnapshotValidator {
             if price >= last_bid_price {
                 let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
-                    reason: format!(
-                        "Bid price {} must be < previous {}",
-                        price, last_bid_price
-                    ),
+                    reason: format!("Bid price {} must be < previous {}", price, last_bid_price),
                 };
                 // Only log error, don't block on IO
                 // self.capture_invalid_snapshot(snapshot, &error);
@@ -480,10 +516,7 @@ impl SnapshotValidator {
             if price <= last_ask_price {
                 let error = ValidationError::InvalidDepthLevel {
                     level: i + 1,
-                    reason: format!(
-                        "Ask price {} must be > previous {}",
-                        price, last_ask_price
-                    ),
+                    reason: format!("Ask price {} must be > previous {}", price, last_ask_price),
                 };
                 // self.capture_invalid_snapshot(snapshot, &error);
                 return Err(error);

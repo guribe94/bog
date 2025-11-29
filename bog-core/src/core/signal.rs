@@ -228,10 +228,18 @@ impl fmt::Debug for Signal {
                 self.bid_price, self.ask_price, self.size
             ),
             SignalAction::QuoteBid => {
-                write!(f, "Signal::QuoteBid {{ price: {}, size: {} }}", self.bid_price, self.size)
+                write!(
+                    f,
+                    "Signal::QuoteBid {{ price: {}, size: {} }}",
+                    self.bid_price, self.size
+                )
             }
             SignalAction::QuoteAsk => {
-                write!(f, "Signal::QuoteAsk {{ price: {}, size: {} }}", self.ask_price, self.size)
+                write!(
+                    f,
+                    "Signal::QuoteAsk {{ price: {}, size: {} }}",
+                    self.ask_price, self.size
+                )
             }
             SignalAction::CancelAll => write!(f, "Signal::CancelAll"),
             SignalAction::TakePosition => write!(

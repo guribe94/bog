@@ -17,21 +17,30 @@ mod market_id_encoding {
     #[test]
     fn test_encode_lighter_market_1() {
         let encoded = bog_core::data::types::encode_market_id(1, 1);
-        assert_eq!(encoded, 1_000_001, "Lighter market 1 should encode to 1,000,001");
+        assert_eq!(
+            encoded, 1_000_001,
+            "Lighter market 1 should encode to 1,000,001"
+        );
     }
 
     /// Test: Lighter market 42 encodes to 1,000,042
     #[test]
     fn test_encode_lighter_market_42() {
         let encoded = bog_core::data::types::encode_market_id(1, 42);
-        assert_eq!(encoded, 1_000_042, "Lighter market 42 should encode to 1,000,042");
+        assert_eq!(
+            encoded, 1_000_042,
+            "Lighter market 42 should encode to 1,000,042"
+        );
     }
 
     /// Test: DEX type 2 market 1 encodes to 2,000,001
     #[test]
     fn test_encode_dex2_market_1() {
         let encoded = bog_core::data::types::encode_market_id(2, 1);
-        assert_eq!(encoded, 2_000_001, "DEX 2 market 1 should encode to 2,000,001");
+        assert_eq!(
+            encoded, 2_000_001,
+            "DEX 2 market 1 should encode to 2,000,001"
+        );
     }
 
     /// Test: Decoding 1,000,001 produces (1, 1)
@@ -68,18 +77,21 @@ mod market_id_encoding {
         let (dex_out, market_out) = bog_core::data::types::decode_market_id(encoded);
 
         assert_eq!(dex_out, dex_in, "DEX type should round-trip correctly");
-        assert_eq!(market_out, market_in, "Market ID should round-trip correctly");
+        assert_eq!(
+            market_out, market_in,
+            "Market ID should round-trip correctly"
+        );
     }
 
     /// Test: Round-trip encode/decode is lossless for various combinations
     #[test]
     fn test_roundtrip_various_markets() {
         let test_cases = vec![
-            (1u8, 1u64),    // Lighter market 1
-            (1u8, 42u64),   // Lighter market 42
+            (1u8, 1u64),       // Lighter market 1
+            (1u8, 42u64),      // Lighter market 42
             (1u8, 999_999u64), // Lighter market near max
-            (2u8, 1u64),    // DEX 2 market 1
-            (3u8, 100u64),  // DEX 3 market 100
+            (2u8, 1u64),       // DEX 2 market 1
+            (3u8, 100u64),     // DEX 3 market 100
         ];
 
         for (dex_in, market_in) in test_cases {

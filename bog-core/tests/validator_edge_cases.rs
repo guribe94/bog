@@ -17,8 +17,8 @@ fn test_validator_division_by_zero_in_spread_calculation() {
     // This could theoretically pass initial checks if ask is also zero
     let mut snapshot = MarketSnapshot::default();
     snapshot.sequence = 1;
-    snapshot.best_bid_price = 0;  // Zero bid
-    snapshot.best_ask_price = 0;  // Zero ask
+    snapshot.best_bid_price = 0; // Zero bid
+    snapshot.best_ask_price = 0; // Zero ask
     snapshot.best_bid_size = 1_000_000_000;
     snapshot.best_ask_size = 1_000_000_000;
     snapshot.exchange_timestamp_ns = 1_700_000_000_000_000_000;
@@ -53,9 +53,9 @@ fn test_validator_zero_bid_nonzero_ask() {
 
     let mut snapshot = MarketSnapshot::default();
     snapshot.sequence = 1;
-    snapshot.best_bid_price = 0;  // Zero bid
-    snapshot.best_ask_price = 50_000_000_000_000;  // $50k ask
-    snapshot.best_bid_size = 0;  // Also zero size (market halted?)
+    snapshot.best_bid_price = 0; // Zero bid
+    snapshot.best_ask_price = 50_000_000_000_000; // $50k ask
+    snapshot.best_bid_size = 0; // Also zero size (market halted?)
     snapshot.best_ask_size = 1_000_000_000;
     snapshot.exchange_timestamp_ns = 1_700_000_000_000_000_000;
 
@@ -96,8 +96,8 @@ fn test_validator_tiny_prices() {
 
     let mut snapshot = MarketSnapshot::default();
     snapshot.sequence = 1;
-    snapshot.best_bid_price = 1;  // Smallest non-zero price
-    snapshot.best_ask_price = 2;  // Tiny spread
+    snapshot.best_bid_price = 1; // Smallest non-zero price
+    snapshot.best_ask_price = 2; // Tiny spread
     snapshot.best_bid_size = 1_000_000_000;
     snapshot.best_ask_size = 1_000_000_000;
     snapshot.exchange_timestamp_ns = 1_700_000_000_000_000_000;
@@ -117,8 +117,8 @@ fn test_validator_spread_bps_overflow() {
 
     let mut snapshot = MarketSnapshot::default();
     snapshot.sequence = 1;
-    snapshot.best_bid_price = 1;  // Tiny bid
-    snapshot.best_ask_price = u64::MAX;  // Huge ask
+    snapshot.best_bid_price = 1; // Tiny bid
+    snapshot.best_ask_price = u64::MAX; // Huge ask
     snapshot.best_bid_size = 1_000_000_000;
     snapshot.best_ask_size = 1_000_000_000;
 

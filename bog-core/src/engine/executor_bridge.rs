@@ -3,7 +3,7 @@
 //! This module provides an adapter that allows execution::SimulatedExecutor
 //! (which has realistic fill simulation) to be used with the generic Engine.
 
-use super::{Executor as EngineExecutor};
+use super::Executor as EngineExecutor;
 use crate::core::{Position, Signal, SignalAction};
 use crate::execution::{Executor as ExecExecutor, Fill, Order, Side};
 use anyhow::Result;
@@ -54,7 +54,7 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
             SignalAction::TakePosition => {
                 // Market order - use bid for buy, ask for sell
                 let (price, exec_side) = match signal.side {
-                    crate::core::Side::Buy => (signal.ask_price, Side::Buy),   // Hit the ask
+                    crate::core::Side::Buy => (signal.ask_price, Side::Buy), // Hit the ask
                     crate::core::Side::Sell => (signal.bid_price, Side::Sell), // Hit the bid
                 };
                 let price_decimal = Decimal::from(price) / Decimal::from(1_000_000_000);
@@ -64,15 +64,7 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
                 self.executor.place_order(order)?;
             }
             SignalAction::CancelAll => {
-                // Cancel all active orders
-                let active_orders: Vec<_> = self.executor.get_active_orders()
-                    .iter()
-                    .map(|o| o.id.clone())
-                    .collect();
-
-                for order_id in active_orders {
-                    let _ = self.executor.cancel_order(&order_id);
-                }
+                self.executor.cancel_all_orders()?;
             }
             SignalAction::NoAction => {
                 // Do nothing
@@ -82,18 +74,7 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
     }
 
     fn cancel_all(&mut self) -> Result<()> {
-        // Get all active orders and cancel them
-        let active_orders: Vec<_> = self.executor.get_active_orders()
-            .iter()
-            .map(|o| o.id.clone())
-            .collect();
-
-        for order_id in active_orders {
-            // Ignore errors when cancelling (order may already be filled/cancelled)
-            let _ = self.executor.cancel_order(&order_id);
-        }
-
-        Ok(())
+        self.executor.cancel_all_orders()
     }
 
     fn name(&self) -> &'static str {

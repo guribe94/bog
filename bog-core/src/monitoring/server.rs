@@ -205,7 +205,11 @@ mod tests {
         let server = MetricsServer::new(config, registry.clone());
 
         // Add some test metrics
-        registry.trading().orders_total.with_label_values(&["BTC-USD", "buy", "limit"]).inc();
+        registry
+            .trading()
+            .orders_total
+            .with_label_values(&["BTC-USD", "buy", "limit"])
+            .inc();
         registry.performance().ticks_per_second.set(100.0);
 
         let metrics = server.serve_metrics_once().unwrap();

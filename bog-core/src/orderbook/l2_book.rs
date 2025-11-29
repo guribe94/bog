@@ -238,7 +238,11 @@ impl L2OrderBook {
     #[inline]
     pub fn total_liquidity(&self, is_bid: bool, max_levels: usize) -> u64 {
         let max_levels = max_levels.min(DEPTH_LEVELS);
-        let sizes = if is_bid { &self.bid_sizes } else { &self.ask_sizes };
+        let sizes = if is_bid {
+            &self.bid_sizes
+        } else {
+            &self.ask_sizes
+        };
 
         sizes.iter().take(max_levels).sum()
     }
@@ -474,9 +478,9 @@ mod tests {
 
         // Best bid/ask (level 0)
         snapshot.best_bid_price = 50_000_000_000_000; // $50,000
-        snapshot.best_bid_size = 1_000_000_000;       // 1.0 BTC
+        snapshot.best_bid_size = 1_000_000_000; // 1.0 BTC
         snapshot.best_ask_price = 50_010_000_000_000; // $50,010
-        snapshot.best_ask_size = 1_500_000_000;       // 1.5 BTC
+        snapshot.best_ask_size = 1_500_000_000; // 1.5 BTC
 
         // Fill in depth levels (bids descending, asks ascending)
         for i in 0..DEPTH_LEVELS {
@@ -695,11 +699,17 @@ mod tests {
 
         // Verify sorted order
         for i in 1..bid_levels.len() {
-            assert!(bid_levels[i].0 < bid_levels[i-1].0, "Bids should be descending");
+            assert!(
+                bid_levels[i].0 < bid_levels[i - 1].0,
+                "Bids should be descending"
+            );
         }
 
         for i in 1..ask_levels.len() {
-            assert!(ask_levels[i].0 > ask_levels[i-1].0, "Asks should be ascending");
+            assert!(
+                ask_levels[i].0 > ask_levels[i - 1].0,
+                "Asks should be ascending"
+            );
         }
     }
 
@@ -862,18 +872,25 @@ mod tests {
         book.full_rebuild(&snapshot);
 
         // Verify invariants are maintained
-        assert!(!book.is_crossed(), "Orderbook should not be crossed after rebuild");
+        assert!(
+            !book.is_crossed(),
+            "Orderbook should not be crossed after rebuild"
+        );
 
         // Bids should be descending
         for i in 1..10 {
-            assert!(book.bid_prices[i] <= book.bid_prices[i-1],
-                "Bids should be descending");
+            assert!(
+                book.bid_prices[i] <= book.bid_prices[i - 1],
+                "Bids should be descending"
+            );
         }
 
         // Asks should be ascending
         for i in 1..10 {
-            assert!(book.ask_prices[i] >= book.ask_prices[i-1],
-                "Asks should be ascending");
+            assert!(
+                book.ask_prices[i] >= book.ask_prices[i - 1],
+                "Asks should be ascending"
+            );
         }
     }
 
@@ -903,8 +920,8 @@ mod tests {
 
         // Verify levels 1-9 preserved
         for i in 1..10 {
-            assert_eq!(book.bid_sizes[i], saved_bid_sizes[i-1]);
-            assert_eq!(book.ask_sizes[i], saved_ask_sizes[i-1]);
+            assert_eq!(book.bid_sizes[i], saved_bid_sizes[i - 1]);
+            assert_eq!(book.ask_sizes[i], saved_ask_sizes[i - 1]);
         }
     }
 

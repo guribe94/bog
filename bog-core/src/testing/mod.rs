@@ -6,8 +6,8 @@
 //! - Performance assertion utilities
 //! - Metrics collection helpers
 
-pub mod mock_huginn;
 pub mod helpers;
+pub mod mock_huginn;
 
-pub use mock_huginn::MockHuginnFeed;
 pub use helpers::*;
+pub use mock_huginn::MockHuginnFeed;

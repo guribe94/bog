@@ -18,7 +18,10 @@ mod backpressure_detection {
         let threshold = 1000;
 
         let backpressure_triggered = queue_depth > threshold;
-        assert!(!backpressure_triggered, "Shallow queue should not trigger backpressure");
+        assert!(
+            !backpressure_triggered,
+            "Shallow queue should not trigger backpressure"
+        );
     }
 
     /// Test: Backpressure triggered when queue is deep
@@ -28,7 +31,10 @@ mod backpressure_detection {
         let threshold = 1000;
 
         let backpressure_triggered = queue_depth > threshold;
-        assert!(backpressure_triggered, "Deep queue should trigger backpressure");
+        assert!(
+            backpressure_triggered,
+            "Deep queue should trigger backpressure"
+        );
     }
 
     /// Test: Backpressure at threshold boundary
@@ -58,10 +64,7 @@ mod backpressure_detection {
         let thresholds = vec![100, 500, 1000, 5000];
         let queue_depth = 2000;
 
-        let triggered_at = thresholds
-            .iter()
-            .filter(|&&t| queue_depth > t)
-            .count();
+        let triggered_at = thresholds.iter().filter(|&&t| queue_depth > t).count();
 
         // Should trigger at: 100, 500, 1000 (but not 5000)
         assert_eq!(triggered_at, 3, "Should trigger at appropriate thresholds");
@@ -81,7 +84,10 @@ mod backpressure_throttling {
         // Throttle duration based on how far behind we are
         let throttle_ms = (backlog as f64 / 1000.0).min(100.0) as u64;
 
-        assert!(throttle_ms > 0, "Should calculate positive throttle duration");
+        assert!(
+            throttle_ms > 0,
+            "Should calculate positive throttle duration"
+        );
         assert!(throttle_ms <= 100, "Throttle should be capped");
     }
 
@@ -166,7 +172,7 @@ mod backpressure_metrics {
         for depth in queue_depths {
             let now_throttled = depth > threshold;
             if now_throttled && !last_throttled {
-                throttle_count += 1;  // Transition to throttled
+                throttle_count += 1; // Transition to throttled
             }
             last_throttled = now_throttled;
         }
@@ -181,12 +187,12 @@ mod backpressure_metrics {
         let mut total_throttle_ms = 0u64;
 
         let snapshots = vec![
-            (500, 0u64),     // Not throttled
-            (1200, 50u64),   // Start throttle: 50ms
-            (1500, 60u64),   // Continue: 60ms
-            (800, 0u64),     // Release: no more throttle
-            (1100, 40u64),   // Start again: 40ms
-            (600, 0u64),     // Release
+            (500, 0u64),   // Not throttled
+            (1200, 50u64), // Start throttle: 50ms
+            (1500, 60u64), // Continue: 60ms
+            (800, 0u64),   // Release: no more throttle
+            (1100, 40u64), // Start again: 40ms
+            (600, 0u64),   // Release
         ];
 
         for (depth, throttle_ms) in snapshots {
@@ -240,14 +246,18 @@ mod backpressure_config {
     fn test_configurable_strategy() {
         #[derive(Debug, Clone, Copy, PartialEq)]
         enum ThrottleStrategy {
-            Sleep,      // Sleep for N ms
-            Yield,      // Just yield CPU
-            Skip,       // Skip messages
-            Disabled,   // No throttling
+            Sleep,    // Sleep for N ms
+            Yield,    // Just yield CPU
+            Skip,     // Skip messages
+            Disabled, // No throttling
         }
 
         let strategy = ThrottleStrategy::Sleep;
-        assert_eq!(strategy, ThrottleStrategy::Sleep, "Should support sleep strategy");
+        assert_eq!(
+            strategy,
+            ThrottleStrategy::Sleep,
+            "Should support sleep strategy"
+        );
 
         // Strategy should be changeable
         let _new_strategy = ThrottleStrategy::Yield;
@@ -290,6 +300,9 @@ mod backpressure_adaptive {
         let exponential = ((depth - threshold) as f64 / 100.0).exp();
 
         // Linear is more predictable, exponential responds faster
-        assert!(linear < exponential, "Exponential responds more aggressively");
+        assert!(
+            linear < exponential,
+            "Exponential responds more aggressively"
+        );
     }
 }

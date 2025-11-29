@@ -86,7 +86,8 @@ impl Metrics {
     /// Add latency measurement
     #[inline(always)]
     pub fn add_latency(&self, latency_ns: u64) {
-        self.total_latency_ns.fetch_add(latency_ns, Ordering::Relaxed);
+        self.total_latency_ns
+            .fetch_add(latency_ns, Ordering::Relaxed);
     }
 
     /// Get snapshot of all metrics

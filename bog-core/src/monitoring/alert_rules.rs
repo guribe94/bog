@@ -81,10 +81,7 @@ impl AlertRule for PositionLimitRule {
                 )
                 .with_detail("current_position", current_position.to_string())
                 .with_detail("limit", self.max_position.to_string())
-                .with_detail(
-                    "excess",
-                    (abs_position - self.max_position).to_string(),
-                );
+                .with_detail("excess", (abs_position - self.max_position).to_string());
 
                 return Some(alert);
             }
@@ -385,7 +382,9 @@ mod tests {
         // Simulate exceeding limit
         if let Some(position) = &context.position {
             // Set position to 1.5 BTC (exceeds 1.0 BTC limit)
-            position.quantity.store(1_500_000_000, std::sync::atomic::Ordering::Relaxed);
+            position
+                .quantity
+                .store(1_500_000_000, std::sync::atomic::Ordering::Relaxed);
         }
 
         // Should trigger alert
@@ -409,7 +408,9 @@ mod tests {
         // Simulate daily loss
         if let Some(position) = &context.position {
             // Set daily PnL to -$1,500 (exceeds -$1,000 limit)
-            position.daily_pnl.store(-1_500_000_000_000, std::sync::atomic::Ordering::Relaxed);
+            position
+                .daily_pnl
+                .store(-1_500_000_000_000, std::sync::atomic::Ordering::Relaxed);
         }
 
         // Should trigger alert
@@ -469,7 +470,9 @@ mod tests {
 
         // Set position to exceed limit
         if let Some(position) = &context.position {
-            position.quantity.store(1_000_000_000, std::sync::atomic::Ordering::Relaxed); // 1.0 BTC
+            position
+                .quantity
+                .store(1_000_000_000, std::sync::atomic::Ordering::Relaxed); // 1.0 BTC
         }
 
         // Evaluate - should trigger alert

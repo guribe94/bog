@@ -113,13 +113,12 @@
 //! - Target: <50ns engine overhead per tick ✅ **Achieved**
 
 use crate::config::{
-    MAX_POSITION, MAX_SHORT,
-    MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
-    MAX_POST_STALE_CHANGE_BPS, MAX_DRAWDOWN,
+    MAX_DRAWDOWN, MAX_POSITION, MAX_POST_STALE_CHANGE_BPS, MAX_SHORT, MIN_QUOTE_INTERVAL_NS,
+    QUEUE_DEPTH_WARNING_THRESHOLD,
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
-use crate::risk::circuit_breaker::{CircuitBreaker, BreakerState};
+use crate::risk::circuit_breaker::{BreakerState, CircuitBreaker};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -287,7 +286,11 @@ pub struct Engine<S: Strategy, E: Executor> {
 impl<S: Strategy, E: Executor> Engine<S, E> {
     /// Create new engine with strategy and executor
     pub fn new(strategy: S, executor: E) -> Self {
-        tracing::info!("Initializing engine: {} + {}", strategy.name(), executor.name());
+        tracing::info!(
+            "Initializing engine: {} + {}",
+            strategy.name(),
+            executor.name()
+        );
 
         Self {
             strategy,
@@ -358,16 +361,26 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // Increment tick counter (relaxed ordering for performance)
         self.hot.increment_ticks();
 
+        // Always drain executor fills before making trading decisions to avoid
+        // leaving pending fills unprocessed when we early-return.
+        self.drain_executor_fills()?;
+
         // Early return if market hasn't changed (optimization)
         // Measured: ~2ns for this check
-        if !self.hot.market_changed(snapshot.best_bid_price, snapshot.best_ask_price) {
+        if !self
+            .hot
+            .market_changed(snapshot.best_bid_price, snapshot.best_ask_price)
+        {
             return Ok(());
         }
 
         // CIRCUIT BREAKER CHECK - halt trading on dangerous market conditions
         match self.circuit_breaker.check(snapshot) {
             BreakerState::Halted(reason) => {
-                tracing::error!("Circuit breaker tripped: {:?} - HALTING ALL TRADING", reason);
+                tracing::error!(
+                    "Circuit breaker tripped: {:?} - HALTING ALL TRADING",
+                    reason
+                );
                 // Cancel all orders when circuit breaker trips
                 self.executor.cancel_all()?;
                 return Ok(()); // Skip this tick entirely
@@ -416,7 +429,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 let bid_change_bps = (bid_change * 10_000) / last_bid;
                 let ask_change_bps = (ask_change * 10_000) / last_ask;
 
-                if bid_change_bps > MAX_POST_STALE_CHANGE_BPS || ask_change_bps > MAX_POST_STALE_CHANGE_BPS {
+                if bid_change_bps > MAX_POST_STALE_CHANGE_BPS
+                    || ask_change_bps > MAX_POST_STALE_CHANGE_BPS
+                {
                     tracing::warn!(
                         "Large price movement detected after stale data recovery: bid moved {}bps, ask moved {}bps - skipping tick",
                         bid_change_bps, ask_change_bps
@@ -445,10 +460,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         let peak_pnl = self.peak_pnl.get();
         let drawdown = peak_pnl.saturating_sub(current_realized);
         if peak_pnl > 0 && MAX_DRAWDOWN > 0 {
-            let allowed_drawdown = ((peak_pnl as i128)
-                * MAX_DRAWDOWN as i128
-                / 1_000_000_000i128)
-                .clamp(i64::MIN as i128, i64::MAX as i128) as i64;
+            let allowed_drawdown = ((peak_pnl as i128) * MAX_DRAWDOWN as i128 / 1_000_000_000i128)
+                .clamp(i64::MIN as i128, i64::MAX as i128)
+                as i64;
 
             if allowed_drawdown > 0 && drawdown > allowed_drawdown {
                 tracing::error!(
@@ -483,7 +497,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     let potential_long = current_qty
                         .checked_add(open_long_exposure)
                         .and_then(|x| x.checked_add(signal.size as i64));
-                        
+
                     // 2. Check Short side: Current - Open Short - New Sell
                     let potential_short = current_qty
                         .checked_sub(open_short_exposure)
@@ -491,59 +505,57 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
                     match (potential_long, potential_short) {
                         (Some(l), Some(s)) => l > MAX_POSITION || s < -MAX_SHORT,
-                        _ => true // Overflow is a breach
+                        _ => true, // Overflow is a breach
                     }
-                },
+                }
                 crate::core::SignalAction::QuoteBid => {
                     // Would increase position (buying)
                     // Risk: Current + Open Long + New Buy
                     let potential_long = current_qty
                         .checked_add(open_long_exposure)
                         .and_then(|x| x.checked_add(signal.size as i64));
-                        
+
                     match potential_long {
                         Some(pos) => pos > MAX_POSITION,
-                        None => true // Overflow
+                        None => true, // Overflow
                     }
-                },
+                }
                 crate::core::SignalAction::QuoteAsk => {
                     // Would decrease position (selling)
                     // Risk: Current - Open Short - New Sell
                     let potential_short = current_qty
                         .checked_sub(open_short_exposure)
                         .and_then(|x| x.checked_sub(signal.size as i64));
-                        
+
                     match potential_short {
                         Some(pos) => pos < -MAX_SHORT,
-                        None => true // Underflow
+                        None => true, // Underflow
                     }
-                },
-                crate::core::SignalAction::TakePosition => {
-                    match signal.side {
-                        crate::core::Side::Buy => {
-                            let potential_long = current_qty
-                                .checked_add(open_long_exposure)
-                                .and_then(|x| x.checked_add(signal.size as i64));
+                }
+                crate::core::SignalAction::TakePosition => match signal.side {
+                    crate::core::Side::Buy => {
+                        let potential_long = current_qty
+                            .checked_add(open_long_exposure)
+                            .and_then(|x| x.checked_add(signal.size as i64));
 
-                            match potential_long {
-                                Some(pos) => pos > MAX_POSITION,
-                                None => true,
-                            }
+                        match potential_long {
+                            Some(pos) => pos > MAX_POSITION,
+                            None => true,
                         }
-                        crate::core::Side::Sell => {
-                            let potential_short = current_qty
-                                .checked_sub(open_short_exposure)
-                                .and_then(|x| x.checked_sub(signal.size as i64));
+                    }
+                    crate::core::Side::Sell => {
+                        let potential_short = current_qty
+                            .checked_sub(open_short_exposure)
+                            .and_then(|x| x.checked_sub(signal.size as i64));
 
-                            match potential_short {
-                                Some(pos) => pos < -MAX_SHORT,
-                                None => true,
-                            }
+                        match potential_short {
+                            Some(pos) => pos < -MAX_SHORT,
+                            None => true,
                         }
                     }
                 },
-                crate::core::SignalAction::CancelAll => false,  // Cancels don't change position
-                crate::core::SignalAction::NoAction => false,   // No action doesn't change position
+                crate::core::SignalAction::CancelAll => false, // Cancels don't change position
+                crate::core::SignalAction::NoAction => false,  // No action doesn't change position
             };
 
             if would_breach {
@@ -557,12 +569,13 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
             // RATE LIMITING CHECK - Prevent excessive quoting to protect exchange API limits
             // Only apply rate limiting for quote actions (not cancels)
-            if matches!(signal.action,
-                crate::core::SignalAction::QuoteBoth |
-                crate::core::SignalAction::QuoteBid |
-                crate::core::SignalAction::QuoteAsk |
-                crate::core::SignalAction::TakePosition) {
-
+            if matches!(
+                signal.action,
+                crate::core::SignalAction::QuoteBoth
+                    | crate::core::SignalAction::QuoteBid
+                    | crate::core::SignalAction::QuoteAsk
+                    | crate::core::SignalAction::TakePosition
+            ) {
                 // Get current time
                 let current_time_ns = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -570,7 +583,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     .as_nanos() as u64;
 
                 // Check if enough time has passed since last quote
-                let time_since_last_quote = current_time_ns.saturating_sub(self.last_quote_time_ns.get());
+                let time_since_last_quote =
+                    current_time_ns.saturating_sub(self.last_quote_time_ns.get());
 
                 if time_since_last_quote < MIN_QUOTE_INTERVAL_NS {
                     tracing::debug!(
@@ -596,96 +610,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // CRITICAL: Process fills and check for queue overflow
         // ====================================================================
         // Get fills from executor
-        let fills = self.executor.get_fills();
-
-        // Check for dropped fills BEFORE processing
-        // If any fills were dropped, the position tracking will be inconsistent
-        if self.executor.dropped_fill_count() > 0 {
-            tracing::error!(
-                "HALTING: {} fills were dropped due to queue overflow - position tracking may be inconsistent",
-                self.executor.dropped_fill_count()
-            );
-            return Err(anyhow!("Fill queue overflow detected - {} fills dropped",
-                              self.executor.dropped_fill_count()));
-        }
-
-        // Process fills and update position
-        for fill in fills {
-            // Log the fill for transparency
-            tracing::info!(
-                "Fill: order_id={:?}, side={:?}, price={}, size={}",
-                fill.order_id,
-                fill.side,
-                fill.price,
-                fill.size
-            );
-
-            // Update position with fill data
-            // Convert Side enum to u8 for process_fill_fixed
-            let order_side = match fill.side {
-                crate::execution::types::Side::Buy => 0,
-                crate::execution::types::Side::Sell => 1,
-            };
-
-            // Convert Decimal to fixed-point u64 (9 decimal places)
-            let price_fixed = (fill.price * rust_decimal::Decimal::from(1_000_000_000))
-                .to_u64()
-                .ok_or_else(|| anyhow!("Failed to convert price to fixed-point"))?;
-            let size_fixed = (fill.size * rust_decimal::Decimal::from(1_000_000_000))
-                .to_u64()
-                .ok_or_else(|| anyhow!("Failed to convert size to fixed-point"))?;
-
-            // Extract fee in basis points (default to 2bps if not provided)
-            let fee_bps = if let Some(fee) = fill.fee {
-                // Calculate fee as percentage of notional: (fee / (price * size)) * 10000
-                let notional = fill.price * fill.size;
-                if notional > rust_decimal::Decimal::ZERO {
-                    let fee_rate = fee / notional;
-                    let fee_bps_decimal = fee_rate * rust_decimal::Decimal::from(10_000);
-                    fee_bps_decimal.to_u32().unwrap_or(2)  // Default to 2bps if conversion fails
-                } else {
-                    2  // Default fee
-                }
-            } else {
-                2  // Default to 2bps (0.02%) if no fee provided
-            };
-
-            if let Err(e) = self.position.process_fill_fixed_with_fee(order_side, price_fixed, size_fixed, fee_bps) {
-                tracing::error!("Failed to process fill: {}", e);
-                // Position tracking error is critical - halt trading
-                return Err(anyhow!("Position update failed: {}", e));
-            }
-
-            // Log position state after fill
-            let current_qty = self.position.get_quantity();
-            let entry_price = self.position.get_entry_price();
-            let realized_pnl = self.position.get_realized_pnl();
-
-            tracing::debug!(
-                "Position after fill: qty={}, entry_price={}, realized_pnl={}, trades={}",
-                current_qty,
-                entry_price,
-                realized_pnl,
-                self.position.get_trade_count()
-            );
-
-            // CRITICAL: Check position limits after fill processing
-            if current_qty > MAX_POSITION {
-                tracing::error!(
-                    "CRITICAL: Position limit exceeded! Long position {} > max {}",
-                    current_qty, MAX_POSITION
-                );
-                return Err(anyhow!("Position limit exceeded: long {} > max {}", current_qty, MAX_POSITION));
-            }
-
-            if current_qty < -MAX_SHORT {
-                tracing::error!(
-                    "CRITICAL: Short position limit exceeded! Short {} > max {}",
-                    -current_qty, MAX_SHORT
-                );
-                return Err(anyhow!("Short position limit exceeded: {} > max {}", -current_qty, MAX_SHORT));
-            }
-        }
+        self.drain_executor_fills()?;
 
         Ok(())
     }
@@ -720,7 +645,10 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             tracing::warn!("Received shutdown signal");
             shutdown.store(true, Ordering::Release);
         }) {
-            tracing::warn!("Failed to set Ctrl-C handler: {}. Shutdown via code only.", e);
+            tracing::warn!(
+                "Failed to set Ctrl-C handler: {}. Shutdown via code only.",
+                e
+            );
         }
 
         // ====================================================================
@@ -741,8 +669,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
             match feed_fn()? {
                 (Some(snapshot), _) if crate::data::is_valid_snapshot(&snapshot) => {
-                    let spread_bps = ((snapshot.best_ask_price - snapshot.best_bid_price) as u128 * 10_000
-                        / snapshot.best_bid_price as u128) as u32;
+                    let spread_bps =
+                        ((snapshot.best_ask_price - snapshot.best_bid_price) as u128 * 10_000
+                            / snapshot.best_bid_price as u128) as u32;
 
                     tracing::info!(
                         "✅ Received VALID initial snapshot (attempt {}): \
@@ -873,6 +802,109 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
     }
 }
 
+impl<S: Strategy, E: Executor> Engine<S, E> {
+    #[inline(always)]
+    fn drain_executor_fills(&mut self) -> Result<()> {
+        let fills = self.executor.get_fills();
+
+        if self.executor.dropped_fill_count() > 0 {
+            tracing::error!(
+                "HALTING: {} fills were dropped due to queue overflow - position tracking may be inconsistent",
+                self.executor.dropped_fill_count()
+            );
+            return Err(anyhow!(
+                "Fill queue overflow detected - {} fills dropped",
+                self.executor.dropped_fill_count()
+            ));
+        }
+
+        for fill in fills {
+            tracing::info!(
+                "Fill: order_id={:?}, side={:?}, price={}, size={}",
+                fill.order_id,
+                fill.side,
+                fill.price,
+                fill.size
+            );
+
+            let order_side = match fill.side {
+                crate::execution::types::Side::Buy => 0,
+                crate::execution::types::Side::Sell => 1,
+            };
+
+            let price_fixed = (fill.price * rust_decimal::Decimal::from(1_000_000_000))
+                .to_u64()
+                .ok_or_else(|| anyhow!("Failed to convert price to fixed-point"))?;
+            let size_fixed = (fill.size * rust_decimal::Decimal::from(1_000_000_000))
+                .to_u64()
+                .ok_or_else(|| anyhow!("Failed to convert size to fixed-point"))?;
+
+            let fee_bps = if let Some(fee) = fill.fee {
+                let notional = fill.price * fill.size;
+                if notional > rust_decimal::Decimal::ZERO {
+                    let fee_rate = fee / notional;
+                    let fee_bps_decimal = fee_rate * rust_decimal::Decimal::from(10_000);
+                    fee_bps_decimal.to_u32().unwrap_or(2)
+                } else {
+                    2
+                }
+            } else {
+                2
+            };
+
+            if let Err(e) = self.position.process_fill_fixed_with_fee(
+                order_side,
+                price_fixed,
+                size_fixed,
+                fee_bps,
+            ) {
+                tracing::error!("Failed to process fill: {}", e);
+                return Err(anyhow!("Position update failed: {}", e));
+            }
+
+            let current_qty = self.position.get_quantity();
+            let entry_price = self.position.get_entry_price();
+            let realized_pnl = self.position.get_realized_pnl();
+
+            tracing::debug!(
+                "Position after fill: qty={}, entry_price={}, realized_pnl={}, trades={}",
+                current_qty,
+                entry_price,
+                realized_pnl,
+                self.position.get_trade_count()
+            );
+
+            if current_qty > MAX_POSITION {
+                tracing::error!(
+                    "CRITICAL: Position limit exceeded! Long position {} > max {}",
+                    current_qty,
+                    MAX_POSITION
+                );
+                return Err(anyhow!(
+                    "Position limit exceeded: long {} > max {}",
+                    current_qty,
+                    MAX_POSITION
+                ));
+            }
+
+            if current_qty < -MAX_SHORT {
+                tracing::error!(
+                    "CRITICAL: Short position limit exceeded! Short {} > max {}",
+                    -current_qty,
+                    MAX_SHORT
+                );
+                return Err(anyhow!(
+                    "Short position limit exceeded: {} > max {}",
+                    -current_qty,
+                    MAX_SHORT
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
 /// Engine statistics
 #[derive(Debug, Clone, Copy)]
 pub struct EngineStats {
@@ -889,8 +921,9 @@ pub struct EngineStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Signal, SignalAction, Side};
+    use crate::core::{Side, Signal, SignalAction};
     use crate::data::SnapshotBuilder;
+    use rust_decimal_macros::dec;
 
     /// Mock strategy for testing
     struct MockStrategy {
@@ -898,10 +931,18 @@ mod tests {
     }
 
     impl Strategy for MockStrategy {
-        fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+        fn calculate(
+            &mut self,
+            _snapshot: &MarketSnapshot,
+            _position: &Position,
+        ) -> Option<Signal> {
             self.call_count += 1;
             if self.call_count % 2 == 0 {
-                Some(Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000))
+                Some(Signal::quote_both(
+                    50_000_000_000_000,
+                    50_005_000_000_000,
+                    100_000_000,
+                ))
             } else {
                 None
             }
@@ -954,6 +995,119 @@ mod tests {
         assert_eq!(engine.stats().ticks_processed, 0);
     }
 
+    struct NoopStrategy;
+
+    impl Strategy for NoopStrategy {
+        fn calculate(
+            &mut self,
+            _snapshot: &MarketSnapshot,
+            _position: &Position,
+        ) -> Option<Signal> {
+            None
+        }
+
+        fn name(&self) -> &'static str {
+            "NoopStrategy"
+        }
+    }
+
+    struct PendingFillExecutor {
+        fills: Vec<crate::execution::Fill>,
+    }
+
+    impl PendingFillExecutor {
+        fn new() -> Self {
+            Self { fills: Vec::new() }
+        }
+
+        fn push_fill(&mut self, fill: crate::execution::Fill) {
+            self.fills.push(fill);
+        }
+    }
+
+    impl Executor for PendingFillExecutor {
+        fn execute(&mut self, _signal: Signal, _position: &Position) -> Result<()> {
+            Ok(())
+        }
+
+        fn cancel_all(&mut self) -> Result<()> {
+            Ok(())
+        }
+
+        fn name(&self) -> &'static str {
+            "PendingFillExecutor"
+        }
+
+        fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
+            std::mem::take(&mut self.fills)
+        }
+
+        fn dropped_fill_count(&self) -> u64 {
+            0
+        }
+
+        fn get_open_exposure(&self) -> (i64, i64) {
+            (0, 0)
+        }
+    }
+
+    fn sample_fill(side: crate::execution::Side) -> crate::execution::Fill {
+        crate::execution::Fill::new(
+            crate::execution::OrderId::new("fill-1".to_string()),
+            side,
+            dec!(50_000),
+            dec!(0.1),
+        )
+    }
+
+    #[test]
+    fn test_fills_processed_when_market_static() {
+        let strategy = NoopStrategy;
+        let executor = PendingFillExecutor::new();
+        let mut engine = Engine::new(strategy, executor);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(1)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        engine.process_tick(&snapshot, true).unwrap();
+
+        engine
+            .executor_mut()
+            .push_fill(sample_fill(crate::execution::Side::Buy));
+        engine.process_tick(&snapshot, true).unwrap();
+
+        assert_eq!(engine.position().get_quantity(), 100_000_000);
+    }
+
+    #[test]
+    fn test_fills_processed_when_data_stale() {
+        let strategy = NoopStrategy;
+        let executor = PendingFillExecutor::new();
+        let mut engine = Engine::new(strategy, executor);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(1)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        engine.process_tick(&snapshot, true).unwrap();
+
+        engine
+            .executor_mut()
+            .push_fill(sample_fill(crate::execution::Side::Sell));
+        engine.process_tick(&snapshot, false).unwrap();
+
+        assert_eq!(engine.position().get_quantity(), -100_000_000);
+    }
+
     #[test]
     fn test_process_tick() {
         let strategy = MockStrategy { call_count: 0 };
@@ -973,28 +1127,28 @@ mod tests {
         engine.process_tick(&snapshot1, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 1);
         assert_eq!(engine.strategy.call_count, 1);
-        assert_eq!(engine.executor.execute_count, 0);  // No signal, no execution
+        assert_eq!(engine.executor.execute_count, 0); // No signal, no execution
 
         // Second tick with same prices - early return (market_changed=false)
         engine.process_tick(&snapshot1, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 2); // ticks_processed increments regardless
-        assert_eq!(engine.strategy.call_count, 1);     // Strategy NOT called (early return)
-        assert_eq!(engine.executor.execute_count, 0);  // Executor NOT called
+        assert_eq!(engine.strategy.call_count, 1); // Strategy NOT called (early return)
+        assert_eq!(engine.executor.execute_count, 0); // Executor NOT called
 
         // Third tick with different prices - MockStrategy returns Signal on even calls (call_count=2)
         let snapshot2 = SnapshotBuilder::new()
             .market_id(1)
             .sequence(2)
             .timestamp(1000)
-            .best_bid(50_001_000_000_000, 1_000_000_000)  // Different price
+            .best_bid(50_001_000_000_000, 1_000_000_000) // Different price
             .best_ask(50_006_000_000_000, 1_000_000_000)
             .incremental_snapshot()
             .build();
 
         engine.process_tick(&snapshot2, true).unwrap();
         assert_eq!(engine.stats().ticks_processed, 3);
-        assert_eq!(engine.strategy.call_count, 2);     // Strategy called (call_count now 2, even)
-        assert_eq!(engine.executor.execute_count, 1);  // Executor called (signal returned on even)
+        assert_eq!(engine.strategy.call_count, 2); // Strategy called (call_count now 2, even)
+        assert_eq!(engine.executor.execute_count, 1); // Executor called (signal returned on even)
     }
 
     #[test]
@@ -1024,11 +1178,17 @@ mod tests {
         // Define Mock Strategy
         struct AlwaysQuoteStrategy;
         impl Strategy for AlwaysQuoteStrategy {
-            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
                 // Quote 1.0
                 Some(Signal::quote_both(50000, 50001, 1_000_000_000))
             }
-            fn name(&self) -> &'static str { "AlwaysQuote" }
+            fn name(&self) -> &'static str {
+                "AlwaysQuote"
+            }
         }
 
         // Define Mock Executor with Exposure
@@ -1038,24 +1198,34 @@ mod tests {
         }
 
         impl Executor for ExposureMockExecutor {
-            fn execute(&mut self, _signal: Signal, _position: &Position) -> Result<()> { Ok(()) }
-            fn cancel_all(&mut self) -> Result<()> { Ok(()) }
-            fn name(&self) -> &'static str { "ExposureMock" }
-            fn get_fills(&mut self) -> Vec<crate::execution::Fill> { Vec::new() }
-            fn dropped_fill_count(&self) -> u64 { 0 }
+            fn execute(&mut self, _signal: Signal, _position: &Position) -> Result<()> {
+                Ok(())
+            }
+            fn cancel_all(&mut self) -> Result<()> {
+                Ok(())
+            }
+            fn name(&self) -> &'static str {
+                "ExposureMock"
+            }
+            fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
+                Vec::new()
+            }
+            fn dropped_fill_count(&self) -> u64 {
+                0
+            }
             fn get_open_exposure(&self) -> (i64, i64) {
                 (self.long_exposure, self.short_exposure)
             }
         }
 
         use crate::config::MAX_POSITION;
-        
+
         // Setup Engine with high exposure
         let strategy = AlwaysQuoteStrategy;
-        let executor = ExposureMockExecutor { 
+        let executor = ExposureMockExecutor {
             long_exposure: MAX_POSITION, // Already at max exposure
-            short_exposure: 0 
-        }; 
+            short_exposure: 0,
+        };
         let mut engine = Engine::new(strategy, executor);
 
         let snapshot = SnapshotBuilder::new()
@@ -1068,12 +1238,16 @@ mod tests {
 
         // Process tick
         engine.process_tick(&snapshot, true).unwrap();
-        
+
         // Should NOT execute because Open Long Exposure (MAX) + New Buy (1.0) > MAX
         // Note: increment_signals() happens AFTER the risk check passes and calculate() returns Some.
         // Wait, my code has increment_signals() AFTER the check.
         // So if check fails, it returns Ok(()) early, and signal_count is NOT incremented.
-        assert_eq!(engine.stats().signals_generated, 0, "Should skip execution due to risk limits");
+        assert_eq!(
+            engine.stats().signals_generated,
+            0,
+            "Should skip execution due to risk limits"
+        );
     }
 
     #[test]
@@ -1082,7 +1256,11 @@ mod tests {
 
         struct TakePositionStrategy;
         impl Strategy for TakePositionStrategy {
-            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
                 Some(Signal::take_position(Side::Buy, MAX_ORDER_SIZE))
             }
 
@@ -1120,7 +1298,11 @@ mod tests {
 
         struct ShortTakeStrategy;
         impl Strategy for ShortTakeStrategy {
-            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
                 Some(Signal::take_position(Side::Sell, MAX_ORDER_SIZE))
             }
 
@@ -1156,8 +1338,16 @@ mod tests {
     fn test_drawdown_guard_prevents_execution() {
         struct QuoteStrategy;
         impl Strategy for QuoteStrategy {
-            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
-                Some(Signal::quote_both(50_000_000_000_000, 50_010_000_000_000, 100_000_000))
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
+                Some(Signal::quote_both(
+                    50_000_000_000_000,
+                    50_010_000_000_000,
+                    100_000_000,
+                ))
             }
 
             fn name(&self) -> &'static str {
@@ -1195,10 +1385,20 @@ mod tests {
     fn test_drawdown_guard_allows_within_limit() {
         struct QuoteStrategy;
         impl Strategy for QuoteStrategy {
-            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
-                Some(Signal::quote_both(50_000_000_000_000, 50_010_000_000_000, 100_000_000))
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
+                Some(Signal::quote_both(
+                    50_000_000_000_000,
+                    50_010_000_000_000,
+                    100_000_000,
+                ))
             }
-            fn name(&self) -> &'static str { "QuoteStrategy" }
+            fn name(&self) -> &'static str {
+                "QuoteStrategy"
+            }
         }
 
         let strategy = QuoteStrategy;
@@ -1222,6 +1422,16 @@ mod tests {
             .build();
 
         let result = engine.process_tick(&snapshot, true);
-        assert!(result.is_ok(), "engine should continue within drawdown limit");
+        assert!(
+            result.is_ok(),
+            "engine should continue within drawdown limit"
+        );
+    }
+}
+
+#[cfg(test)]
+impl<S: Strategy, E: Executor> Engine<S, E> {
+    fn executor_mut(&mut self) -> &mut E {
+        &mut self.executor
     }
 }

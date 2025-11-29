@@ -8,6 +8,7 @@
 //! - Alert state tracking (active/resolved)
 
 use anyhow::{Context, Result};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -15,7 +16,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use parking_lot::RwLock;
 use tracing::{debug, error, info, warn};
 
 /// Alert severity levels
@@ -232,8 +232,8 @@ impl Default for AlertManagerConfig {
             outputs: vec![AlertOutput::Console {
                 min_severity: AlertSeverity::Warning,
             }],
-            rate_limit_secs: 60,      // 1 minute
-            auto_resolve_secs: 300,   // 5 minutes
+            rate_limit_secs: 60,    // 1 minute
+            auto_resolve_secs: 300, // 5 minutes
             enable_aggregation: false,
         }
     }
@@ -251,7 +251,10 @@ pub struct AlertManager {
 impl AlertManager {
     /// Create a new alert manager
     pub fn new(config: AlertManagerConfig) -> Self {
-        info!("AlertManager initialized with {} outputs", config.outputs.len());
+        info!(
+            "AlertManager initialized with {} outputs",
+            config.outputs.len()
+        );
         Self {
             config,
             active_alerts: Arc::new(RwLock::new(HashMap::new())),
@@ -341,7 +344,11 @@ impl AlertManager {
                     Ok(())
                 }
             }
-            AlertOutput::Webhook { url, min_severity, timeout_ms } => {
+            AlertOutput::Webhook {
+                url,
+                min_severity,
+                timeout_ms,
+            } => {
                 if alert.severity >= *min_severity {
                     self.send_to_webhook(alert, url, *timeout_ms)
                 } else {

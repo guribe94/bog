@@ -303,7 +303,11 @@ fn test_consecutive_empty_polls_increment() {
     // Mark a few empty polls - should not go offline yet
     for i in 0..5 {
         breaker.mark_empty_poll();
-        assert!(!breaker.is_offline(), "Should not be offline after {} polls", i + 1);
+        assert!(
+            !breaker.is_offline(),
+            "Should not be offline after {} polls",
+            i + 1
+        );
     }
 
     // Reset should clear counter

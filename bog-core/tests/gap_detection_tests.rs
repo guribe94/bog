@@ -126,7 +126,7 @@ fn test_no_gap_first_message() {
     // Should not be a gap
     assert_eq!(gap, 0);
     assert!(!detector.gap_detected());
-    
+
     // Should be ready now
     assert!(detector.is_ready());
     assert_eq!(detector.last_sequence(), 100);
@@ -233,7 +233,7 @@ fn test_wraparound_arithmetic() {
     // Formula: u64::MAX - (u64::MAX - 2) + 5 = 2 + 5 = 7.
     detector.check(u64::MAX - 2);
     let gap = detector.check(5);
-    
+
     assert_eq!(gap, 7);
     assert!(detector.gap_detected());
 }
@@ -248,7 +248,7 @@ fn test_wraparound_arithmetic() {
 #[test]
 fn test_gap_detector_initialization() {
     let detector = GapDetector::new();
-    
+
     assert_eq!(detector.last_sequence(), 0);
     assert_eq!(detector.last_gap_size(), 0);
     assert!(!detector.gap_detected());
@@ -292,10 +292,10 @@ fn test_gap_detector_idempotent() {
 
     // 1. check(100) → OK
     detector.check(100);
-    
+
     // 2. check(100) → duplicate
     let gap = detector.check(100);
-    
+
     // 3. Verify
     assert_eq!(gap, 0);
     assert_eq!(detector.last_sequence(), 100);
@@ -329,23 +329,23 @@ fn test_gap_detector_reset() {
 #[test]
 fn test_recovery_after_small_gap() {
     let mut detector = GapDetector::new();
-    
+
     // 1. Normal processing
     detector.check(1);
     detector.check(2);
-    
+
     // 2. Gap detected
     let gap = detector.check(5);
     assert_eq!(gap, 2);
-    
+
     // 3. Simulate snapshot recovery by resetting at new sequence
     // In real system, we'd fetch snapshot corresponding to seq 5
     detector.reset_at_sequence(5);
-    
+
     // 4. Continue
     assert!(detector.is_ready());
     assert!(!detector.gap_detected());
-    
+
     // 5. Next message
     detector.check(6);
     assert!(!detector.gap_detected());
@@ -358,14 +358,14 @@ fn test_recovery_after_small_gap() {
 fn test_recovery_after_large_gap() {
     let mut detector = GapDetector::new();
     detector.check(100);
-    
+
     // Gap
     let gap = detector.check(2000);
     assert_eq!(gap, 1899);
-    
+
     // Recovery
     detector.reset_at_sequence(2000);
-    
+
     assert!(!detector.gap_detected());
     assert_eq!(detector.last_sequence(), 2000);
 }
@@ -376,21 +376,21 @@ fn test_recovery_after_large_gap() {
 #[test]
 fn test_multiple_gaps_sequence() {
     let mut detector = GapDetector::new();
-    
+
     // Gap 1
     detector.check(1);
     assert_eq!(detector.check(5), 3); // Gap of 3
-    
+
     // Recovery 1
     detector.reset_at_sequence(5);
-    
+
     // Gap 2
     detector.check(10); // Gap: 10 - 5 - 1 = 4
     assert_eq!(detector.last_gap_size(), 4);
-    
+
     // Recovery 2
     detector.reset_at_sequence(10);
-    
+
     assert!(!detector.gap_detected());
 }
 
@@ -403,22 +403,22 @@ fn test_multiple_gaps_sequence() {
 #[test]
 fn test_gap_during_recovery() {
     let mut detector = GapDetector::new();
-    
+
     detector.check(100);
-    
+
     // Gap detected
-    detector.check(110); 
+    detector.check(110);
     assert!(detector.gap_detected());
-    
+
     // Before we reset, another message comes in with ANOTHER gap relative to 110
     // e.g. 120.
     // The detector will calculate gap from 110 -> 120.
     let gap2 = detector.check(120);
-    
+
     // Gap = 120 - 110 - 1 = 9
     assert_eq!(gap2, 9);
     assert_eq!(detector.last_sequence(), 120);
-    
+
     // Final recovery handles everything up to 120
     detector.reset_at_sequence(120);
     assert!(!detector.gap_detected());
@@ -434,19 +434,19 @@ fn test_gap_during_recovery() {
 #[test]
 fn test_detect_huginn_restart() {
     let mut detector = GapDetector::new();
-    
+
     // Initial state
     detector.check(1000);
     detector.set_epoch(5);
-    
+
     // Restart: sequence drops, epoch increases
     let is_restart = detector.detect_restart(10, 6);
-    
+
     assert!(is_restart);
     // Epoch should auto-update
     // Note: detect_restart updates epoch if true? Let's check impl.
     // Impl says: if is_restart { self.last_epoch = epoch; }
-    
+
     // Verify internal state if exposed, otherwise verify behavior
     // We can verify by checking if a subsequent call with same epoch isn't a restart
     assert!(!detector.detect_restart(11, 6));
@@ -458,16 +458,16 @@ fn test_detect_huginn_restart() {
 #[test]
 fn test_sequence_reset_without_epoch_change_is_gap() {
     let mut detector = GapDetector::new();
-    
+
     detector.check(1000);
     detector.set_epoch(5);
-    
+
     // Sequence drops, epoch same
     let is_restart = detector.detect_restart(10, 5);
-    
+
     // Should NOT be a restart
     assert!(!is_restart);
-    
+
     // Should be a gap (wraparound logic applies if we called check)
     // But detect_restart is separate check.
     // If we call check(10) after 1000:
@@ -487,7 +487,7 @@ fn test_sequence_reset_without_epoch_change_is_gap() {
 fn test_gap_size_always_non_negative() {
     let mut detector = GapDetector::new();
     detector.check(100);
-    
+
     // Test various inputs
     let inputs = vec![101, 102, 200, u64::MAX, 0, 50];
     for seq in inputs {
@@ -504,10 +504,10 @@ fn test_gap_size_always_non_negative() {
 fn test_gap_detection_monotonic() {
     let mut detector = GapDetector::new();
     detector.check(100);
-    
+
     // Next is 105
     detector.check(105);
-    
+
     assert_eq!(detector.last_sequence(), 105);
 }
 
@@ -517,7 +517,7 @@ fn test_gap_detection_monotonic() {
 #[test]
 fn test_wraparound_safe_comparison() {
     let mut detector = GapDetector::new();
-    
+
     // Boundary case
     detector.check(u64::MAX);
     let gap = detector.check(0);
@@ -536,20 +536,20 @@ fn test_wraparound_safe_comparison() {
 fn test_gap_detection_latency() {
     let mut detector = GapDetector::new();
     detector.check(0);
-    
+
     let start = Instant::now();
     let iterations = 1_000_000;
-    
+
     for i in 1..=iterations {
         // Simulate sequential access
         let _ = detector.check(i);
     }
-    
+
     let duration = start.elapsed();
     let ns_per_op = duration.as_nanos() as f64 / iterations as f64;
-    
+
     println!("Gap detection latency: {:.2} ns/op", ns_per_op);
-    
+
     // Rough check - might be flaky in CI/debug builds so we set a loose bound
     // In release mode this should be < 1ns
     assert!(ns_per_op < 50.0, "Latency too high: {} ns", ns_per_op);
@@ -562,7 +562,7 @@ fn test_gap_detection_latency() {
 /// Test: invalid_sequence_zero
 ///
 /// Verifies handling of invalid sequence logic if any.
-/// Currently 0 is valid in our logic (wraparound target), so this test 
+/// Currently 0 is valid in our logic (wraparound target), so this test
 /// confirms 0 is accepted.
 #[test]
 fn test_invalid_sequence_zero() {
@@ -581,23 +581,23 @@ fn test_sequence_before_gap_recovery() {
     // This is more of an integration behavior (buffering),
     // but for the unit test we verify the detector state is consistent
     // if we keep feeding it during a gap state.
-    
+
     let mut detector = GapDetector::new();
     detector.check(100);
-    
+
     // Gap
-    detector.check(105); 
+    detector.check(105);
     assert!(detector.gap_detected());
-    
+
     // More messages arrive (106, 107)
     detector.check(106);
-    
+
     // It should treat 106 as valid continuation from 105
-    // (Gap was from 100->105). 
+    // (Gap was from 100->105).
     // 105->106 has no NEW gap.
-    assert!(!detector.gap_detected()); 
+    assert!(!detector.gap_detected());
     assert_eq!(detector.last_gap_size(), 0);
-    
+
     // The "gap" flag in the detector is transient for the current check() call
     // The ENGINE is responsible for seeing the flag and pausing processing
 }

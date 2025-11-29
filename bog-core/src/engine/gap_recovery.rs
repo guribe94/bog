@@ -3,10 +3,10 @@
 //! Handles sequence gaps in market data feeds with automatic resynchronization.
 //! Critical for maintaining data integrity during network issues or Huginn restarts.
 
+use crate::data::{MarketFeed, MarketSnapshot};
 use anyhow::{anyhow, Result};
 use std::time::{Duration, Instant};
-use tracing::{error, warn, info, debug};
-use crate::data::{MarketFeed, MarketSnapshot};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for automatic gap recovery
 #[derive(Debug, Clone)]
@@ -37,10 +37,10 @@ impl Default for GapRecoveryConfig {
     fn default() -> Self {
         Self {
             auto_recover: true,
-            max_recoverable_gap: 10000,  // Up to 10k messages
-            snapshot_timeout: Duration::from_secs(2),  // Reduced from 30s - with request_snapshot(), Huginn responds in <1s
-            max_recovery_attempts: 10,  // Increased from 3 for more resilience
-            recovery_retry_delay: Duration::from_millis(100),  // Reduced from 500ms - faster retries to prevent buffer fill during waits
+            max_recoverable_gap: 10000,               // Up to 10k messages
+            snapshot_timeout: Duration::from_secs(2), // Reduced from 30s - with request_snapshot(), Huginn responds in <1s
+            max_recovery_attempts: 10,                // Increased from 3 for more resilience
+            recovery_retry_delay: Duration::from_millis(100), // Reduced from 500ms - faster retries to prevent buffer fill during waits
             pause_trading_during_recovery: true,
             alert_on_gap: true,
         }
@@ -123,7 +123,8 @@ impl GapRecoveryManager {
             self.consecutive_failures += 1;
             return Err(anyhow!(
                 "Gap of {} messages exceeds recovery limit of {}",
-                gap_size, self.config.max_recoverable_gap
+                gap_size,
+                self.config.max_recoverable_gap
             ));
         }
 
@@ -135,7 +136,10 @@ impl GapRecoveryManager {
 
         // Start recovery
         self.recovery_in_progress = true;
-        info!("🔄 Starting automatic gap recovery (attempt 1/{})", self.config.max_recovery_attempts);
+        info!(
+            "🔄 Starting automatic gap recovery (attempt 1/{})",
+            self.config.max_recovery_attempts
+        );
 
         let start_time = Instant::now();
         let mut last_error = None;
@@ -187,7 +191,9 @@ impl GapRecoveryManager {
         let error_msg = format!(
             "Gap recovery failed after {} attempts: {}",
             self.config.max_recovery_attempts,
-            last_error.map(|e| e.to_string()).unwrap_or_else(|| "Unknown error".to_string())
+            last_error
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "Unknown error".to_string())
         );
 
         error!("❌ {}", error_msg);
@@ -208,14 +214,23 @@ impl GapRecoveryManager {
         info!("📸 REQUESTING snapshot from Huginn (atomic signal via shared memory)...");
         feed.request_snapshot();
 
-        info!("⏳ Waiting for snapshot from Huginn (timeout: {:?})...", self.config.snapshot_timeout);
-        let snapshot = feed.fetch_snapshot(Some(self.config.snapshot_timeout))
-            .ok_or_else(|| anyhow!(
+        info!(
+            "⏳ Waiting for snapshot from Huginn (timeout: {:?})...",
+            self.config.snapshot_timeout
+        );
+        let snapshot = feed
+            .fetch_snapshot(Some(self.config.snapshot_timeout))
+            .ok_or_else(|| {
+                anyhow!(
                 "Snapshot timeout after {:?}. Check Huginn logs for 'Snapshot request detected'.",
                 self.config.snapshot_timeout
-            ))?;
+            )
+            })?;
 
-        info!("✅ Snapshot received successfully: seq={}", snapshot.sequence);
+        info!(
+            "✅ Snapshot received successfully: seq={}",
+            snapshot.sequence
+        );
 
         // Rewind to checkpoint to replay any buffered messages
         debug!("Rewinding to checkpoint for message replay...");
@@ -258,7 +273,8 @@ impl GapRecoveryManager {
             } else {
                 100.0
             },
-            time_since_last_recovery: self.last_recovery_time
+            time_since_last_recovery: self
+                .last_recovery_time
                 .map(|t| t.elapsed())
                 .unwrap_or(Duration::from_secs(0)),
         }

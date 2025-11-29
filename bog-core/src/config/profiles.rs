@@ -151,9 +151,9 @@ impl ConfigProfile {
                 inventory_based: None,
             },
             risk: RiskConfig {
-                max_position: dec!(0.5),     // 0.5 BTC max
-                max_short: dec!(0.5),        // 0.5 BTC max short
-                max_order_size: dec!(0.25),  // 0.25 BTC per order
+                max_position: dec!(0.5),    // 0.5 BTC max
+                max_short: dec!(0.5),       // 0.5 BTC max short
+                max_order_size: dec!(0.25), // 0.25 BTC per order
                 min_order_size: dec!(0.0001),
                 max_outstanding_orders: 10,
                 max_daily_loss: dec!(500.0), // $500 daily loss
@@ -223,16 +223,16 @@ impl ConfigProfile {
             strategy: StrategyConfig {
                 strategy_type: "simple_spread".to_string(),
                 simple_spread: Some(SimpleSpreadParams {
-                    spread_bps: 5.0,         // Tight spread
-                    order_size: dec!(0.1),   // Standard size
-                    min_spread_bps: 1.0,     // 1 bps minimum
+                    spread_bps: 5.0,       // Tight spread
+                    order_size: dec!(0.1), // Standard size
+                    min_spread_bps: 1.0,   // 1 bps minimum
                 }),
                 inventory_based: None,
             },
             risk: RiskConfig {
-                max_position: dec!(1.0),     // 1.0 BTC max
-                max_short: dec!(1.0),        // 1.0 BTC max short
-                max_order_size: dec!(0.5),   // 0.5 BTC per order
+                max_position: dec!(1.0),   // 1.0 BTC max
+                max_short: dec!(1.0),      // 1.0 BTC max short
+                max_order_size: dec!(0.5), // 0.5 BTC per order
                 min_order_size: dec!(0.0001),
                 max_outstanding_orders: 20,
                 max_daily_loss: dec!(5000.0), // $5k daily loss
@@ -307,10 +307,16 @@ mod tests {
     #[test]
     fn test_profile_name_from_str() {
         assert_eq!(ProfileName::from_str("dev"), Some(ProfileName::Development));
-        assert_eq!(ProfileName::from_str("development"), Some(ProfileName::Development));
+        assert_eq!(
+            ProfileName::from_str("development"),
+            Some(ProfileName::Development)
+        );
         assert_eq!(ProfileName::from_str("staging"), Some(ProfileName::Staging));
         assert_eq!(ProfileName::from_str("prod"), Some(ProfileName::Production));
-        assert_eq!(ProfileName::from_str("production"), Some(ProfileName::Production));
+        assert_eq!(
+            ProfileName::from_str("production"),
+            Some(ProfileName::Production)
+        );
         assert_eq!(ProfileName::from_str("invalid"), None);
     }
 

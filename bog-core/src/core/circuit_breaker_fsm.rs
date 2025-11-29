@@ -57,8 +57,8 @@
 //! // In Open state, automatically transitions to HalfOpen after timeout
 //! ```
 
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant, SystemTime};
-use serde::{Serialize, Deserialize};
 
 // ============================================================================
 // BINARY CIRCUIT BREAKER (Risk Management)
@@ -72,7 +72,11 @@ pub enum HaltReason {
     /// Price changed too much in one tick
     ExcessivePriceMove { change_pct: u64, max_pct: u64 },
     /// Insufficient liquidity on both sides
-    InsufficientLiquidity { min_size: u64, actual_bid: u64, actual_ask: u64 },
+    InsufficientLiquidity {
+        min_size: u64,
+        actual_bid: u64,
+        actual_ask: u64,
+    },
     /// Market data is stale
     StaleData { age_ms: i64, max_age_ms: i64 },
     /// Manual halt by operator
@@ -84,14 +88,36 @@ pub enum HaltReason {
 impl std::fmt::Display for HaltReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HaltReason::ExcessiveSpread { spread_bps, max_bps } => {
-                write!(f, "Excessive spread: {}bps (max: {}bps)", spread_bps, max_bps)
+            HaltReason::ExcessiveSpread {
+                spread_bps,
+                max_bps,
+            } => {
+                write!(
+                    f,
+                    "Excessive spread: {}bps (max: {}bps)",
+                    spread_bps, max_bps
+                )
             }
-            HaltReason::ExcessivePriceMove { change_pct, max_pct } => {
-                write!(f, "Excessive price move: {}% (max: {}%)", change_pct, max_pct)
+            HaltReason::ExcessivePriceMove {
+                change_pct,
+                max_pct,
+            } => {
+                write!(
+                    f,
+                    "Excessive price move: {}% (max: {}%)",
+                    change_pct, max_pct
+                )
             }
-            HaltReason::InsufficientLiquidity { min_size, actual_bid, actual_ask } => {
-                write!(f, "Insufficient liquidity: bid={}, ask={} (min: {})", actual_bid, actual_ask, min_size)
+            HaltReason::InsufficientLiquidity {
+                min_size,
+                actual_bid,
+                actual_ask,
+            } => {
+                write!(
+                    f,
+                    "Insufficient liquidity: bid={}, ask={} (min: {})",
+                    actual_bid, actual_ask, min_size
+                )
             }
             HaltReason::StaleData { age_ms, max_age_ms } => {
                 write!(f, "Stale data: {}ms old (max: {}ms)", age_ms, max_age_ms)

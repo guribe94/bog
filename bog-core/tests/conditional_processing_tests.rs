@@ -93,9 +93,18 @@ mod conditional_processing {
         }
 
         let messages = vec![
-            Message { sequence: 1, is_full: false }, // Skip (incremental)
-            Message { sequence: 2, is_full: false }, // Skip (incremental)
-            Message { sequence: 3, is_full: true },  // Process (full snapshot)
+            Message {
+                sequence: 1,
+                is_full: false,
+            }, // Skip (incremental)
+            Message {
+                sequence: 2,
+                is_full: false,
+            }, // Skip (incremental)
+            Message {
+                sequence: 3,
+                is_full: true,
+            }, // Process (full snapshot)
         ];
 
         let mut processed = vec![];
@@ -128,7 +137,7 @@ mod conditional_processing {
         for (seq, process) in messages {
             if process {
                 if seq > last_seq + 1 {
-                    gaps += 1;  // Detect gap
+                    gaps += 1; // Detect gap
                 }
                 last_seq = seq;
             } else {
@@ -179,9 +188,9 @@ mod skip_statistics {
         let mut messages_skipped = 0u64;
 
         let messages = vec![
-            false, false, false, true,  // Skip 3, process 1
-            false, false, true, false,   // Skip 3, process 1
-            true, false, false, false,   // Skip 3, process 1
+            false, false, false, true, // Skip 3, process 1
+            false, false, true, false, // Skip 3, process 1
+            true, false, false, false, // Skip 3, process 1
         ];
 
         for should_process in messages {
@@ -231,13 +240,19 @@ mod peek_with_trading_state {
             data: u64,
         }
 
-        const MARKET_OPEN: u32 = 9;  // 9 AM
+        const MARKET_OPEN: u32 = 9; // 9 AM
         const MARKET_CLOSE: u32 = 17; // 5 PM
 
         let updates = vec![
-            Update { hour: 8, data: 100 },  // Before open: skip
-            Update { hour: 10, data: 101 }, // Open: process
-            Update { hour: 18, data: 102 }, // After close: skip
+            Update { hour: 8, data: 100 }, // Before open: skip
+            Update {
+                hour: 10,
+                data: 101,
+            }, // Open: process
+            Update {
+                hour: 18,
+                data: 102,
+            }, // After close: skip
         ];
 
         let mut processed = vec![];
@@ -254,7 +269,7 @@ mod peek_with_trading_state {
     #[test]
     fn test_process_during_high_frequency() {
         let queue_depth = 500; // Many pending messages
-        let threshold = 100;   // If queue > 100, process everything
+        let threshold = 100; // If queue > 100, process everything
 
         let should_skip = queue_depth < threshold;
         assert!(!should_skip, "Should not skip when queue is deep");

@@ -3,8 +3,8 @@
 //! Monitors the health of the market data feed and signals when
 //! the system is ready to trade.
 
-use std::time::{Duration, Instant};
 use crate::resilience::{GapDetector, StaleDataBreaker, StaleDataState};
+use std::time::{Duration, Instant};
 
 /// Configuration for health monitoring
 #[derive(Debug, Clone)]

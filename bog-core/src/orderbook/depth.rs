@@ -4,7 +4,6 @@
 /// All prices and sizes are u64 fixed-point (9 decimal places).
 ///
 /// **Performance target:** <10ns per calculation
-
 use huginn::shm::{MarketSnapshot, ORDERBOOK_DEPTH};
 
 /// Calculate Volume-Weighted Average Price (VWAP) across depth levels
@@ -30,11 +29,7 @@ use huginn::shm::{MarketSnapshot, ORDERBOOK_DEPTH};
 /// let ask_vwap = calculate_vwap(&snapshot, false, 5);
 /// ```
 #[inline(always)]
-pub fn calculate_vwap(
-    snapshot: &MarketSnapshot,
-    is_bid: bool,
-    max_levels: usize,
-) -> Option<u64> {
+pub fn calculate_vwap(snapshot: &MarketSnapshot, is_bid: bool, max_levels: usize) -> Option<u64> {
     let max_levels = max_levels.min(ORDERBOOK_DEPTH); // Clamp to valid range
 
     let (prices, sizes) = if is_bid {
@@ -103,10 +98,7 @@ pub fn calculate_vwap(
 /// }
 /// ```
 #[inline(always)]
-pub fn calculate_imbalance(
-    snapshot: &MarketSnapshot,
-    max_levels: usize,
-) -> i64 {
+pub fn calculate_imbalance(snapshot: &MarketSnapshot, max_levels: usize) -> i64 {
     let max_levels = max_levels.min(ORDERBOOK_DEPTH);
 
     let mut bid_volume: u128 = 0;
@@ -172,11 +164,7 @@ pub fn calculate_imbalance(
 /// // Returns: 5_500_000_000 (5.5 BTC in fixed-point)
 /// ```
 #[inline(always)]
-pub fn calculate_liquidity(
-    snapshot: &MarketSnapshot,
-    is_bid: bool,
-    max_levels: usize,
-) -> u64 {
+pub fn calculate_liquidity(snapshot: &MarketSnapshot, is_bid: bool, max_levels: usize) -> u64 {
     let max_levels = max_levels.min(ORDERBOOK_DEPTH);
 
     let sizes = if is_bid {
@@ -334,11 +322,7 @@ pub fn spread_bps_from_prices(bid_price: u64, ask_price: u64) -> u32 {
 /// // Returns: Some(49_985_000_000_000) ≈ $49,985
 /// ```
 #[inline]
-pub fn calculate_vwap_u64(
-    prices: &[u64],
-    sizes: &[u64],
-    max_levels: usize,
-) -> Option<u64> {
+pub fn calculate_vwap_u64(prices: &[u64], sizes: &[u64], max_levels: usize) -> Option<u64> {
     let max_levels = max_levels.min(prices.len().min(sizes.len()));
 
     let mut total_value: u128 = 0;
@@ -461,7 +445,11 @@ mod tests {
                 49_970_000_000_000,
                 49_960_000_000_000,
                 49_950_000_000_000,
-                0, 0, 0, 0, 0, // No depth beyond level 5
+                0,
+                0,
+                0,
+                0,
+                0, // No depth beyond level 5
             ],
             bid_sizes: [
                 2_000_000_000, // 2.0 BTC at level 1
@@ -469,20 +457,36 @@ mod tests {
                 1_000_000_000, // 1.0 BTC
                 500_000_000,   // 0.5 BTC
                 500_000_000,   // 0.5 BTC
-                0, 0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
+                0,
             ],
             // Level 1-10 asks (prices ascending)
             ask_prices: [
                 50_020_000_000_000, // +10 from best
                 50_030_000_000_000,
                 50_040_000_000_000,
-                0, 0, 0, 0, 0, 0, 0, // Only 3 levels
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0, // Only 3 levels
             ],
             ask_sizes: [
                 1_500_000_000, // 1.5 BTC
                 1_000_000_000, // 1.0 BTC
                 500_000_000,   // 0.5 BTC
-                0, 0, 0, 0, 0, 0, 0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
             ],
             dex_type: 1,
             ..Default::default()

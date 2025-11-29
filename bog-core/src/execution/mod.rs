@@ -115,19 +115,17 @@
 //!
 //! See [execution benchmarks](../../docs/benchmarks/) for details.
 
-pub mod types;
-pub mod simulated;
 pub mod lighter;
-pub mod production;
 pub mod order_bridge;
+pub mod production;
+pub mod simulated;
+pub mod types;
 
-pub use types::{
-    ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce,
-};
-pub use simulated::{SimulatedExecutor, RealisticFillConfig};
 pub use lighter::LighterExecutor;
-pub use production::{ProductionExecutor, ProductionExecutorConfig, ExecutionMetrics};
-pub use order_bridge::{OrderStateWrapper, order_state_to_legacy, legacy_order_to_pending};
+pub use order_bridge::{legacy_order_to_pending, order_state_to_legacy, OrderStateWrapper};
+pub use production::{ExecutionMetrics, ProductionExecutor, ProductionExecutorConfig};
+pub use simulated::{RealisticFillConfig, SimulatedExecutor};
+pub use types::{ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce};
 
 use anyhow::Result;
 
@@ -179,6 +177,20 @@ pub trait Executor: Send {
     /// (Default implementation returns 0 for backends that don't support this)
     fn dropped_fill_count(&self) -> u64 {
         0
+    }
+
+    /// Cancel all active orders (default implementation iterates via get_active_orders)
+    fn cancel_all_orders(&mut self) -> Result<()> {
+        let order_ids: Vec<OrderId> = self
+            .get_active_orders()
+            .into_iter()
+            .map(|order| order.id.clone())
+            .collect();
+
+        for order_id in order_ids {
+            self.cancel_order(&order_id)?;
+        }
+        Ok(())
     }
 }
 

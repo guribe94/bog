@@ -81,8 +81,7 @@ mod tests {
 
         // Verify struct matches expected optimized size
         assert_eq!(
-            actual_size,
-            SNAPSHOT_SIZE,
+            actual_size, SNAPSHOT_SIZE,
             "MarketSnapshot size must match SNAPSHOT_SIZE"
         );
 
@@ -93,7 +92,11 @@ mod tests {
             "MarketSnapshot must be cache-line aligned"
         );
 
-        println!("MarketSnapshot: {} bytes ({} cache lines)", actual_size, actual_size / 64);
+        println!(
+            "MarketSnapshot: {} bytes ({} cache lines)",
+            actual_size,
+            actual_size / 64
+        );
     }
 
     #[test]
@@ -103,7 +106,7 @@ mod tests {
         let snapshot_size = std::mem::size_of::<huginn::shm::MarketSnapshot>();
 
         // Calculate expected padding based on depth
-        let hot_data = 72;  // 9 u64 fields
+        let hot_data = 72; // 9 u64 fields
         let depth_arrays_size = ORDERBOOK_DEPTH * 32; // 4 arrays of u64
         let flags_size = 2; // snapshot_flags + dex_type
 
@@ -115,11 +118,13 @@ mod tests {
         println!("Expected padding: {} bytes", expected_padding);
         println!("Actual padding: {} bytes", PADDING_SIZE);
         println!("Total size: {} bytes", snapshot_size);
-        println!("Waste: {:.1}%", (PADDING_SIZE as f64 / snapshot_size as f64) * 100.0);
+        println!(
+            "Waste: {:.1}%",
+            (PADDING_SIZE as f64 / snapshot_size as f64) * 100.0
+        );
 
         assert_eq!(
-            PADDING_SIZE,
-            expected_padding,
+            PADDING_SIZE, expected_padding,
             "Padding calculation mismatch"
         );
     }

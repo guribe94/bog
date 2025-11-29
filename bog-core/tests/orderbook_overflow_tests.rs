@@ -6,10 +6,7 @@
 use bog_core::data::MarketSnapshot;
 
 /// Helper to create a snapshot with custom depth
-fn create_depth_snapshot(
-    bid_sizes: [u64; 10],
-    ask_sizes: [u64; 10],
-) -> MarketSnapshot {
+fn create_depth_snapshot(bid_sizes: [u64; 10], ask_sizes: [u64; 10]) -> MarketSnapshot {
     let mut snapshot = MarketSnapshot::default();
     snapshot.sequence = 1;
     snapshot.best_bid_price = 50_000_000_000_000;

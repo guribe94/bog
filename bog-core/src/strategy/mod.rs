@@ -59,13 +59,13 @@
 //!
 //! See [`crate::engine::Strategy`] for the current API and examples.
 
-pub mod types;
-pub mod simple_spread;
 pub mod inventory_based;
+pub mod simple_spread;
+pub mod types;
 
-pub use types::{Quote, Signal, StrategyState};
-pub use simple_spread::SimpleSpreadStrategy;
 pub use inventory_based::InventoryBasedStrategy;
+pub use simple_spread::SimpleSpreadStrategy;
+pub use types::{Quote, Signal, StrategyState};
 
 use crate::data::MarketSnapshot;
 use crate::execution::Fill;

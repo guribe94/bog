@@ -5,9 +5,9 @@
 
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
-use bog_core::engine::{Engine, SimulatedExecutor, Strategy, Executor};
+use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_strategies::SimpleSpread;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 /// Create a test market snapshot
 fn create_market_snapshot(price_offset: u64) -> MarketSnapshot {
@@ -76,11 +76,7 @@ fn bench_risk_validation(c: &mut Criterion) {
     group.significance_level(0.01).sample_size(10000);
 
     let position = Position::new();
-    let signal = Signal::quote_both(
-        49_995_000_000_000,
-        50_005_000_000_000,
-        100_000_000,
-    );
+    let signal = Signal::quote_both(49_995_000_000_000, 50_005_000_000_000, 100_000_000);
 
     group.bench_function("validate_signal", |b| {
         b.iter(|| {
@@ -102,16 +98,16 @@ fn bench_executor(c: &mut Criterion) {
 
     let mut executor = SimulatedExecutor::new_default();
     let position = Position::new();
-    let signal = Signal::quote_both(
-        49_995_000_000_000,
-        50_005_000_000_000,
-        100_000_000,
-    );
+    let signal = Signal::quote_both(49_995_000_000_000, 50_005_000_000_000, 100_000_000);
 
     let mut iteration = 0;
     group.bench_function("execute_signal", |b| {
         b.iter(|| {
-            black_box(executor.execute(black_box(signal), black_box(&position)).unwrap());
+            black_box(
+                executor
+                    .execute(black_box(signal), black_box(&position))
+                    .unwrap(),
+            );
 
             // Drain fills every 100 iterations to prevent queue overflow
             iteration += 1;
@@ -196,16 +192,16 @@ fn bench_varying_order_sizes(c: &mut Criterion) {
 
     for size in [10_000_000, 100_000_000, 500_000_000].iter() {
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
-            let signal = Signal::quote_both(
-                49_995_000_000_000,
-                50_005_000_000_000,
-                size,
-            );
+            let signal = Signal::quote_both(49_995_000_000_000, 50_005_000_000_000, size);
             let mut executor = SimulatedExecutor::new_default();
             let mut iteration = 0;
 
             b.iter(|| {
-                black_box(executor.execute(black_box(signal), black_box(&position)).unwrap());
+                black_box(
+                    executor
+                        .execute(black_box(signal), black_box(&position))
+                        .unwrap(),
+                );
 
                 // Drain fills every 100 iterations
                 iteration += 1;

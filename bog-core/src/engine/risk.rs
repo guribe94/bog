@@ -10,7 +10,7 @@
 //! - Branch-free where possible
 //! - Uses existing Position atomics
 
-use crate::core::{Position, Signal, SignalAction, Side};
+use crate::core::{Position, Side, Signal, SignalAction};
 use anyhow::{anyhow, Result};
 
 // ===== CONST RISK LIMITS FROM CARGO FEATURES =====
@@ -63,6 +63,9 @@ pub const MIN_ORDER_SIZE: u64 = 100_000_000;
 /// Delegated to `crate::config::MAX_DAILY_LOSS` to ensure consistency.
 pub const MAX_DAILY_LOSS: i64 = crate::config::MAX_DAILY_LOSS;
 
+/// Tick size in fixed-point (9 decimals)
+pub const TICK_SIZE: u64 = crate::config::TICK_SIZE;
+
 // ===== INLINE RISK VALIDATION =====
 
 /// Risk violation reasons (zero allocation)
@@ -112,6 +115,9 @@ pub fn validate_signal(signal: &Signal, position: &Position) -> Result<()> {
             return Err(anyhow!(RiskViolation::OrderTooLarge.as_str()));
         }
     }
+
+    // Validate tick alignment on all quoted prices
+    validate_tick_alignment(signal)?;
 
     // Validate position limits
     validate_position_limits(signal, position)
@@ -170,6 +176,39 @@ fn validate_position_limits(signal: &Signal, position: &Position) -> Result<()> 
     let daily_pnl = position.get_realized_pnl();
     if daily_pnl < -MAX_DAILY_LOSS {
         return Err(anyhow!(RiskViolation::DailyLossLimit.as_str()));
+    }
+
+    Ok(())
+}
+
+#[inline(always)]
+fn validate_tick_alignment(signal: &Signal) -> Result<()> {
+    let check_price = |price: u64, label: &str| -> Result<()> {
+        if price > 0 && price % TICK_SIZE != 0 {
+            return Err(anyhow!(format!(
+                "{} price {} not aligned to tick size {}",
+                label, price, TICK_SIZE
+            )));
+        }
+        Ok(())
+    };
+
+    match signal.action {
+        SignalAction::QuoteBoth => {
+            check_price(signal.bid_price, "Bid")?;
+            check_price(signal.ask_price, "Ask")?;
+        }
+        SignalAction::QuoteBid => {
+            check_price(signal.bid_price, "Bid")?;
+        }
+        SignalAction::QuoteAsk => {
+            check_price(signal.ask_price, "Ask")?;
+        }
+        SignalAction::TakePosition => match signal.side {
+            Side::Buy => check_price(signal.bid_price, "Aggressive bid")?,
+            Side::Sell => check_price(signal.ask_price, "Aggressive ask")?,
+        },
+        SignalAction::CancelAll | SignalAction::NoAction => {}
     }
 
     Ok(())
@@ -283,27 +322,15 @@ mod tests {
         let position = Position::new();
 
         // Too small
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MIN_ORDER_SIZE - 1,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MIN_ORDER_SIZE - 1);
         assert!(validate_signal(&signal, &position).is_err());
 
         // Valid
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MIN_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MIN_ORDER_SIZE);
         assert!(validate_signal(&signal, &position).is_ok());
 
         // Too large
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MAX_ORDER_SIZE + 1,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE + 1);
         assert!(validate_signal(&signal, &position).is_err());
     }
 
@@ -339,11 +366,7 @@ mod tests {
         let position = Position::new();
 
         // QuoteBoth needs to check both sides
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MAX_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE);
         assert!(validate_signal(&signal, &position).is_ok());
 
         // Size that would violate both sides
@@ -356,8 +379,22 @@ mod tests {
     }
 
     #[test]
+    fn test_tick_alignment_validation() {
+        let position = Position::new();
+
+        let misaligned = Signal::quote_both(50_000_000_000_001, 50_005_000_000_002, MAX_ORDER_SIZE);
+        assert!(validate_signal(&misaligned, &position).is_err());
+
+        let aligned = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE);
+        assert!(validate_signal(&aligned, &position).is_ok());
+    }
+
+    #[test]
     fn test_risk_violation_enum() {
-        assert_eq!(RiskViolation::OrderTooSmall.as_str(), "Order size below minimum");
+        assert_eq!(
+            RiskViolation::OrderTooSmall.as_str(),
+            "Order size below minimum"
+        );
         assert_eq!(RiskViolation::NoViolation.as_str(), "No violation");
     }
 
@@ -377,11 +414,7 @@ mod tests {
         position.update_realized_pnl(-MAX_DAILY_LOSS - 1);
 
         // Any order should be rejected when daily loss limit is hit
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            100_000_000,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000);
 
         let result = validate_signal(&signal, &position);
         assert!(result.is_err());
@@ -395,11 +428,7 @@ mod tests {
         // Exactly at daily loss limit (should be valid)
         position.update_realized_pnl(-MAX_DAILY_LOSS);
 
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            100_000_000,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000);
 
         assert!(validate_signal(&signal, &position).is_ok());
 
@@ -449,11 +478,7 @@ mod tests {
         position.update_quantity(current_qty);
 
         // QuoteBoth with size that would exceed long limit
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MAX_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE);
 
         // Should fail because bid side would exceed limit
         assert!(validate_signal(&signal, &position).is_err());
@@ -468,11 +493,7 @@ mod tests {
         position.update_quantity(current_qty);
 
         // QuoteBoth with size that would exceed short limit
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MAX_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE);
 
         // Should fail because ask side would exceed limit
         assert!(validate_signal(&signal, &position).is_err());
@@ -483,19 +504,11 @@ mod tests {
         let position = Position::new();
 
         // Exactly at MIN_ORDER_SIZE (should be valid)
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MIN_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MIN_ORDER_SIZE);
         assert!(validate_signal(&signal, &position).is_ok());
 
         // Exactly at MAX_ORDER_SIZE (should be valid)
-        let signal = Signal::quote_both(
-            50_000_000_000_000,
-            50_005_000_000_000,
-            MAX_ORDER_SIZE,
-        );
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, MAX_ORDER_SIZE);
         assert!(validate_signal(&signal, &position).is_ok());
     }
 

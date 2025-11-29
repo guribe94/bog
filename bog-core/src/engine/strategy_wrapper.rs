@@ -3,12 +3,10 @@
 //! Wraps any Strategy implementation with lifecycle management (FSM) at the engine level.
 //! Strategies remain Zero-Sized Types (ZSTs), while lifecycle state is managed externally.
 
-use crate::core::strategy_fsm::{
-    StrategyState, StrategyInitializing
-};
+use super::Strategy;
+use crate::core::strategy_fsm::{StrategyInitializing, StrategyState};
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
-use super::Strategy;
 
 /// Wrapper that adds lifecycle FSM to any Strategy
 ///
@@ -55,7 +53,7 @@ impl<S: Strategy> StrategyWrapper<S> {
 
         self.lifecycle = match old_state {
             StrategyState::Initializing(state) => StrategyState::Active(state.start()),
-            other => other,  // No-op if not in Initializing state
+            other => other, // No-op if not in Initializing state
         };
     }
 
@@ -142,7 +140,11 @@ mod tests {
     struct AlwaysQuoteStrategy;
 
     impl Strategy for AlwaysQuoteStrategy {
-        fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+        fn calculate(
+            &mut self,
+            _snapshot: &MarketSnapshot,
+            _position: &Position,
+        ) -> Option<Signal> {
             Some(Signal::quote_both(
                 50_000_000_000_000,
                 50_010_000_000_000,
@@ -186,7 +188,10 @@ mod tests {
         let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_none(), "Should not generate signals when paused");
-        assert!(!wrapper.is_operational(), "Should not be operational when paused");
+        assert!(
+            !wrapper.is_operational(),
+            "Should not be operational when paused"
+        );
     }
 
     #[test]
@@ -203,7 +208,10 @@ mod tests {
         let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_some(), "Should generate signals when active");
-        assert!(wrapper.is_operational(), "Should be operational when active");
+        assert!(
+            wrapper.is_operational(),
+            "Should be operational when active"
+        );
 
         if let Some(sig) = signal {
             assert_eq!(sig.action, SignalAction::QuoteBoth);
@@ -220,8 +228,14 @@ mod tests {
         let position = Position::new();
         let signal = wrapper.calculate(&snapshot, &position);
 
-        assert!(signal.is_none(), "Should not generate signals when initializing");
-        assert!(!wrapper.is_operational(), "Should not be operational when initializing");
+        assert!(
+            signal.is_none(),
+            "Should not generate signals when initializing"
+        );
+        assert!(
+            !wrapper.is_operational(),
+            "Should not be operational when initializing"
+        );
     }
 
     #[test]
@@ -237,7 +251,10 @@ mod tests {
         let signal = wrapper.calculate(&snapshot, &position);
 
         assert!(signal.is_none(), "Should not generate signals when stopped");
-        assert!(!wrapper.is_operational(), "Should not be operational when stopped");
+        assert!(
+            !wrapper.is_operational(),
+            "Should not be operational when stopped"
+        );
     }
 
     #[test]

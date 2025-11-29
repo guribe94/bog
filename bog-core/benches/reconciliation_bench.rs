@@ -29,10 +29,11 @@ fn bench_reconcile_no_drift(c: &mut Criterion) {
 
     group.bench_function("no_drift", |b| {
         b.iter(|| {
-            black_box(reconciler.reconcile(
-                black_box(internal_pos),
-                black_box(executor_pos),
-            ).unwrap());
+            black_box(
+                reconciler
+                    .reconcile(black_box(internal_pos), black_box(executor_pos))
+                    .unwrap(),
+            );
         });
     });
 
@@ -45,15 +46,16 @@ fn bench_reconcile_small_drift(c: &mut Criterion) {
     group.significance_level(0.01).sample_size(10000);
 
     let reconciler = PositionReconciler::new();
-    let internal_pos = 1_000_000_000i64;   // 1.0 BTC
-    let executor_pos = 1_000_500_000i64;   // 1.0005 BTC (0.0005 BTC drift)
+    let internal_pos = 1_000_000_000i64; // 1.0 BTC
+    let executor_pos = 1_000_500_000i64; // 1.0005 BTC (0.0005 BTC drift)
 
     group.bench_function("small_drift", |b| {
         b.iter(|| {
-            black_box(reconciler.reconcile(
-                black_box(internal_pos),
-                black_box(executor_pos),
-            ).unwrap());
+            black_box(
+                reconciler
+                    .reconcile(black_box(internal_pos), black_box(executor_pos))
+                    .unwrap(),
+            );
         });
     });
 
@@ -66,16 +68,13 @@ fn bench_reconcile_large_drift(c: &mut Criterion) {
     group.significance_level(0.01).sample_size(10000);
 
     let reconciler = PositionReconciler::new();
-    let internal_pos = 1_000_000_000i64;   // 1.0 BTC
-    let executor_pos = 1_050_000_000i64;   // 1.05 BTC (0.05 BTC drift - large!)
+    let internal_pos = 1_000_000_000i64; // 1.0 BTC
+    let executor_pos = 1_050_000_000i64; // 1.05 BTC (0.05 BTC drift - large!)
 
     group.bench_function("large_drift", |b| {
         b.iter(|| {
             // This should fail due to excessive drift
-            let result = reconciler.reconcile(
-                black_box(internal_pos),
-                black_box(executor_pos),
-            );
+            let result = reconciler.reconcile(black_box(internal_pos), black_box(executor_pos));
             black_box(result);
         });
     });
@@ -121,10 +120,11 @@ fn bench_reconcile_custom_config(c: &mut Criterion) {
 
     group.bench_function("custom_config", |b| {
         b.iter(|| {
-            black_box(reconciler.reconcile(
-                black_box(internal_pos),
-                black_box(executor_pos),
-            ).unwrap());
+            black_box(
+                reconciler
+                    .reconcile(black_box(internal_pos), black_box(executor_pos))
+                    .unwrap(),
+            );
         });
     });
 

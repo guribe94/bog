@@ -4,14 +4,14 @@ pub mod types;
 pub mod validator;
 
 pub use constants::{ORDERBOOK_DEPTH, PADDING_SIZE, SNAPSHOT_SIZE};
-pub use snapshot_builder::{SnapshotBuilder, create_realistic_depth_snapshot};
+pub use snapshot_builder::{create_realistic_depth_snapshot, SnapshotBuilder};
 pub use types::{conversions, ConsumerStats, MarketSnapshot, MarketSnapshotExt};
 pub use validator::{SnapshotValidator, ValidationConfig, ValidationError};
 
+use crate::resilience::{FeedHealth, GapDetector, HealthConfig, StaleDataBreaker, StaleDataConfig};
 use anyhow::{Context, Result};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
-use crate::resilience::{GapDetector, StaleDataBreaker, StaleDataConfig, FeedHealth, HealthConfig};
 
 // ============================================================================
 // Snapshot Validation (CRITICAL for Real Money Safety)
@@ -124,10 +124,7 @@ pub fn validate_snapshot_with_time(
     if is_stale_with_time(snapshot, max_age_ns, now_ns) {
         let age_ns = now_ns.saturating_sub(snapshot.exchange_timestamp_ns);
 
-        return Err(SnapshotValidationError::StaleData {
-            age_ns,
-            max_age_ns,
-        });
+        return Err(SnapshotValidationError::StaleData { age_ns, max_age_ns });
     }
 
     Ok(())
@@ -188,8 +185,7 @@ pub fn is_crossed(snapshot: &MarketSnapshot) -> bool {
 
 /// Check if orderbook is locked (bid == ask)
 pub fn is_locked(snapshot: &MarketSnapshot) -> bool {
-    snapshot.best_bid_price > 0
-        && snapshot.best_bid_price == snapshot.best_ask_price
+    snapshot.best_bid_price > 0 && snapshot.best_bid_price == snapshot.best_ask_price
 }
 
 /// Check if snapshot is stale (older than threshold) using a provided current time
@@ -214,6 +210,31 @@ pub fn is_stale(snapshot: &MarketSnapshot, max_age_ns: u64) -> bool {
     is_stale_with_time(snapshot, max_age_ns, now_ns)
 }
 
+trait SnapshotOps {
+    fn save_position(&self) -> u64;
+    fn request_snapshot(&mut self);
+    fn fetch_snapshot(&mut self, timeout: Option<Duration>) -> Option<MarketSnapshot>;
+    fn rewind_to(&mut self, position: u64);
+}
+
+fn perform_snapshot_recovery(
+    feed: &mut impl SnapshotOps,
+    timeout: Duration,
+) -> Result<MarketSnapshot> {
+    let checkpoint = feed.save_position();
+    feed.request_snapshot();
+
+    let snapshot = feed.fetch_snapshot(Some(timeout)).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Snapshot timeout after {:.1}s. Verify the Huginn snapshot task is running and reachable.",
+            timeout.as_secs_f64()
+        )
+    })?;
+
+    feed.rewind_to(checkpoint);
+    Ok(snapshot)
+}
+
 /// Configuration for epoch change monitoring
 #[derive(Debug, Clone)]
 pub struct EpochCheckConfig {
@@ -226,8 +247,8 @@ pub struct EpochCheckConfig {
 impl Default for EpochCheckConfig {
     fn default() -> Self {
         Self {
-            check_interval_messages: 1000,  // Check every 1000 messages
-            check_interval_ms: 100,         // Check every 100ms
+            check_interval_messages: 1000, // Check every 1000 messages
+            check_interval_ms: 100,        // Check every 100ms
         }
     }
 }
@@ -514,7 +535,11 @@ impl MarketFeed {
 
     /// Get health information (for monitoring)
     pub fn health_info(&self) -> (crate::resilience::HealthStatus, u64, std::time::Duration) {
-        (self.health.status(), self.health.message_count(), self.health.uptime())
+        (
+            self.health.status(),
+            self.health.message_count(),
+            self.health.uptime(),
+        )
     }
 
     /// Wait for first valid snapshot with timeout
@@ -564,7 +589,11 @@ impl MarketFeed {
                 }
                 None => {
                     if attempt % 10 == 0 {
-                        debug!("Ring buffer empty (attempt {}/{})", attempt + 1, max_retries);
+                        debug!(
+                            "Ring buffer empty (attempt {}/{})",
+                            attempt + 1,
+                            max_retries
+                        );
                     }
                 }
             }
@@ -749,18 +778,7 @@ impl MarketFeed {
 
         let start = Instant::now();
 
-        // CRITICAL FIX: Request snapshot from Huginn BEFORE waiting for it
-        // Without this, fetch_snapshot() will timeout because no snapshot is ever generated
-        info!("Requesting full snapshot from Huginn (via atomic counter signal)...");
-        self.request_snapshot();
-
-        // Wait for snapshot (Huginn should fetch and publish within ~500ms)
-        let snapshot = self.fetch_snapshot(Some(timeout))
-            .ok_or_else(|| anyhow::anyhow!(
-                "Snapshot timeout after {:.1}s. Verify: (1) Huginn snapshot polling task is running, \
-                 (2) No rate limiting (max 1 request per 10s), (3) Huginn can reach Lighter exchange",
-                timeout.as_secs_f64()
-            ))?;
+        let snapshot = perform_snapshot_recovery(self, timeout)?;
 
         info!(
             "✅ Snapshot received: seq={}, bid={}, ask={}, took {:.3}s",
@@ -961,7 +979,10 @@ impl MarketFeed {
 
         // Release backpressure when recovered
         if !now_triggered && self.backpressure_triggered {
-            info!("✅ Backpressure released. Queue depth normalized to {}", queue_depth);
+            info!(
+                "✅ Backpressure released. Queue depth normalized to {}",
+                queue_depth
+            );
             self.backpressure_triggered = false;
         }
 
@@ -1032,7 +1053,10 @@ impl MarketFeed {
     pub fn mark_recovery_complete(&mut self, sequence: u64) {
         self.recovery_in_progress = false;
         self.gap_detector.reset_at_sequence(sequence);
-        info!("Gap recovery completed, resuming normal operation from sequence {}", sequence);
+        info!(
+            "Gap recovery completed, resuming normal operation from sequence {}",
+            sequence
+        );
     }
 
     /// Trigger automatic gap recovery with snapshot resync
@@ -1056,14 +1080,122 @@ impl MarketFeed {
         );
 
         // Use the snapshot protocol to recover
-        let snapshot = self.initialize_with_snapshot(timeout)?;
+        let snapshot = perform_snapshot_recovery(self, timeout)?;
 
-        // Mark recovery as complete
-        self.mark_recovery_complete(snapshot.sequence);
+        let reset_sequence = if self.gap_detector.last_sequence() > 0 {
+            self.gap_detector.last_sequence().saturating_sub(1)
+        } else {
+            snapshot.sequence.saturating_sub(1)
+        };
 
-        info!("Gap recovery successful, resynced at sequence {}", snapshot.sequence);
+        self.mark_recovery_complete(reset_sequence);
+
+        info!(
+            "Gap recovery successful, snapshot seq={} (reset to {})",
+            snapshot.sequence, reset_sequence
+        );
 
         Ok(())
+    }
+}
+
+impl SnapshotOps for MarketFeed {
+    fn save_position(&self) -> u64 {
+        self.inner.save_position()
+    }
+
+    fn request_snapshot(&mut self) {
+        self.inner.request_snapshot();
+    }
+
+    fn fetch_snapshot(&mut self, timeout: Option<Duration>) -> Option<MarketSnapshot> {
+        self.inner.fetch_snapshot(timeout)
+    }
+
+    fn rewind_to(&mut self, position: u64) {
+        self.inner.rewind_to(position);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_recovery_tests {
+    use super::*;
+
+    struct MockSnapshotOps {
+        saved_position: u64,
+        requested: bool,
+        rewound: Vec<u64>,
+        snapshot: Option<MarketSnapshot>,
+    }
+
+    impl MockSnapshotOps {
+        fn new(saved_position: u64, snapshot: Option<MarketSnapshot>) -> Self {
+            Self {
+                saved_position,
+                requested: false,
+                rewound: Vec::new(),
+                snapshot,
+            }
+        }
+    }
+
+    impl SnapshotOps for MockSnapshotOps {
+        fn save_position(&self) -> u64 {
+            self.saved_position
+        }
+
+        fn request_snapshot(&mut self) {
+            self.requested = true;
+        }
+
+        fn fetch_snapshot(&mut self, _timeout: Option<Duration>) -> Option<MarketSnapshot> {
+            self.snapshot.take()
+        }
+
+        fn rewind_to(&mut self, position: u64) {
+            self.rewound.push(position);
+        }
+    }
+
+    fn dummy_snapshot(sequence: u64) -> MarketSnapshot {
+        MarketSnapshot {
+            market_id: 1,
+            sequence,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 50_000_000_000_000,
+            best_bid_size: 1_000_000_000,
+            best_ask_price: 50_005_000_000_000,
+            best_ask_size: 1_000_000_000,
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 54],
+        }
+    }
+
+    #[test]
+    fn test_perform_snapshot_recovery_requests_and_rewinds() {
+        let mut mock = MockSnapshotOps::new(42, Some(dummy_snapshot(123)));
+        let snapshot = perform_snapshot_recovery(&mut mock, Duration::from_secs(1)).unwrap();
+
+        assert!(mock.requested);
+        assert_eq!(mock.rewound, vec![42]);
+        assert_eq!(snapshot.sequence, 123);
+    }
+
+    #[test]
+    fn test_perform_snapshot_recovery_errors_on_timeout() {
+        let mut mock = MockSnapshotOps::new(99, None);
+        let err = perform_snapshot_recovery(&mut mock, Duration::from_secs(1)).unwrap_err();
+
+        assert!(mock.requested);
+        assert!(err.to_string().contains("Snapshot timeout"));
+        assert!(mock.rewound.is_empty());
     }
 }
 
@@ -1126,7 +1258,10 @@ mod tests {
 
         const MAX_AGE: u64 = 5_000_000_000;
         let result = validate_snapshot(&snapshot, MAX_AGE);
-        assert!(matches!(result, Err(SnapshotValidationError::Crossed { .. })));
+        assert!(matches!(
+            result,
+            Err(SnapshotValidationError::Crossed { .. })
+        ));
         assert!(is_crossed(&snapshot));
     }
 
@@ -1138,7 +1273,10 @@ mod tests {
 
         const MAX_AGE: u64 = 5_000_000_000;
         let result = validate_snapshot(&snapshot, MAX_AGE);
-        assert!(matches!(result, Err(SnapshotValidationError::SpreadTooWide { .. })));
+        assert!(matches!(
+            result,
+            Err(SnapshotValidationError::SpreadTooWide { .. })
+        ));
     }
 
     #[test]

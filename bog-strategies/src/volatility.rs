@@ -260,11 +260,7 @@ impl<const WINDOW_SIZE: usize> ParkinsonVolatility<WINDOW_SIZE> {
             if low > 0 && high >= low {
                 // Calculate log(high/low)^2 approximation
                 let ratio = (high * 10_000) / low;
-                let log_ratio_approx = if ratio > 10_000 {
-                    ratio - 10_000
-                } else {
-                    0
-                };
+                let log_ratio_approx = if ratio > 10_000 { ratio - 10_000 } else { 0 };
                 sum_log_ratio_sq += (log_ratio_approx as u128).pow(2);
             }
         }

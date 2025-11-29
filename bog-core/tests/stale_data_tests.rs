@@ -17,7 +17,7 @@ fn test_stale_snapshot_rejected() {
 
     // This test FAILS because validate_snapshot doesn't have max_age_ns parameter yet
 
-    let max_age_ns = 5_000_000_000u64;  // 5 seconds
+    let max_age_ns = 5_000_000_000u64; // 5 seconds
 
     // Create a stale snapshot (10 seconds old)
     // Currently we can't easily create a snapshot with specific timestamp,
@@ -33,7 +33,7 @@ fn test_recent_snapshot_accepted() {
     //
     // Expected: validate_snapshot() accepts data < max_age_ns
 
-    let max_age_ns = 5_000_000_000u64;  // 5 seconds
+    let max_age_ns = 5_000_000_000u64; // 5 seconds
 
     // Create a recent snapshot (1 second old)
     // After implementation:
@@ -53,7 +53,10 @@ fn test_timestamp_boundary_condition() {
     // Currently: no way to test this
     // After implementation: add test with snapshot exactly at boundary
 
-    assert!(snapshot_age_ns <= max_age_ns, "Boundary: exactly at max age");
+    assert!(
+        snapshot_age_ns <= max_age_ns,
+        "Boundary: exactly at max age"
+    );
 }
 
 #[test]
@@ -64,7 +67,7 @@ fn test_just_over_boundary_rejected() {
     // Expected: Should be REJECTED
 
     let max_age_ns = 5_000_000_000u64;
-    let snapshot_age_ns = 5_100_000_000u64;  // 5.1 seconds
+    let snapshot_age_ns = 5_100_000_000u64; // 5.1 seconds
 
     assert!(snapshot_age_ns > max_age_ns, "Should be over boundary");
     // After implementation: verify rejection
@@ -77,7 +80,10 @@ fn test_zero_age_always_accepted() {
     let max_age_ns = 5_000_000_000u64;
     let snapshot_age_ns = 0u64;
 
-    assert!(snapshot_age_ns <= max_age_ns, "Current data should always be accepted");
+    assert!(
+        snapshot_age_ns <= max_age_ns,
+        "Current data should always be accepted"
+    );
 }
 
 #[test]
@@ -87,21 +93,26 @@ fn test_multiple_stale_checks() {
     let max_age_ns = 5_000_000_000;
 
     let test_cases = vec![
-        (0u64, true),                    // Current: accept
-        (1_000_000_000u64, true),        // 1 sec: accept
-        (4_999_999_999u64, true),        // 4.999 sec: accept
-        (5_000_000_000u64, true),        // 5.0 sec: accept (boundary)
-        (5_000_000_001u64, false),       // 5.001 sec: reject
-        (10_000_000_000u64, false),      // 10 sec: reject
+        (0u64, true),               // Current: accept
+        (1_000_000_000u64, true),   // 1 sec: accept
+        (4_999_999_999u64, true),   // 4.999 sec: accept
+        (5_000_000_000u64, true),   // 5.0 sec: accept (boundary)
+        (5_000_000_001u64, false),  // 5.001 sec: reject
+        (10_000_000_000u64, false), // 10 sec: reject
     ];
 
     for (age_ns, should_accept) in test_cases {
         let is_valid = age_ns <= max_age_ns;
         assert_eq!(
-            is_valid, should_accept,
+            is_valid,
+            should_accept,
             "Age {}ns should be {}",
             age_ns,
-            if should_accept { "accepted" } else { "rejected" }
+            if should_accept {
+                "accepted"
+            } else {
+                "rejected"
+            }
         );
     }
 }

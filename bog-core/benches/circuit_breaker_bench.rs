@@ -31,10 +31,10 @@ fn create_normal_snapshot() -> MarketSnapshot {
         exchange_timestamp_ns: now,
         local_recv_ns: now,
         local_publish_ns: now,
-        best_bid_price: 50_000_000_000_000,   // $50,000
-        best_bid_size: 1_000_000_000,          // 1.0 BTC
-        best_ask_price: 50_005_000_000_000,   // $50,005 (1bps spread)
-        best_ask_size: 1_000_000_000,          // 1.0 BTC
+        best_bid_price: 50_000_000_000_000, // $50,000
+        best_bid_size: 1_000_000_000,       // 1.0 BTC
+        best_ask_price: 50_005_000_000_000, // $50,005 (1bps spread)
+        best_ask_size: 1_000_000_000,       // 1.0 BTC
         bid_prices: [0; 10],
         bid_sizes: [0; 10],
         ask_prices: [0; 10],
@@ -180,7 +180,7 @@ fn bench_consecutive_violations(c: &mut Criterion) {
             breaker.check(&normal_snapshot); // Resets counter
             breaker.check(&wide_snapshot);
             breaker.check(&normal_snapshot); // Resets counter
-            // Then 3 consecutive (should halt)
+                                             // Then 3 consecutive (should halt)
             breaker.check(&wide_snapshot);
             breaker.check(&wide_snapshot);
             black_box(breaker.check(&wide_snapshot)); // 3rd consecutive - trips

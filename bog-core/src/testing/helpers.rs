@@ -75,7 +75,7 @@
 //! assert_eq!(price_fp, 50_000_500_000_000);
 //! ```
 
-use crate::core::{OrderId, Position, Signal, SignalAction, Side};
+use crate::core::{OrderId, Position, Side, Signal, SignalAction};
 use crate::data::SnapshotBuilder;
 use crate::monitoring::MetricsRegistry;
 use huginn::MarketSnapshot;
@@ -106,28 +106,40 @@ pub fn create_test_snapshot(
 /// Create a simple test snapshot with default BTC-USD prices
 pub fn create_simple_snapshot(sequence: u64) -> MarketSnapshot {
     create_test_snapshot(
-        1,                    // market_id
-        sequence,             // sequence
-        50000_000000000,      // bid: $50,000
-        50005_000000000,      // ask: $50,005
-        1_000000000,          // bid size: 1.0 BTC
-        1_000000000,          // ask size: 1.0 BTC
+        1,               // market_id
+        sequence,        // sequence
+        50000_000000000, // bid: $50,000
+        50005_000000000, // ask: $50,005
+        1_000000000,     // bid size: 1.0 BTC
+        1_000000000,     // ask size: 1.0 BTC
     )
 }
 
 /// Create a test position with specified quantity
 pub fn create_test_position(quantity: i64) -> Arc<Position> {
     let position = Arc::new(Position::new());
-    position.quantity.store(quantity, std::sync::atomic::Ordering::Relaxed);
+    position
+        .quantity
+        .store(quantity, std::sync::atomic::Ordering::Relaxed);
     position
 }
 
 /// Create a test position with quantity and PnL
-pub fn create_test_position_with_pnl(quantity: i64, realized_pnl: i64, daily_pnl: i64) -> Arc<Position> {
+pub fn create_test_position_with_pnl(
+    quantity: i64,
+    realized_pnl: i64,
+    daily_pnl: i64,
+) -> Arc<Position> {
     let position = Arc::new(Position::new());
-    position.quantity.store(quantity, std::sync::atomic::Ordering::Relaxed);
-    position.realized_pnl.store(realized_pnl, std::sync::atomic::Ordering::Relaxed);
-    position.daily_pnl.store(daily_pnl, std::sync::atomic::Ordering::Relaxed);
+    position
+        .quantity
+        .store(quantity, std::sync::atomic::Ordering::Relaxed);
+    position
+        .realized_pnl
+        .store(realized_pnl, std::sync::atomic::Ordering::Relaxed);
+    position
+        .daily_pnl
+        .store(daily_pnl, std::sync::atomic::Ordering::Relaxed);
     position
 }
 
@@ -304,10 +316,14 @@ mod tests {
 
     #[test]
     fn test_assert_within_latency() {
-        assert_within_latency(Duration::from_millis(10), || {
-            // Fast operation
-            let _x = 1 + 1;
-        }, "fast operation");
+        assert_within_latency(
+            Duration::from_millis(10),
+            || {
+                // Fast operation
+                let _x = 1 + 1;
+            },
+            "fast operation",
+        );
     }
 
     #[test]

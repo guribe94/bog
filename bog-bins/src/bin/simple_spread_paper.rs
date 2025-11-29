@@ -15,15 +15,15 @@
 
 use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
-use bog_core::data::{MarketFeed, SnapshotValidator, ValidationConfig, ValidationError};
 use bog_core::data::types::encode_market_id;
+use bog_core::data::{MarketFeed, SnapshotValidator, ValidationConfig, ValidationError};
 use bog_core::engine::{
-    Engine, SimulatedExecutor, GapRecoveryManager, GapRecoveryConfig,
-    AlertManager, AlertConfig, AlertType
+    AlertConfig, AlertManager, AlertType, Engine, GapRecoveryConfig, GapRecoveryManager,
+    SimulatedExecutor,
 };
 use bog_core::resilience::{install_panic_handler, KillSwitch};
+use bog_strategies::simple_spread::{MIN_SPREAD_BPS, ORDER_SIZE, SPREAD_BPS};
 use bog_strategies::SimpleSpread;
-use bog_strategies::simple_spread::{SPREAD_BPS, ORDER_SIZE, MIN_SPREAD_BPS};
 use clap::Parser;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -62,7 +62,10 @@ fn main() -> Result<()> {
     // Connect to real Huginn shared memory
     // Encode market ID for Lighter DEX (dex_type=1)
     let encoded_market_id = encode_market_id(1, args.market_id);
-    info!("Connecting to Huginn shared memory for market {} (encoded: {})...", args.market_id, encoded_market_id);
+    info!(
+        "Connecting to Huginn shared memory for market {} (encoded: {})...",
+        args.market_id, encoded_market_id
+    );
     let mut feed = MarketFeed::connect(encoded_market_id)?;
 
     info!("Connected successfully. Waiting for initial market snapshot...");
@@ -76,7 +79,8 @@ fn main() -> Result<()> {
                 snapshot.sequence,
                 snapshot.best_bid_price,
                 snapshot.best_ask_price,
-                ((snapshot.best_ask_price - snapshot.best_bid_price) * 10_000) / snapshot.best_bid_price
+                ((snapshot.best_ask_price - snapshot.best_bid_price) * 10_000)
+                    / snapshot.best_bid_price
             );
 
             // Validate initial snapshot
@@ -94,7 +98,10 @@ fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Failed to get initial snapshot: {}", e);
-            error!("Is Huginn running? Check: ls -la /dev/shm/hg_m{}", args.market_id);
+            error!(
+                "Is Huginn running? Check: ls -la /dev/shm/hg_m{}",
+                args.market_id
+            );
             return Err(e);
         }
     };
@@ -102,14 +109,30 @@ fn main() -> Result<()> {
     // Log initial market conditions
     info!("Initial market conditions validated:");
     info!("  - Sequence: {}", initial_snapshot.sequence);
-    info!("  - Best Bid: {} (size: {})", initial_snapshot.best_bid_price, initial_snapshot.best_bid_size);
-    info!("  - Best Ask: {} (size: {})", initial_snapshot.best_ask_price, initial_snapshot.best_ask_size);
-    info!("  - Spread: {} bps", ((initial_snapshot.best_ask_price - initial_snapshot.best_bid_price) * 10_000) / initial_snapshot.best_bid_price);
-    info!("  - Is Full Snapshot: {}", initial_snapshot.is_full_snapshot());
+    info!(
+        "  - Best Bid: {} (size: {})",
+        initial_snapshot.best_bid_price, initial_snapshot.best_bid_size
+    );
+    info!(
+        "  - Best Ask: {} (size: {})",
+        initial_snapshot.best_ask_price, initial_snapshot.best_ask_size
+    );
+    info!(
+        "  - Spread: {} bps",
+        ((initial_snapshot.best_ask_price - initial_snapshot.best_bid_price) * 10_000)
+            / initial_snapshot.best_bid_price
+    );
+    info!(
+        "  - Is Full Snapshot: {}",
+        initial_snapshot.is_full_snapshot()
+    );
 
     // Create strategy (non-zero sized type with volatility state)
     let strategy = SimpleSpread::new();
-    info!("Strategy: SimpleSpread (size: {} bytes)", std::mem::size_of_val(&strategy));
+    info!(
+        "Strategy: SimpleSpread (size: {} bytes)",
+        std::mem::size_of_val(&strategy)
+    );
     info!("  - Target Spread: {} bps", SPREAD_BPS);
     info!("  - Order Size: {} (fixed-point)", ORDER_SIZE);
     info!("  - Min Market Spread: {} bps", MIN_SPREAD_BPS);
@@ -132,18 +155,19 @@ fn main() -> Result<()> {
 
     // Create alert manager for comprehensive monitoring
     let mut alert_config = AlertConfig::default();
-    alert_config.halt_on_critical = true;  // Stop trading on critical alerts
+    alert_config.halt_on_critical = true; // Stop trading on critical alerts
     let mut alert_manager = AlertManager::new(alert_config);
     info!("Alert system enabled with critical halt protection");
 
     // Create snapshot validator with enhanced checks
     let mut validation_config = ValidationConfig::default();
-    validation_config.max_spread_bps = 1000;        // 10% max spread
-    validation_config.min_spread_bps = 1;            // 1bp minimum
-    validation_config.max_price_change_bps = 500;    // 5% max change per snapshot
-    validation_config.validate_depth = true;         // Validate all 10 levels
+    validation_config.max_spread_bps = 1000; // 10% max spread
+    validation_config.min_spread_bps = 1; // 1bp minimum
+    validation_config.max_price_change_bps = 500; // 5% max change per snapshot
+    validation_config.validate_depth = true; // Validate all 10 levels
     let mut validator = SnapshotValidator::with_config(validation_config);
-    info!("Enhanced data validation enabled (depth={}, spike detection={}bps)",
+    info!(
+        "Enhanced data validation enabled (depth={}, spike detection={}bps)",
         validator.config().validate_depth,
         validator.config().max_price_change_bps
     );
@@ -181,32 +205,63 @@ fn main() -> Result<()> {
                         let mut ctx = HashMap::new();
                         ctx.insert("bid".to_string(), bid.to_string());
                         ctx.insert("ask".to_string(), ask.to_string());
-                        (AlertType::OrderbookCrossed, (format!("Orderbook crossed: bid={}, ask={}", bid, ask), ctx))
+                        (
+                            AlertType::OrderbookCrossed,
+                            (format!("Orderbook crossed: bid={}, ask={}", bid, ask), ctx),
+                        )
                     }
                     ValidationError::SpreadTooWide { spread_bps } => {
                         let mut ctx = HashMap::new();
                         ctx.insert("spread_bps".to_string(), spread_bps.to_string());
-                        (AlertType::SpreadTooWide, (format!("Spread too wide: {}bps", spread_bps), ctx))
+                        (
+                            AlertType::SpreadTooWide,
+                            (format!("Spread too wide: {}bps", spread_bps), ctx),
+                        )
                     }
-                    ValidationError::PriceSpike { change_bps, max_bps } => {
+                    ValidationError::PriceSpike {
+                        change_bps,
+                        max_bps,
+                    } => {
                         let mut ctx = HashMap::new();
                         ctx.insert("change_bps".to_string(), change_bps.to_string());
                         ctx.insert("max_bps".to_string(), max_bps.to_string());
-                        (AlertType::PriceSpike, (format!("Price spike: {}bps (max {}bps)", change_bps, max_bps), ctx))
+                        (
+                            AlertType::PriceSpike,
+                            (
+                                format!("Price spike: {}bps (max {}bps)", change_bps, max_bps),
+                                ctx,
+                            ),
+                        )
                     }
-                    ValidationError::LowLiquidity { total_bid_size, total_ask_size, min_size } => {
+                    ValidationError::LowLiquidity {
+                        total_bid_size,
+                        total_ask_size,
+                        min_size,
+                    } => {
                         let mut ctx = HashMap::new();
                         ctx.insert("bid_size".to_string(), total_bid_size.to_string());
                         ctx.insert("ask_size".to_string(), total_ask_size.to_string());
                         ctx.insert("min_size".to_string(), min_size.to_string());
-                        (AlertType::LowLiquidity, (format!("Low liquidity: bid={}, ask={}", total_bid_size, total_ask_size), ctx))
+                        (
+                            AlertType::LowLiquidity,
+                            (
+                                format!(
+                                    "Low liquidity: bid={}, ask={}",
+                                    total_bid_size, total_ask_size
+                                ),
+                                ctx,
+                            ),
+                        )
                     }
-                    _ => {
-                        (AlertType::DataInvalid, (validation_error.to_string(), HashMap::new()))
-                    }
+                    _ => (
+                        AlertType::DataInvalid,
+                        (validation_error.to_string(), HashMap::new()),
+                    ),
                 };
 
-                alert_manager.raise_alert(alert_type, message.0, message.1).ok();
+                alert_manager
+                    .raise_alert(alert_type, message.0, message.1)
+                    .ok();
 
                 // Reject this snapshot - don't trade on invalid data
                 snapshot = None;
@@ -218,11 +273,13 @@ fn main() -> Result<()> {
             warn!("Data is stale! State: {:?}", feed.stale_state());
             let mut context = HashMap::new();
             context.insert("state".to_string(), format!("{:?}", feed.stale_state()));
-            alert_manager.raise_alert(
-                AlertType::DataStale,
-                "Market data is stale".to_string(),
-                context,
-            ).ok();
+            alert_manager
+                .raise_alert(
+                    AlertType::DataStale,
+                    "Market data is stale".to_string(),
+                    context,
+                )
+                .ok();
         }
 
         // Handle gaps with automatic recovery
@@ -235,21 +292,28 @@ fn main() -> Result<()> {
                 context.insert("gap_size".to_string(), gap_size.to_string());
                 context.insert("last_seq".to_string(), last_sequence.to_string());
                 context.insert("current_seq".to_string(), snap.sequence.to_string());
-                alert_manager.raise_alert(
-                    AlertType::DataGap,
-                    format!("Sequence gap of {} messages detected", gap_size),
-                    context,
-                ).ok();
+                alert_manager
+                    .raise_alert(
+                        AlertType::DataGap,
+                        format!("Sequence gap of {} messages detected", gap_size),
+                        context,
+                    )
+                    .ok();
 
                 // Trigger automatic recovery
                 match gap_recovery.handle_gap(&mut feed, gap_size, last_sequence, snap.sequence) {
                     Ok(Some(recovery_snapshot)) => {
-                        info!("Gap recovered successfully, resuming from seq={}", recovery_snapshot.sequence);
+                        info!(
+                            "Gap recovered successfully, resuming from seq={}",
+                            recovery_snapshot.sequence
+                        );
                         snapshot = Some(recovery_snapshot);
                         last_sequence = recovery_snapshot.sequence;
                     }
                     Ok(None) => {
-                        warn!("Gap detected but recovery skipped (manual intervention may be needed)");
+                        warn!(
+                            "Gap detected but recovery skipped (manual intervention may be needed)"
+                        );
                     }
                     Err(e) => {
                         error!("Gap recovery failed: {}", e);
@@ -257,17 +321,21 @@ fn main() -> Result<()> {
                         // Alert for recovery failure
                         let mut context = HashMap::new();
                         context.insert("error".to_string(), e.to_string());
-                        alert_manager.raise_alert(
-                            AlertType::RecoveryFailed,
-                            "Gap recovery failed".to_string(),
-                            context,
-                        ).ok();
+                        alert_manager
+                            .raise_alert(
+                                AlertType::RecoveryFailed,
+                                "Gap recovery failed".to_string(),
+                                context,
+                            )
+                            .ok();
 
                         // Check if we should abandon
                         if gap_recovery.should_abandon() {
                             error!("Too many consecutive gap recovery failures, shutting down!");
                             kill_switch_engine.shutdown("Gap recovery failure threshold exceeded");
-                            return Err(anyhow::anyhow!("Gap recovery abandoned after repeated failures"));
+                            return Err(anyhow::anyhow!(
+                                "Gap recovery abandoned after repeated failures"
+                            ));
                         }
                     }
                 }
@@ -280,23 +348,29 @@ fn main() -> Result<()> {
                     let mut context = HashMap::new();
                     context.insert("bid".to_string(), snap.best_bid_price.to_string());
                     context.insert("ask".to_string(), snap.best_ask_price.to_string());
-                    alert_manager.raise_alert(
-                        AlertType::OrderbookCrossed,
-                        "Orderbook is crossed".to_string(),
-                        context,
-                    ).ok();
+                    alert_manager
+                        .raise_alert(
+                            AlertType::OrderbookCrossed,
+                            "Orderbook is crossed".to_string(),
+                            context,
+                        )
+                        .ok();
                 }
 
                 // Check for wide spreads
-                let spread_bps = ((snap.best_ask_price - snap.best_bid_price) * 10_000) / snap.best_bid_price;
-                if spread_bps > 100 {  // > 1% spread
+                let spread_bps =
+                    ((snap.best_ask_price - snap.best_bid_price) * 10_000) / snap.best_bid_price;
+                if spread_bps > 100 {
+                    // > 1% spread
                     let mut context = HashMap::new();
                     context.insert("spread_bps".to_string(), spread_bps.to_string());
-                    alert_manager.raise_alert(
-                        AlertType::SpreadTooWide,
-                        format!("Spread is {}bps", spread_bps),
-                        context,
-                    ).ok();
+                    alert_manager
+                        .raise_alert(
+                            AlertType::SpreadTooWide,
+                            format!("Spread is {}bps", spread_bps),
+                            context,
+                        )
+                        .ok();
                 }
             }
         }
@@ -307,11 +381,13 @@ fn main() -> Result<()> {
             warn!("High queue depth: {} messages", queue_depth);
             let mut context = HashMap::new();
             context.insert("queue_depth".to_string(), queue_depth.to_string());
-            alert_manager.raise_alert(
-                AlertType::HighQueueDepth,
-                format!("Queue depth: {}", queue_depth),
-                context,
-            ).ok();
+            alert_manager
+                .raise_alert(
+                    AlertType::HighQueueDepth,
+                    format!("Queue depth: {}", queue_depth),
+                    context,
+                )
+                .ok();
         }
 
         // Check for epoch changes (Huginn restart)
@@ -319,11 +395,13 @@ fn main() -> Result<()> {
             warn!("Huginn restart detected (epoch changed)");
 
             // Alert for Huginn restart
-            alert_manager.raise_alert(
-                AlertType::HuginnRestart,
-                "Huginn producer restarted".to_string(),
-                HashMap::new(),
-            ).ok();
+            alert_manager
+                .raise_alert(
+                    AlertType::HuginnRestart,
+                    "Huginn producer restarted".to_string(),
+                    HashMap::new(),
+                )
+                .ok();
 
             // Reset gap recovery stats after Huginn restart
             gap_recovery.reset_stats();
@@ -372,7 +450,10 @@ fn main() -> Result<()> {
 
     let consumer_stats = feed.consumer_stats();
     info!("  - Total Reads: {}", consumer_stats.total_reads);
-    info!("  - Read Success Rate: {:.2}%", consumer_stats.read_success_rate());
+    info!(
+        "  - Read Success Rate: {:.2}%",
+        consumer_stats.read_success_rate()
+    );
 
     // Gap recovery statistics
     info!("Gap Recovery Statistics:");

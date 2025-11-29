@@ -6,8 +6,8 @@
 //! - Other critical safety violations occur
 
 use bog_core::execution::{Order, Side};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_zero_fill_conversion_halts() {
@@ -17,7 +17,7 @@ fn test_zero_fill_conversion_halts() {
     //
     // Note: This is tested at the simulate_fill level, but we can verify the logic
 
-    use bog_core::execution::{SimulatedExecutor, Executor};
+    use bog_core::execution::{Executor, SimulatedExecutor};
 
     let mut executor = SimulatedExecutor::new();
 
@@ -27,7 +27,7 @@ fn test_zero_fill_conversion_halts() {
     let tiny_order = Order::limit(
         Side::Buy,
         Decimal::from(50000),
-        Decimal::new(1, 11)  // 0.00000000001 - smaller than fixed-point precision
+        Decimal::new(1, 11), // 0.00000000001 - smaller than fixed-point precision
     );
 
     // This should return an error from simulate_fill
@@ -36,7 +36,7 @@ fn test_zero_fill_conversion_halts() {
     // After Fix #2, this should return Err
     // Currently it might succeed with a warning
     // For now, just verify order placement works with normal sizes
-    assert!(result.is_ok() || result.is_err());  // Either is acceptable for tiny size
+    assert!(result.is_ok() || result.is_err()); // Either is acceptable for tiny size
 }
 
 #[test]

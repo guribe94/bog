@@ -7,8 +7,8 @@
 //! - PnL matches expected: (sell_price - buy_price) * quantity - fees
 
 use bog_core::execution::{Fill, Side};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_round_trip_pnl_with_fees() {
@@ -43,7 +43,7 @@ fn test_round_trip_pnl_with_fees() {
 
     // Expected result: gross_profit = $10 price diff * 0.1 qty = $1
     assert_eq!(gross_profit, Decimal::from(1)); // $1 gross profit
-    // Fees: $5000 * 0.0002 + $5001 * 0.0002 ≈ $2
+                                                // Fees: $5000 * 0.0002 + $5001 * 0.0002 ≈ $2
     assert!(total_fee > Decimal::from_f64(1.99).unwrap());
     assert!(total_fee < Decimal::from_f64(2.01).unwrap());
     // Net: $1 - $2 = -$1 (loss)
@@ -59,13 +59,25 @@ fn test_fee_calculation_2bps_accuracy() {
     // Fee should be exactly 2 bps (0.02%) of notional
 
     let price = Decimal::from(50000);
-    let fee_bps = Decimal::from_f64(0.0002).unwrap();  // 2 bps
+    let fee_bps = Decimal::from_f64(0.0002).unwrap(); // 2 bps
 
     let test_cases = vec![
-        (Decimal::from_f64(0.01).unwrap(), Decimal::from_f64(0.1).unwrap()),      // 0.01 BTC: $0.10
-        (Decimal::from_f64(0.1).unwrap(), Decimal::from_f64(1.0).unwrap()),       // 0.1 BTC: $1.00
-        (Decimal::from_f64(1.0).unwrap(), Decimal::from_f64(10.0).unwrap()),      // 1.0 BTC: $10.00
-        (Decimal::from_f64(10.0).unwrap(), Decimal::from_f64(100.0).unwrap()),    // 10 BTC: $100.00
+        (
+            Decimal::from_f64(0.01).unwrap(),
+            Decimal::from_f64(0.1).unwrap(),
+        ), // 0.01 BTC: $0.10
+        (
+            Decimal::from_f64(0.1).unwrap(),
+            Decimal::from_f64(1.0).unwrap(),
+        ), // 0.1 BTC: $1.00
+        (
+            Decimal::from_f64(1.0).unwrap(),
+            Decimal::from_f64(10.0).unwrap(),
+        ), // 1.0 BTC: $10.00
+        (
+            Decimal::from_f64(10.0).unwrap(),
+            Decimal::from_f64(100.0).unwrap(),
+        ), // 10 BTC: $100.00
     ];
 
     for (size, expected_fee) in test_cases {
@@ -95,7 +107,7 @@ fn test_fees_deducted_from_pnl() {
     let mut total_fees = Decimal::from(0);
 
     for i in 1..=3 {
-        let sell_price = Decimal::from(50000 + (i * 10));  // $50,010, $50,020, $50,030
+        let sell_price = Decimal::from(50000 + (i * 10)); // $50,010, $50,020, $50,030
         let gross_profit = (sell_price - price) * quantity;
         let fee = (price * quantity * fee_bps) + (sell_price * quantity * fee_bps);
 
@@ -147,10 +159,10 @@ fn test_fee_consistency_across_fills() {
     // Scenario: Verify fee is applied even with unusual prices
 
     let test_prices = vec![
-        Decimal::from(100),           // Very cheap
-        Decimal::from(50000),         // Normal
-        Decimal::from(100000),        // Very expensive
-        Decimal::from_f64(1234.56).unwrap(),  // Fractional
+        Decimal::from(100),                  // Very cheap
+        Decimal::from(50000),                // Normal
+        Decimal::from(100000),               // Very expensive
+        Decimal::from_f64(1234.56).unwrap(), // Fractional
     ];
 
     let quantity = Decimal::from_f64(0.1).unwrap();
@@ -161,11 +173,23 @@ fn test_fee_consistency_across_fills() {
         let fee = notional * fee_bps;
 
         // Verify fee is positive and reasonable
-        assert!(fee > Decimal::from(0), "Fee should be positive for price {}", price);
-        assert!(fee <= notional, "Fee should not exceed notional for price {}", price);
+        assert!(
+            fee > Decimal::from(0),
+            "Fee should be positive for price {}",
+            price
+        );
+        assert!(
+            fee <= notional,
+            "Fee should not exceed notional for price {}",
+            price
+        );
 
         // Verify fee is exactly 2 bps
         let fee_rate = fee / notional;
-        assert_eq!(fee_rate, fee_bps, "Fee rate should be 2 bps for price {}", price);
+        assert_eq!(
+            fee_rate, fee_bps,
+            "Fee rate should be 2 bps for price {}",
+            price
+        );
     }
 }

@@ -40,8 +40,8 @@
 //! cargo run --example shared_memory_feed
 //! ```
 
-use bog_core::data::MarketFeed;
 use anyhow::Result;
+use bog_core::data::MarketFeed;
 use std::time::{Duration, Instant};
 
 fn main() -> Result<()> {
@@ -109,12 +109,9 @@ fn main() -> Result<()> {
             let bid = snapshot.best_bid_price as f64 / 1_000_000_000.0;
             let ask = snapshot.best_ask_price as f64 / 1_000_000_000.0;
 
-            println!("│ {:4} │ {:8} │ ${:14.2} │ ${:14.2} │ {:4}bp │",
-                count,
-                snapshot.sequence,
-                bid,
-                ask,
-                spread_bps
+            println!(
+                "│ {:4} │ {:8} │ ${:14.2} │ ${:14.2} │ {:4}bp │",
+                count, snapshot.sequence, bid, ask, spread_bps
             );
 
             // Exit after 20 snapshots or 30 seconds
@@ -143,7 +140,10 @@ fn main() -> Result<()> {
     println!("   Snapshots received: {}", count);
     println!("   Duration: {:?}", elapsed);
     if count > 0 {
-        println!("   Rate: {:.1} snapshots/sec", count as f64 / elapsed.as_secs_f64());
+        println!(
+            "   Rate: {:.1} snapshots/sec",
+            count as f64 / elapsed.as_secs_f64()
+        );
     }
     println!("\n📊 Feed Statistics:");
     println!("   Total reads: {}", stats.total_reads);

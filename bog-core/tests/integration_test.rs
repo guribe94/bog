@@ -2,11 +2,11 @@
 //!
 //! Tests the full stack: Engine<Strategy, Executor>
 
+use anyhow::Result;
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
 use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_strategies::SimpleSpread;
-use anyhow::Result;
 
 /// Test that the full engine works with SimpleSpread + SimulatedExecutor
 #[test]
@@ -24,7 +24,7 @@ fn test_engine_with_simple_spread() -> Result<()> {
         sequence: 1,
         exchange_timestamp_ns: 0,
         best_bid_price: 50_000_000_000_000, // $50,000
-        best_bid_size: 1_000_000_000,        // 1.0 BTC
+        best_bid_size: 1_000_000_000,       // 1.0 BTC
         best_ask_price: 50_010_000_000_000, // $50,010 (2bps spread)
         best_ask_size: 1_000_000_000,
         ..Default::default()
@@ -129,11 +129,7 @@ fn test_executor_stats() -> Result<()> {
     let mut executor = SimulatedExecutor::new_default();
 
     let position = Position::new();
-    let signal = Signal::quote_both(
-        49_995_000_000_000,
-        50_005_000_000_000,
-        100_000_000,
-    );
+    let signal = Signal::quote_both(49_995_000_000_000, 50_005_000_000_000, 100_000_000);
 
     executor.execute(signal, &position)?;
 
@@ -182,7 +178,11 @@ fn test_tick_processing_latency() -> Result<()> {
 
     // This is a rough test - proper benchmarks in bog-bench
     // Target is <1μs (1000ns), but we're just checking it's reasonable
-    assert!(avg_latency < 10_000, "Tick latency too high: {}ns", avg_latency);
+    assert!(
+        avg_latency < 10_000,
+        "Tick latency too high: {}ns",
+        avg_latency
+    );
 
     Ok(())
 }

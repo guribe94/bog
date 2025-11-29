@@ -87,8 +87,8 @@
 //! }
 //! ```
 
+use crate::core::circuit_breaker_fsm::{BinaryBreakerState, BinaryNormal};
 use crate::data::MarketSnapshot;
-use crate::core::circuit_breaker_fsm::{BinaryNormal, BinaryBreakerState};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
 
@@ -302,7 +302,10 @@ impl CircuitBreaker {
             error!("CIRCUIT BREAKER TRIPPED: {}", reason);
 
             // Use type-safe state machine transition
-            match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+            match std::mem::replace(
+                &mut self.state,
+                BinaryBreakerState::Normal(BinaryNormal::new()),
+            ) {
                 BinaryBreakerState::Normal(normal) => {
                     self.state = BinaryBreakerState::Halted(normal.trip(reason.clone()));
                 }
@@ -328,7 +331,10 @@ impl CircuitBreaker {
     /// Should only be called after investigating and resolving the issue.
     /// Uses type-safe state machine transition!
     pub fn reset(&mut self) {
-        match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+        match std::mem::replace(
+            &mut self.state,
+            BinaryBreakerState::Normal(BinaryNormal::new()),
+        ) {
             BinaryBreakerState::Halted(halted) => {
                 warn!("Circuit breaker reset (was: {})", halted.reason());
                 self.state = BinaryBreakerState::Normal(halted.reset());
@@ -346,7 +352,10 @@ impl CircuitBreaker {
     pub fn manual_halt(&mut self, message: String) {
         error!("Circuit breaker manually halted: {}", message);
 
-        match std::mem::replace(&mut self.state, BinaryBreakerState::Normal(BinaryNormal::new())) {
+        match std::mem::replace(
+            &mut self.state,
+            BinaryBreakerState::Normal(BinaryNormal::new()),
+        ) {
             BinaryBreakerState::Normal(normal) => {
                 self.state = BinaryBreakerState::Halted(normal.trip(HaltReason::Manual(message)));
             }
@@ -408,8 +417,8 @@ mod tests {
             .market_id(1)
             .sequence(1)
             .timestamp(now)
-            .best_bid(50_000_000_000_000, 1_000_000_000)  // $50,000, 1 BTC
-            .best_ask(50_010_000_000_000, 1_000_000_000)  // $50,010, 1 BTC (2bps spread)
+            .best_bid(50_000_000_000_000, 1_000_000_000) // $50,000, 1 BTC
+            .best_ask(50_010_000_000_000, 1_000_000_000) // $50,010, 1 BTC (2bps spread)
             .incremental_snapshot()
             .build()
     }
@@ -431,7 +440,7 @@ mod tests {
 
         // Flash crash: spread goes from 2bps to 500bps
         let mut snapshot = create_normal_snapshot();
-        snapshot.best_ask_price = 52_500_000_000_000;  // 5% spread (500bps)
+        snapshot.best_ask_price = 52_500_000_000_000; // 5% spread (500bps)
 
         // First 2 violations: warnings only
         breaker.check(&snapshot);
@@ -461,7 +470,7 @@ mod tests {
 
         // Price jumps 20% (flash crash)
         let mut snapshot2 = create_normal_snapshot();
-        snapshot2.best_bid_price = 60_000_000_000_000;  // +20%
+        snapshot2.best_bid_price = 60_000_000_000_000; // +20%
         snapshot2.best_ask_price = 60_010_000_000_000;
 
         // First 2 violations: warnings
@@ -484,7 +493,7 @@ mod tests {
         let mut breaker = CircuitBreaker::new();
 
         let mut snapshot = create_normal_snapshot();
-        snapshot.best_bid_size = 1_000_000;  // 0.001 BTC (< MIN_LIQUIDITY)
+        snapshot.best_bid_size = 1_000_000; // 0.001 BTC (< MIN_LIQUIDITY)
         snapshot.best_ask_size = 1_000_000;
 
         // Low liquidity should skip tick but not halt
@@ -498,7 +507,7 @@ mod tests {
         let mut breaker = CircuitBreaker::new();
 
         let mut snapshot = create_normal_snapshot();
-        snapshot.exchange_timestamp_ns = 0;  // Very old
+        snapshot.exchange_timestamp_ns = 0; // Very old
 
         // Stale data should skip tick but not halt
         let state = breaker.check(&snapshot);
@@ -538,7 +547,7 @@ mod tests {
         let mut breaker = CircuitBreaker::new();
 
         let mut snapshot = create_normal_snapshot();
-        snapshot.best_ask_price = 52_500_000_000_000;  // Wide spread
+        snapshot.best_ask_price = 52_500_000_000_000; // Wide spread
 
         // First violation: warning
         breaker.check(&snapshot);

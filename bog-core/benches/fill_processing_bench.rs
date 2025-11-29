@@ -15,7 +15,7 @@
 //! and fast to maintain accurate PnL tracking.
 
 use bog_core::core::Position;
-use bog_core::execution::{Fill, OrderId, Side, OrderStatus};
+use bog_core::execution::{Fill, OrderId, OrderStatus, Side};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rust_decimal::Decimal;
 
@@ -39,7 +39,7 @@ fn bench_single_fill_processing(c: &mut Criterion) {
 
     let position = Position::new();
     let fill = create_fill(
-        Decimal::from_str_exact("0.1").unwrap(),  // 0.1 BTC
+        Decimal::from_str_exact("0.1").unwrap(),   // 0.1 BTC
         Decimal::from_str_exact("50000").unwrap(), // $50,000
         Side::Buy,
     );
@@ -47,8 +47,8 @@ fn bench_single_fill_processing(c: &mut Criterion) {
     group.bench_function("single_fill", |b| {
         b.iter(|| {
             // Simulate fill processing: update position
-            let quantity_i64 = (fill.size.mantissa() as i64) *
-                if fill.side == Side::Buy { 1 } else { -1 };
+            let quantity_i64 =
+                (fill.size.mantissa() as i64) * if fill.side == Side::Buy { 1 } else { -1 };
             black_box(position.update_quantity(quantity_i64));
         });
     });
@@ -68,7 +68,7 @@ fn bench_partial_fills(c: &mut Criterion) {
             // Simulate 10 partial fills
             for _ in 0..10 {
                 let fill = create_fill(
-                    Decimal::from_str_exact("0.01").unwrap(),  // 0.01 BTC each
+                    Decimal::from_str_exact("0.01").unwrap(), // 0.01 BTC each
                     Decimal::from_str_exact("50000").unwrap(),
                     Side::Buy,
                 );
@@ -97,8 +97,8 @@ fn bench_fill_aggregation(c: &mut Criterion) {
                     Decimal::from_str_exact("50000").unwrap(),
                     if i % 2 == 0 { Side::Buy } else { Side::Sell },
                 );
-                let quantity_i64 = (fill.size.mantissa() as i64) *
-                    if fill.side == Side::Buy { 1 } else { -1 };
+                let quantity_i64 =
+                    (fill.size.mantissa() as i64) * if fill.side == Side::Buy { 1 } else { -1 };
                 black_box(position.update_quantity(quantity_i64));
             }
         });
@@ -114,7 +114,7 @@ fn bench_position_update_with_pnl(c: &mut Criterion) {
 
     let position = Position::new();
     let quantity = 100_000_000i64; // 0.1 BTC in fixed-point
-    let pnl = 5_000_000_000i64;     // $5 profit
+    let pnl = 5_000_000_000i64; // $5 profit
 
     group.bench_function("update_position_and_pnl", |b| {
         b.iter(|| {

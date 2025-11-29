@@ -132,7 +132,9 @@ impl<T: Default + Clone> PoolGuard<T> {
     /// The object is only None during the Drop implementation.
     #[allow(clippy::expect_used)] // Invariant: obj is Some until drop
     pub fn get(&self) -> &T {
-        self.obj.as_ref().expect("BUG: PoolGuard accessed after drop")
+        self.obj
+            .as_ref()
+            .expect("BUG: PoolGuard accessed after drop")
     }
 
     /// Get mutable reference to inner object
@@ -143,7 +145,9 @@ impl<T: Default + Clone> PoolGuard<T> {
     /// The object is only None during the Drop implementation.
     #[allow(clippy::expect_used)] // Invariant: obj is Some until drop
     pub fn get_mut(&mut self) -> &mut T {
-        self.obj.as_mut().expect("BUG: PoolGuard accessed after drop")
+        self.obj
+            .as_mut()
+            .expect("BUG: PoolGuard accessed after drop")
     }
 }
 

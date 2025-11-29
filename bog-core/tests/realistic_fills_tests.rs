@@ -6,9 +6,9 @@
 //! - Instant mode still fills 100% with no slippage
 //! - Network and exchange latency are properly simulated
 
-use bog_core::execution::{SimulatedExecutor, Order, Executor, Side};
-use rust_decimal::Decimal;
+use bog_core::execution::{Executor, Order, Side, SimulatedExecutor};
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_instant_mode_fills_100_percent() {
@@ -18,13 +18,13 @@ fn test_instant_mode_fills_100_percent() {
     // Action: Place orders
     // Expected: All orders fill 100%, no slippage
 
-    let mut executor = SimulatedExecutor::new();  // Instant mode
+    let mut executor = SimulatedExecutor::new(); // Instant mode
 
     // Place a buy order
     let order = Order::limit(
         Side::Buy,
         Decimal::from(50000),
-        Decimal::from_f64(0.1).unwrap()
+        Decimal::from_f64(0.1).unwrap(),
     );
 
     let result = executor.place_order(order.clone());
@@ -39,7 +39,10 @@ fn test_instant_mode_fills_100_percent() {
     assert_eq!(fill.size, order.size, "Instant mode should fill 100%");
 
     // Verify no slippage (fill price = order price)
-    assert_eq!(fill.price, order.price, "Instant mode should have no slippage");
+    assert_eq!(
+        fill.price, order.price,
+        "Instant mode should have no slippage"
+    );
 }
 
 #[test]
@@ -59,7 +62,7 @@ fn test_realistic_mode_enables_partial_fills() {
 
     // Place 100 orders and track fill rates
     for i in 0..100 {
-        let price = Decimal::from(50000 + (i % 10) * 10);  // Vary price slightly
+        let price = Decimal::from(50000 + (i % 10) * 10); // Vary price slightly
         let order = Order::limit(Side::Buy, price, Decimal::from_f64(0.1).unwrap());
 
         let result = executor.place_order(order.clone());
@@ -73,7 +76,10 @@ fn test_realistic_mode_enables_partial_fills() {
     }
 
     // Verify we have fills
-    assert!(!fill_ratios.is_empty(), "Should have fills in realistic mode");
+    assert!(
+        !fill_ratios.is_empty(),
+        "Should have fills in realistic mode"
+    );
 
     // Verify mix of fill ratios (not all 100%)
     let all_full = fill_ratios.iter().all(|&r| r == Decimal::from(1));
@@ -115,7 +121,8 @@ fn test_realistic_mode_applies_slippage() {
     // For a buy, slippage makes fill price WORSE (higher)
     // Expected: buy_price + 2bps
     // Exact amount: 50000 * 0.0002 = $10, so fill should be ~$50010
-    if buy_fill.size > Decimal::from(0) {  // If any fill
+    if buy_fill.size > Decimal::from(0) {
+        // If any fill
         let slippage_expected = buy_price * Decimal::from_f64(0.0002).unwrap();
         let price_with_slippage = buy_price + slippage_expected;
 
@@ -139,7 +146,7 @@ fn test_realistic_mode_partial_fill_not_100() {
         let order = Order::limit(
             Side::Buy,
             Decimal::from(50000 + i),
-            Decimal::from_f64(0.1).unwrap()
+            Decimal::from_f64(0.1).unwrap(),
         );
 
         if executor.place_order(order.clone()).is_ok() {
@@ -188,7 +195,7 @@ fn test_fill_rates_statistics() {
         let order = Order::limit(
             Side::Buy,
             Decimal::from(50000),
-            Decimal::from_f64(0.1).unwrap()
+            Decimal::from_f64(0.1).unwrap(),
         );
 
         if executor.place_order(order.clone()).is_ok() {
@@ -204,8 +211,7 @@ fn test_fill_rates_statistics() {
 
     // Average should be between 40-80%
     assert!(
-        avg_fill_ratio >= Decimal::from_f64(0.4).unwrap() &&
-        avg_fill_ratio <= Decimal::from(1),
+        avg_fill_ratio >= Decimal::from_f64(0.4).unwrap() && avg_fill_ratio <= Decimal::from(1),
         "Average fill ratio should be between 40% and 100% (actual: {})",
         avg_fill_ratio
     );

@@ -183,7 +183,10 @@ impl PartialFillResultOrError {
 
     /// Check if the result is a successful partial fill
     pub fn is_partially_filled(&self) -> bool {
-        matches!(self, PartialFillResultOrError::Ok(FillResult::PartiallyFilled(_)))
+        matches!(
+            self,
+            PartialFillResultOrError::Ok(FillResult::PartiallyFilled(_))
+        )
     }
 }
 
@@ -1038,9 +1041,13 @@ mod tests {
 
         // Overfill returns error
         assert!(result.is_err());
-        if let PartialFillResultOrError::Error(FillError::ExceedsRemaining { remaining_qty, .. }, returned_order) = result {
+        if let PartialFillResultOrError::Error(
+            FillError::ExceedsRemaining { remaining_qty, .. },
+            returned_order,
+        ) = result
+        {
             assert_eq!(remaining_qty, 400_000_000); // 40% remaining
-            // Can still fill the correct amount
+                                                    // Can still fill the correct amount
             let result = returned_order.fill(400_000_000, 50_000_000_000_000);
             assert!(result.is_filled());
         } else {
@@ -1311,9 +1318,7 @@ mod tests {
 
         // 100 fills of 1% each
         let fill_size = 10_000_000; // 0.01 BTC
-        let mut current = FillResult::PartiallyFilled(OrderPartiallyFilled {
-            data: order.data,
-        });
+        let mut current = FillResult::PartiallyFilled(OrderPartiallyFilled { data: order.data });
 
         for i in 0..100 {
             match current {
@@ -1343,9 +1348,7 @@ mod tests {
         let order_id = order.data().id.clone();
 
         // This demonstrates that OrderId can be sent across threads
-        let handle = std::thread::spawn(move || {
-            order_id
-        });
+        let handle = std::thread::spawn(move || order_id);
 
         let received_id = handle.join().unwrap();
         assert_eq!(received_id, order.data().id);

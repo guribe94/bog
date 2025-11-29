@@ -33,10 +33,10 @@ fn create_market_snapshot() -> MarketSnapshot {
         exchange_timestamp_ns: now,
         local_recv_ns: now,
         local_publish_ns: now,
-        best_bid_price: 50_000_000_000_000,   // $50,000
-        best_bid_size: 1_000_000_000,          // 1.0 BTC
-        best_ask_price: 50_010_000_000_000,   // $50,010
-        best_ask_size: 1_000_000_000,          // 1.0 BTC
+        best_bid_price: 50_000_000_000_000, // $50,000
+        best_bid_size: 1_000_000_000,       // 1.0 BTC
+        best_ask_price: 50_010_000_000_000, // $50,010
+        best_ask_size: 1_000_000_000,       // 1.0 BTC
         bid_prices: [0; 10],
         bid_sizes: [0; 10],
         ask_prices: [0; 10],

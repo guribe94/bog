@@ -47,9 +47,7 @@ pub fn set_realtime_priority(priority: i32) -> Result<()> {
             tracing::info!("Set thread priority to SCHED_FIFO:{}", priority);
             Ok(())
         } else {
-            anyhow::bail!(
-                "Failed to set thread priority (may need CAP_SYS_NICE or root)"
-            )
+            anyhow::bail!("Failed to set thread priority (may need CAP_SYS_NICE or root)")
         }
     }
 }
@@ -88,7 +86,11 @@ pub fn optimize_for_hft(core: usize, priority: i32) -> Result<()> {
     pin_to_core(core)?;
     set_realtime_priority(priority)?;
 
-    tracing::info!("Thread optimized for HFT: core={}, priority={}", core, priority);
+    tracing::info!(
+        "Thread optimized for HFT: core={}, priority={}",
+        core,
+        priority
+    );
     Ok(())
 }
 
@@ -112,7 +114,10 @@ mod tests {
             let result = pin_to_core(0);
             // Log result but don't assert - pinning may not be supported on all platforms
             if result.is_err() {
-                println!("CPU pinning not available (expected on macOS/without permissions): {:?}", result);
+                println!(
+                    "CPU pinning not available (expected on macOS/without permissions): {:?}",
+                    result
+                );
             } else {
                 println!("Successfully pinned to core 0");
             }

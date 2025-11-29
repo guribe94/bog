@@ -19,7 +19,7 @@
 
 use bog_core::core::Position;
 use bog_core::data::MarketSnapshot;
-use bog_core::engine::{Engine, SimulatedExecutor, Strategy, Executor};
+use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_strategies::SimpleSpread;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
@@ -45,9 +45,9 @@ fn create_market_snapshot(base_price_delta: i64, sequence: u64) -> MarketSnapsho
         local_recv_ns: now,
         local_publish_ns: now,
         best_bid_price: bid_price,
-        best_bid_size: 1_000_000_000,    // 1.0 BTC
+        best_bid_size: 1_000_000_000, // 1.0 BTC
         best_ask_price: ask_price,
-        best_ask_size: 1_000_000_000,    // 1.0 BTC
+        best_ask_size: 1_000_000_000, // 1.0 BTC
         bid_prices: [0; 10],
         bid_sizes: [0; 10],
         ask_prices: [0; 10],
@@ -113,7 +113,11 @@ fn bench_oscillating_market(c: &mut Criterion) {
 
             for tick in 0..1000 {
                 // Oscillate: +$10, -$10, +$10, -$10, ...
-                let price_delta = if tick % 2 == 0 { 10_000_000_000 } else { -10_000_000_000 };
+                let price_delta = if tick % 2 == 0 {
+                    10_000_000_000
+                } else {
+                    -10_000_000_000
+                };
                 let snapshot = create_market_snapshot(price_delta, tick);
                 black_box(engine.process_tick(&snapshot, true).unwrap());
             }
@@ -159,7 +163,11 @@ fn bench_volatile_market(c: &mut Criterion) {
 
             for tick in 0..1000 {
                 // Large swings: +$100, -$100, +$100, -$100, ...
-                let price_delta = if tick % 2 == 0 { 100_000_000_000 } else { -100_000_000_000 };
+                let price_delta = if tick % 2 == 0 {
+                    100_000_000_000
+                } else {
+                    -100_000_000_000
+                };
                 let snapshot = create_market_snapshot(price_delta, tick);
                 black_box(engine.process_tick(&snapshot, true).unwrap());
             }
@@ -182,7 +190,11 @@ fn bench_market_with_gaps(c: &mut Criterion) {
 
             for tick in 0..1000 {
                 // Every 10th tick has no change (market unchanged)
-                let price_delta = if tick % 10 == 0 { 0 } else { (tick as i64 % 5) * 1_000_000_000 };
+                let price_delta = if tick % 10 == 0 {
+                    0
+                } else {
+                    (tick as i64 % 5) * 1_000_000_000
+                };
                 let snapshot = create_market_snapshot(price_delta, tick);
                 black_box(engine.process_tick(&snapshot, true).unwrap());
             }

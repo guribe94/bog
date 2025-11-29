@@ -3,7 +3,7 @@
 //! These tests verify that entry price calculations handle extreme values
 //! without overflow or data corruption when averaging positions.
 
-use bog_core::core::{Position, OverflowError};
+use bog_core::core::{OverflowError, Position};
 
 /// Test weighted average entry price with values that could overflow
 ///
@@ -27,8 +27,7 @@ fn test_entry_price_weighted_average_overflow() {
     // First fill: establish large position
     let result = position.process_fill_fixed(
         0, // Buy
-        high_price,
-        large_qty,
+        high_price, large_qty,
     );
 
     if result.is_err() {
@@ -49,8 +48,7 @@ fn test_entry_price_weighted_average_overflow() {
 
     let result2 = position.process_fill_fixed(
         0, // Buy more
-        high_price,
-        large_qty,
+        high_price, large_qty,
     );
 
     // This should either:

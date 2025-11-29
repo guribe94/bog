@@ -1,11 +1,11 @@
-use bog_core::engine::Engine;
-use bog_core::execution::simulated::SimulatedExecutor;
-use bog_core::engine::executor_bridge::ExecutorBridge;
+use bog_core::core::Position;
 use bog_core::core::Signal;
 use bog_core::data::MarketSnapshot;
-use bog_core::engine::Strategy;
-use bog_core::core::Position;
+use bog_core::engine::executor_bridge::ExecutorBridge;
+use bog_core::engine::Engine;
 use bog_core::engine::Executor; // Import trait for get_fills
+use bog_core::engine::Strategy;
+use bog_core::execution::simulated::SimulatedExecutor;
 use rust_decimal_macros::dec;
 
 // Strategy that always quotes 0.1 BTC on both sides
@@ -43,7 +43,7 @@ fn create_test_snapshot() -> MarketSnapshot {
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 54], 
+        _padding: [0; 54],
     }
 }
 
@@ -69,7 +69,10 @@ fn test_safety_rejects_low_balance() {
     // 5. Verify NO trades occurred (order should be rejected pre-trade)
     // Since engine consumes fills, we check position stats
     let trade_count = engine.position().get_trade_count();
-    assert_eq!(trade_count, 0, "Should have 0 trades with 0 balance! Safety check failed.");
+    assert_eq!(
+        trade_count, 0,
+        "Should have 0 trades with 0 balance! Safety check failed."
+    );
 }
 
 #[test]
@@ -92,6 +95,9 @@ fn test_safety_allows_sufficient_balance() {
     // 5. Verify trades OCCURRED
     // Engine consumes fills and updates position
     let trade_count = engine.position().get_trade_count();
-    assert!(trade_count > 0, "Should have trades with sufficient balance");
+    assert!(
+        trade_count > 0,
+        "Should have trades with sufficient balance"
+    );
     assert_eq!(trade_count, 2, "Should have exactly 2 trades (buy + sell)");
 }

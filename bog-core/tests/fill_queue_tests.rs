@@ -3,9 +3,9 @@
 //! These tests verify that the executor properly detects and handles
 //! situations where fills are dropped due to queue overflow.
 
-use bog_core::execution::{Order, SimulatedExecutor, Executor, Side};
-use rust_decimal::Decimal;
+use bog_core::execution::{Executor, Order, Side, SimulatedExecutor};
 use rust_decimal::prelude::FromPrimitive;
+use rust_decimal::Decimal;
 
 #[test]
 fn test_dropped_fill_counter_tracks_overflow() {
@@ -31,7 +31,11 @@ fn test_fill_queue_overflow_detection() {
     let mut executor = SimulatedExecutor::new();
 
     // Place an order
-    let order = Order::limit(Side::Buy, Decimal::from(50000), Decimal::from_f64(0.1).unwrap());
+    let order = Order::limit(
+        Side::Buy,
+        Decimal::from(50000),
+        Decimal::from_f64(0.1).unwrap(),
+    );
 
     // Currently this returns Result<()>, but we can't check for dropped fills
     // After implementation, we should be able to:
@@ -54,7 +58,7 @@ fn test_fill_queue_recovery_after_consumption() {
         let order = Order::limit(
             Side::Buy,
             Decimal::from(50000),
-            Decimal::from_f64(0.01).unwrap()
+            Decimal::from_f64(0.01).unwrap(),
         );
         let _ = executor.place_order(order);
     }
@@ -71,14 +75,21 @@ fn test_fill_queue_recovery_after_consumption() {
         let order = Order::limit(
             Side::Sell,
             Decimal::from(50010),
-            Decimal::from_f64(0.01).unwrap()
+            Decimal::from_f64(0.01).unwrap(),
         );
         let _ = executor.place_order(order);
     }
 
     let more_fills = executor.get_fills();
-    assert!(!more_fills.is_empty(), "Should have more fills after consumption");
-    assert_eq!(executor.dropped_fill_count(), 0, "No fills should be dropped");
+    assert!(
+        !more_fills.is_empty(),
+        "Should have more fills after consumption"
+    );
+    assert_eq!(
+        executor.dropped_fill_count(),
+        0,
+        "No fills should be dropped"
+    );
 }
 
 #[test]
@@ -93,7 +104,7 @@ fn test_multiple_fills_per_tick_no_overflow() {
         let buy = Order::limit(
             Side::Buy,
             Decimal::from(50000),
-            Decimal::from_f64(0.1).unwrap()
+            Decimal::from_f64(0.1).unwrap(),
         );
         let _ = executor.place_order(buy);
 
@@ -101,7 +112,7 @@ fn test_multiple_fills_per_tick_no_overflow() {
         let sell = Order::limit(
             Side::Sell,
             Decimal::from(50010),
-            Decimal::from_f64(0.1).unwrap()
+            Decimal::from_f64(0.1).unwrap(),
         );
         let _ = executor.place_order(sell);
 
@@ -110,7 +121,11 @@ fn test_multiple_fills_per_tick_no_overflow() {
     }
 
     // With proper cleanup, no fills should be dropped
-    assert_eq!(executor.dropped_fill_count(), 0, "Normal trading should not drop fills");
+    assert_eq!(
+        executor.dropped_fill_count(),
+        0,
+        "Normal trading should not drop fills"
+    );
 }
 
 #[test]

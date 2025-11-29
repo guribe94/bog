@@ -1,5 +1,5 @@
-use super::{Executor, ExecutionMode, Fill, Order, OrderId, OrderStatus};
 use super::order_bridge::OrderStateWrapper;
+use super::{ExecutionMode, Executor, Fill, Order, OrderId, OrderStatus};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
 use std::collections::HashMap;
@@ -80,7 +80,10 @@ impl Executor for LighterExecutor {
 
     fn cancel_order(&mut self, order_id: &OrderId) -> Result<()> {
         info!("STUB: Would cancel order {} on Lighter DEX", order_id);
-        info!("  API endpoint: DELETE {}/orders/{}", self.api_url, order_id);
+        info!(
+            "  API endpoint: DELETE {}/orders/{}",
+            self.api_url, order_id
+        );
 
         if let Some(order_wrapper) = self.orders.get_mut(order_id) {
             if order_wrapper.is_active() {
@@ -89,7 +92,10 @@ impl Executor for LighterExecutor {
                     return Err(anyhow!("Failed to cancel order {}: {}", order_id, e));
                 }
 
-                warn!("STUB: Order {} marked as cancelled but NOT sent to exchange", order_id);
+                warn!(
+                    "STUB: Order {} marked as cancelled but NOT sent to exchange",
+                    order_id
+                );
                 Ok(())
             } else {
                 Err(anyhow!("Order {} is not active", order_id))
@@ -140,12 +146,12 @@ impl Executor for LighterExecutor {
             if wrapper.is_active() {
                 let order = wrapper.to_legacy();
                 let remaining = order.remaining_size();
-                
+
                 // Convert to fixed-point i64
                 let remaining_u64 = (remaining * rust_decimal::Decimal::from(1_000_000_000))
                     .to_u64()
                     .unwrap_or(0);
-                
+
                 match order.side {
                     super::Side::Buy => long_exposure += remaining_u64 as i64,
                     super::Side::Sell => short_exposure += remaining_u64 as i64,
@@ -263,7 +269,10 @@ mod tests {
 
         // Verify order is tracked
         assert!(executor.get_order_status(&order_id).is_some());
-        assert_eq!(executor.get_order_status(&order_id), Some(OrderStatus::Open));
+        assert_eq!(
+            executor.get_order_status(&order_id),
+            Some(OrderStatus::Open)
+        );
     }
 
     #[test]

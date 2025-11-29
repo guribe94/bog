@@ -37,10 +37,10 @@
 //! }
 //! ```
 
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use parking_lot::Mutex;
 use tracing::{debug, warn};
 
 /// Rate limiter configuration
@@ -60,8 +60,8 @@ impl RateLimiterConfig {
     /// Conservative limits for production
     pub fn conservative() -> Self {
         Self {
-            max_orders_per_second: 10,   // 10 orders/sec max
-            burst_capacity: 20,           // Can burst to 20
+            max_orders_per_second: 10, // 10 orders/sec max
+            burst_capacity: 20,        // Can burst to 20
             refill_rate: 10.0,
             refill_interval: Duration::from_secs(1),
         }
@@ -372,7 +372,11 @@ mod tests {
 
         // Acceptance rate should be 50%
         let rate = limiter.acceptance_rate();
-        assert!((rate - 0.5).abs() < 0.01, "Rate should be ~0.5, got {}", rate);
+        assert!(
+            (rate - 0.5).abs() < 0.01,
+            "Rate should be ~0.5, got {}",
+            rate
+        );
     }
 
     #[test]

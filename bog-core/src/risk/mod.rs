@@ -144,23 +144,23 @@
 //!
 //! Well within the <100ns risk budget for sub-microsecond tick-to-trade.
 
-pub mod types;
 pub mod circuit_breaker;
-pub mod rate_limiter;
 pub mod pre_trade;
+pub mod rate_limiter;
+pub mod types;
 
-pub use types::{Position, RiskLimits, RiskViolation};
-pub use circuit_breaker::{CircuitBreaker, BreakerState, HaltReason};
+pub use circuit_breaker::{BreakerState, CircuitBreaker, HaltReason};
+pub use pre_trade::{ExchangeRules, PreTradeRejection, PreTradeResult, PreTradeValidator};
 pub use rate_limiter::{RateLimiter, RateLimiterConfig};
-pub use pre_trade::{PreTradeValidator, PreTradeResult, PreTradeRejection, ExchangeRules};
+pub use types::{Position, RiskLimits, RiskViolation};
 
 // Removed: moving to compile-time config
 // use crate::config::RiskConfig;
 use crate::execution::{Fill, Side};
 use crate::strategy::Signal;
 use anyhow::{anyhow, Result};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, info};
 
@@ -245,23 +245,19 @@ impl RiskManager {
         for order in &orders {
             // Check order size limits
             if order.size < self.limits.min_order_size {
-                return Err(anyhow!(
-                    RiskViolation::OrderSizeTooSmall {
-                        size: order.size,
-                        min: self.limits.min_order_size
-                    }
-                    .to_string()
-                ));
+                return Err(anyhow!(RiskViolation::OrderSizeTooSmall {
+                    size: order.size,
+                    min: self.limits.min_order_size
+                }
+                .to_string()));
             }
 
             if order.size > self.limits.max_order_size {
-                return Err(anyhow!(
-                    RiskViolation::OrderSizeTooLarge {
-                        size: order.size,
-                        max: self.limits.max_order_size
-                    }
-                    .to_string()
-                ));
+                return Err(anyhow!(RiskViolation::OrderSizeTooLarge {
+                    size: order.size,
+                    max: self.limits.max_order_size
+                }
+                .to_string()));
             }
 
             // Check position limits (projected position after order fills)
@@ -271,36 +267,30 @@ impl RiskManager {
             };
 
             if projected_position > self.limits.max_position {
-                return Err(anyhow!(
-                    RiskViolation::PositionLimitExceeded {
-                        projected: projected_position,
-                        limit: self.limits.max_position
-                    }
-                    .to_string()
-                ));
+                return Err(anyhow!(RiskViolation::PositionLimitExceeded {
+                    projected: projected_position,
+                    limit: self.limits.max_position
+                }
+                .to_string()));
             }
 
             if projected_position < -self.limits.max_short {
-                return Err(anyhow!(
-                    RiskViolation::ShortLimitExceeded {
-                        projected: projected_position,
-                        limit: self.limits.max_short
-                    }
-                    .to_string()
-                ));
+                return Err(anyhow!(RiskViolation::ShortLimitExceeded {
+                    projected: projected_position,
+                    limit: self.limits.max_short
+                }
+                .to_string()));
             }
         }
 
         // Check outstanding order count
         let new_order_count = self.outstanding_order_count + orders.len();
         if new_order_count > self.limits.max_outstanding_orders {
-            return Err(anyhow!(
-                RiskViolation::TooManyOutstandingOrders {
-                    current: new_order_count,
-                    max: self.limits.max_outstanding_orders
-                }
-                .to_string()
-            ));
+            return Err(anyhow!(RiskViolation::TooManyOutstandingOrders {
+                current: new_order_count,
+                max: self.limits.max_outstanding_orders
+            }
+            .to_string()));
         }
 
         // Check daily loss limit
@@ -309,13 +299,11 @@ impl RiskManager {
                 "Daily loss limit breached: {} < -{}",
                 self.position.daily_pnl, self.limits.max_daily_loss
             );
-            return Err(anyhow!(
-                RiskViolation::DailyLossLimitBreached {
-                    daily_pnl: self.position.daily_pnl,
-                    limit: self.limits.max_daily_loss
-                }
-                .to_string()
-            ));
+            return Err(anyhow!(RiskViolation::DailyLossLimitBreached {
+                daily_pnl: self.position.daily_pnl,
+                limit: self.limits.max_daily_loss
+            }
+            .to_string()));
         }
 
         // Check drawdown
@@ -335,13 +323,11 @@ impl RiskManager {
                 drawdown_pct * 100.0,
                 self.limits.max_drawdown_pct * 100.0
             );
-            return Err(anyhow!(
-                RiskViolation::DrawdownLimitBreached {
-                    drawdown_pct,
-                    limit: self.limits.max_drawdown_pct
-                }
-                .to_string()
-            ));
+            return Err(anyhow!(RiskViolation::DrawdownLimitBreached {
+                drawdown_pct,
+                limit: self.limits.max_drawdown_pct
+            }
+            .to_string()));
         }
 
         Ok(())
@@ -628,24 +614,14 @@ mod tests {
         let mut rm = RiskManager::with_limits(limits);
 
         // Buy
-        let fill = Fill::new(
-            OrderId::new_random(),
-            Side::Buy,
-            dec!(50000),
-            dec!(0.1),
-        );
+        let fill = Fill::new(OrderId::new_random(), Side::Buy, dec!(50000), dec!(0.1));
         rm.update_position(&fill);
 
         assert_eq!(rm.position().quantity, dec!(0.1));
         assert_eq!(rm.position().trade_count, 1);
 
         // Sell
-        let fill = Fill::new(
-            OrderId::new_random(),
-            Side::Sell,
-            dec!(50100),
-            dec!(0.1),
-        );
+        let fill = Fill::new(OrderId::new_random(), Side::Sell, dec!(50100), dec!(0.1));
         rm.update_position(&fill);
 
         assert_eq!(rm.position().quantity, Decimal::ZERO);

@@ -16,10 +16,10 @@
 
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
-use bog_core::engine::{Engine, SimulatedExecutor, Strategy, Executor};
+use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_core::execution::{Fill, OrderId, Side};
 use bog_strategies::SimpleSpread;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rust_decimal::Decimal;
 use std::time::{Duration, Instant};
 
@@ -56,22 +56,26 @@ fn bench_sustained_tick_rate(c: &mut Criterion) {
     group.significance_level(0.01).sample_size(100);
 
     for count in [1000, 5000, 10000].iter() {
-        group.bench_with_input(BenchmarkId::new("sustained_ticks", count), count, |b, &count| {
-            b.iter(|| {
-                let strategy = SimpleSpread;
-                let executor = SimulatedExecutor::new_default();
-                let mut engine = Engine::new(strategy, executor);
+        group.bench_with_input(
+            BenchmarkId::new("sustained_ticks", count),
+            count,
+            |b, &count| {
+                b.iter(|| {
+                    let strategy = SimpleSpread;
+                    let executor = SimulatedExecutor::new_default();
+                    let mut engine = Engine::new(strategy, executor);
 
-                let start = Instant::now();
-                for seq in 0..count {
-                    let snapshot = create_snapshot(seq);
-                    engine.process_tick(&snapshot, true).unwrap();
-                }
-                let elapsed = start.elapsed();
+                    let start = Instant::now();
+                    for seq in 0..count {
+                        let snapshot = create_snapshot(seq);
+                        engine.process_tick(&snapshot, true).unwrap();
+                    }
+                    let elapsed = start.elapsed();
 
-                black_box(elapsed);
-            });
-        });
+                    black_box(elapsed);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -84,11 +88,7 @@ fn bench_max_orders_per_second(c: &mut Criterion) {
 
     let mut executor = SimulatedExecutor::new_default();
     let position = Position::new();
-    let signal = Signal::quote_both(
-        49_995_000_000_000,
-        50_005_000_000_000,
-        100_000_000,
-    );
+    let signal = Signal::quote_both(49_995_000_000_000, 50_005_000_000_000, 100_000_000);
 
     group.bench_function("1000_orders", |b| {
         b.iter(|| {
@@ -116,7 +116,11 @@ fn bench_max_fills_per_second(c: &mut Criterion) {
         b.iter(|| {
             // Simulate processing 1000 fills
             for i in 0..1000 {
-                let quantity_i64 = if i % 2 == 0 { 100_000_000 } else { -100_000_000 };
+                let quantity_i64 = if i % 2 == 0 {
+                    100_000_000
+                } else {
+                    -100_000_000
+                };
                 black_box(position.update_quantity(quantity_i64));
             }
         });

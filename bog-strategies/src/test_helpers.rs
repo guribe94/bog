@@ -66,7 +66,10 @@ pub fn create_depth_snapshot(
     tick_size: u64,
     size_per_level: u64,
 ) -> MarketSnapshot {
-    assert!(depth_levels >= 1 && depth_levels <= 10, "depth_levels must be 1-10");
+    assert!(
+        depth_levels >= 1 && depth_levels <= 10,
+        "depth_levels must be 1-10"
+    );
     assert!(best_bid < best_ask, "bid must be < ask");
 
     let mut snapshot = create_basic_snapshot(best_bid, best_ask, size_per_level, size_per_level);
@@ -174,7 +177,11 @@ pub fn create_multi_level_snapshot(
     sizes: Vec<u64>,
 ) -> MarketSnapshot {
     assert!(depth_levels >= 1 && depth_levels <= 10);
-    assert_eq!(sizes.len(), depth_levels, "sizes.len() must equal depth_levels");
+    assert_eq!(
+        sizes.len(),
+        depth_levels,
+        "sizes.len() must equal depth_levels"
+    );
     assert!(best_bid < best_ask);
 
     let mut snapshot = create_basic_snapshot(best_bid, best_ask, sizes[0], sizes[0]);
@@ -248,11 +255,11 @@ mod tests {
     #[test]
     fn test_create_depth_snapshot_5_levels() {
         let snapshot = create_depth_snapshot(
-            50_000_000_000_000,  // $50,000
-            50_010_000_000_000,  // $50,010
-            5,                    // 5 levels
-            5_000_000_000,       // $5 tick
-            100_000_000,         // 0.1 BTC
+            50_000_000_000_000, // $50,000
+            50_010_000_000_000, // $50,010
+            5,                  // 5 levels
+            5_000_000_000,      // $5 tick
+            100_000_000,        // 0.1 BTC
         );
 
         // Check bid levels descend
@@ -281,12 +288,12 @@ mod tests {
             50_010_000_000_000,
             3,
             5_000_000_000,
-            3.0,  // 3x more bids
+            3.0, // 3x more bids
         );
 
         // Bid sizes should be 3x ask sizes
-        assert_eq!(snapshot.best_bid_size, 300_000_000);  // 0.3 BTC
-        assert_eq!(snapshot.best_ask_size, 100_000_000);  // 0.1 BTC
+        assert_eq!(snapshot.best_bid_size, 300_000_000); // 0.3 BTC
+        assert_eq!(snapshot.best_ask_size, 100_000_000); // 0.1 BTC
         assert_eq!(snapshot.bid_sizes[0], 300_000_000);
         assert_eq!(snapshot.ask_sizes[0], 100_000_000);
     }
@@ -315,7 +322,7 @@ mod tests {
         let snapshot = create_sparse_depth_snapshot(
             50_000_000_000_000,
             50_010_000_000_000,
-            &[0, 2, 5],  // Only levels 0, 2, 5 populated
+            &[0, 2, 5], // Only levels 0, 2, 5 populated
             5_000_000_000,
             100_000_000,
         );
@@ -341,7 +348,7 @@ mod tests {
     #[should_panic(expected = "bid must be < ask")]
     fn test_crossed_orderbook_panics() {
         create_depth_snapshot(
-            50_010_000_000_000,  // bid > ask (invalid)
+            50_010_000_000_000, // bid > ask (invalid)
             50_000_000_000_000,
             5,
             5_000_000_000,
@@ -355,7 +362,7 @@ mod tests {
         create_depth_snapshot(
             50_000_000_000_000,
             50_010_000_000_000,
-            11,  // Invalid: > 10
+            11, // Invalid: > 10
             5_000_000_000,
             100_000_000,
         );
