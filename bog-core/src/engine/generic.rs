@@ -452,13 +452,21 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         self.last_fresh_bid.set(snapshot.best_bid_price);
         self.last_fresh_ask.set(snapshot.best_ask_price);
 
-        // Update peak realized PnL and enforce drawdown guard
-        let current_realized = self.position.get_realized_pnl();
-        if current_realized > self.peak_pnl.get() {
-            self.peak_pnl.set(current_realized);
+        // Update peak PnL (Realized + Unrealized) and enforce drawdown guard
+        // Calculate mid price safely to avoid overflow
+        let mid_price = snapshot.best_bid_price / 2
+            + snapshot.best_ask_price / 2
+            + (snapshot.best_bid_price % 2 + snapshot.best_ask_price % 2) / 2;
+        
+        let unrealized = self.position.get_unrealized_pnl(mid_price);
+        let total_pnl = self.position.get_realized_pnl().saturating_add(unrealized);
+
+        if total_pnl > self.peak_pnl.get() {
+            self.peak_pnl.set(total_pnl);
         }
         let peak_pnl = self.peak_pnl.get();
-        let drawdown = peak_pnl.saturating_sub(current_realized);
+        let drawdown = peak_pnl.saturating_sub(total_pnl);
+        
         if peak_pnl > 0 && MAX_DRAWDOWN > 0 {
             let allowed_drawdown = ((peak_pnl as i128) * MAX_DRAWDOWN as i128 / 1_000_000_000i128)
                 .clamp(i64::MIN as i128, i64::MAX as i128)
@@ -590,11 +598,15 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     | crate::core::SignalAction::QuoteAsk
                     | crate::core::SignalAction::TakePosition
             ) {
-                // Get current time
-                let current_time_ns = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as u64;
+                // Get current time from snapshot if available, or system time as fallback
+                let current_time_ns = if snapshot.local_recv_ns > 0 {
+                    snapshot.local_recv_ns
+                } else {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos() as u64
+                };
 
                 // Check if enough time has passed since last quote
                 let time_since_last_quote =
@@ -1138,10 +1150,13 @@ mod tests {
         let executor = MockExecutor { execute_count: 0 };
         let mut engine = Engine::new(strategy, executor);
 
+        // Use realistic timestamps to satisfy rate limiting (MIN_QUOTE_INTERVAL_NS)
+        let start_time = 1_000_000_000; // 1s
+
         let snapshot1 = SnapshotBuilder::new()
             .market_id(1)
             .sequence(1)
-            .timestamp(0)
+            .timestamp(start_time)
             .best_bid(50_000_000_000_000, 1_000_000_000)
             .best_ask(50_005_000_000_000, 1_000_000_000)
             .incremental_snapshot()
@@ -1160,10 +1175,13 @@ mod tests {
         assert_eq!(engine.executor.execute_count, 0); // Executor NOT called
 
         // Third tick with different prices - MockStrategy returns Signal on even calls (call_count=2)
+        // Must advance time > MIN_QUOTE_INTERVAL_NS (100ms) to pass rate limiting
+        let next_time = start_time + 200_000_000; // +200ms
+
         let snapshot2 = SnapshotBuilder::new()
             .market_id(1)
             .sequence(2)
-            .timestamp(1000)
+            .timestamp(next_time)
             .best_bid(50_001_000_000_000, 1_000_000_000) // Different price
             .best_ask(50_006_000_000_000, 1_000_000_000)
             .incremental_snapshot()
@@ -1386,17 +1404,28 @@ mod tests {
         // Simulate historical peak PnL
         let peak = 10_000 * 1_000_000_000;
         engine.peak_pnl.set(peak);
+        
+        // Set realized PnL to peak (so no realized drawdown)
+        engine.position().update_realized_pnl(peak);
 
-        let allowed = ((peak as i128 * MAX_DRAWDOWN as i128) / 1_000_000_000i128) as i64;
-        // Current realized PnL sits more than allowed drawdown below peak
-        let current = peak - allowed - 1_000_000_000;
-        engine.position().update_realized_pnl(current);
+        // Setup position to cause UNREALIZED loss
+        // Long 1 BTC @ 50k
+        engine.position().update_quantity(1_000_000_000);
+        engine.position().entry_price.store(50_000_000_000_000, Ordering::Relaxed);
+
+        // Market drops to 40k
+        // Unrealized PnL = (40k - 50k) * 1 = -10k
+        // Total PnL = 10k (realized) - 10k (unrealized) = 0
+        // Drawdown = 10k - 0 = 10k
+        // Allowed = 5% of 10k = 500
+        // 10k > 500 -> Should halt
 
         let snapshot = SnapshotBuilder::new()
             .market_id(2)
             .sequence(42)
-            .best_bid(50_000_000_000_000, 1_000_000_000)
-            .best_ask(50_010_000_000_000, 1_000_000_000)
+            .timestamp(1_000_000_000)
+            .best_bid(40_000_000_000_000, 1_000_000_000)
+            .best_ask(40_010_000_000_000, 1_000_000_000)
             .incremental_snapshot()
             .build();
 

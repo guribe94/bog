@@ -4,7 +4,7 @@
 //! (which has realistic fill simulation) to be used with the generic Engine.
 
 use super::Executor as EngineExecutor;
-use crate::core::{Position, Signal, SignalAction};
+use crate::core::{fixed_point, Position, Signal, SignalAction};
 use crate::execution::{Executor as ExecExecutor, Fill, Order, Side};
 use anyhow::Result;
 use rust_decimal::Decimal;
@@ -22,12 +22,18 @@ impl<E: ExecExecutor> ExecutorBridge<E> {
 
 impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
     fn execute(&mut self, signal: Signal, _position: &Position) -> Result<()> {
+        let scale = Decimal::from(fixed_point::SCALE);
+
         match signal.action {
             SignalAction::QuoteBoth => {
+                // CRITICAL FIX: Cancel existing orders before placing new ones
+                // This prevents order spamming and capital exhaustion
+                self.executor.cancel_all_orders()?;
+
                 // Convert u64 fixed-point to Decimal
-                let bid_price = Decimal::from(signal.bid_price) / Decimal::from(1_000_000_000);
-                let ask_price = Decimal::from(signal.ask_price) / Decimal::from(1_000_000_000);
-                let size = Decimal::from(signal.size) / Decimal::from(1_000_000_000);
+                let bid_price = Decimal::from(signal.bid_price) / scale;
+                let ask_price = Decimal::from(signal.ask_price) / scale;
+                let size = Decimal::from(signal.size) / scale;
 
                 // Place bid order
                 let bid_order = Order::limit(Side::Buy, bid_price, size);
@@ -38,15 +44,21 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
                 self.executor.place_order(ask_order)?;
             }
             SignalAction::QuoteBid => {
-                let bid_price = Decimal::from(signal.bid_price) / Decimal::from(1_000_000_000);
-                let size = Decimal::from(signal.size) / Decimal::from(1_000_000_000);
+                // CRITICAL FIX: Cancel existing orders before placing new ones
+                self.executor.cancel_all_orders()?;
+
+                let bid_price = Decimal::from(signal.bid_price) / scale;
+                let size = Decimal::from(signal.size) / scale;
 
                 let bid_order = Order::limit(Side::Buy, bid_price, size);
                 self.executor.place_order(bid_order)?;
             }
             SignalAction::QuoteAsk => {
-                let ask_price = Decimal::from(signal.ask_price) / Decimal::from(1_000_000_000);
-                let size = Decimal::from(signal.size) / Decimal::from(1_000_000_000);
+                // CRITICAL FIX: Cancel existing orders before placing new ones
+                self.executor.cancel_all_orders()?;
+
+                let ask_price = Decimal::from(signal.ask_price) / scale;
+                let size = Decimal::from(signal.size) / scale;
 
                 let ask_order = Order::limit(Side::Sell, ask_price, size);
                 self.executor.place_order(ask_order)?;
@@ -57,8 +69,8 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
                     crate::core::Side::Buy => (signal.ask_price, Side::Buy), // Hit the ask
                     crate::core::Side::Sell => (signal.bid_price, Side::Sell), // Hit the bid
                 };
-                let price_decimal = Decimal::from(price) / Decimal::from(1_000_000_000);
-                let size = Decimal::from(signal.size) / Decimal::from(1_000_000_000);
+                let price_decimal = Decimal::from(price) / scale;
+                let size = Decimal::from(signal.size) / scale;
 
                 let order = Order::limit(exec_side, price_decimal, size);
                 self.executor.place_order(order)?;

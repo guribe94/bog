@@ -522,6 +522,36 @@ impl ProductionExecutor {
         Some(fill)
     }
 
+    /// Calculate net position from all executed fills
+    ///
+    /// Iterates through all recovered orders and sums up their fills.
+    /// Useful for initializing Engine position after restart.
+    pub fn calculate_net_position(&self) -> i64 {
+        let mut net_position = 0i64;
+        let scale = Decimal::from(crate::core::fixed_point::SCALE);
+        
+        for entry in self.orders.iter() {
+            let state = entry.value();
+            for fill in &state.fills {
+                // Convert size to fixed-point (9 decimals)
+                // Use SCALE constant for consistency
+                let size_fixed = (fill.size * scale)
+                    .to_u64()
+                    .unwrap_or_else(|| {
+                        error!("CRITICAL: Fill size conversion failed during recovery! Fill: {:?}", fill);
+                        0
+                    }) as i64;
+                
+                match fill.side {
+                    super::Side::Buy => net_position += size_fixed,
+                    super::Side::Sell => net_position -= size_fixed,
+                }
+            }
+        }
+        
+        net_position
+    }
+
     /// Get order statistics for logging
     pub fn order_stats(&self) -> String {
         format!(
@@ -663,6 +693,7 @@ impl Executor for ProductionExecutor {
         // This is acceptable for the stub implementation.
         Vec::new()
     }
+
 
     fn execution_mode(&self) -> ExecutionMode {
         self.mode

@@ -1,31 +1,33 @@
-//! Simple Spread Strategy - PAPER TRADING ONLY
+//! Simple Spread Strategy - PAPER TRADING
 //!
-//! WARNING: This binary uses SimulatedExecutor and does NOT place real orders!
+//! WARNING: This binary uses ProductionExecutor in SIMULATED mode.
 //! THIS IS FOR PAPER TRADING / TESTING ONLY
 //! DO NOT USE FOR REAL MONEY TRADING
 //!
 //! This binary combines:
 //! - SimpleSpread strategy (zero-sized type)
-//! - SimulatedExecutor (PAPER TRADING ONLY - no real orders)
+//! - ProductionExecutor (configured for simulation with journaling)
 //! - Real Huginn market data via shared memory
 //! - Full compile-time monomorphization
 //!
 //! Purpose: Test strategies with real market data without risking capital
-//! For live trading: Implement LighterExecutor first
+//! For live trading: Ensure ProductionExecutor is configured for live execution.
 
 use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
 use bog_core::data::types::encode_market_id;
 use bog_core::data::{MarketFeed, SnapshotValidator, ValidationConfig, ValidationError};
+use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::engine::{
     AlertConfig, AlertManager, AlertType, Engine, GapRecoveryConfig, GapRecoveryManager,
-    SimulatedExecutor,
 };
+use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig};
 use bog_core::resilience::{install_panic_handler, KillSwitch};
 use bog_strategies::simple_spread::{MIN_SPREAD_BPS, ORDER_SIZE, SPREAD_BPS};
 use bog_strategies::SimpleSpread;
 use clap::Parser;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
@@ -139,12 +141,37 @@ fn main() -> Result<()> {
 
     // Create executor
     // PAPER TRADING: Replace with LighterExecutor for live trading
-    warn!("PAPER TRADING: SimulatedExecutor active - NO REAL ORDERS!");
-    warn!("All trades are simulated. No funds at risk.");
-    let executor = SimulatedExecutor::new_default();
+    warn!("PAPER TRADING: ProductionExecutor active (simulated mode) - NO REAL ORDERS!");
+    warn!("All trades are simulated and journaled. No funds at risk.");
+    
+    let executor_config = ProductionExecutorConfig {
+        enable_journal: true,
+        journal_path: PathBuf::from("data/paper_trading_journal.jsonl"),
+        recover_on_startup: true,
+        validate_recovery: true,
+        instant_fills: true, // Keep instant fills for paper trading logic
+        ..Default::default()
+    };
+    
+    let executor = ProductionExecutor::new(executor_config);
+    
+    // Calculate net position from recovered journal (if any)
+    let recovered_position = executor.calculate_net_position();
+    if recovered_position != 0 {
+        info!("Recovered net position from journal: {}", recovered_position);
+    }
+
+    // Bridge the executor to the engine trait
+    let bridged_executor = ExecutorBridge::new(executor);
 
     // Create engine with full compile-time monomorphization
-    let mut engine = Engine::new(strategy, executor);
+    let mut engine = Engine::new(strategy, bridged_executor);
+    
+    // Initialize engine position with recovered value
+    if recovered_position != 0 {
+        engine.position().update_quantity(recovered_position);
+        info!("Engine position initialized to {}", recovered_position);
+    }
 
     // Create gap recovery manager for automatic recovery
     let mut gap_recovery_config = GapRecoveryConfig::default();

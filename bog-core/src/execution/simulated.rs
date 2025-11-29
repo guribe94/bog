@@ -75,8 +75,6 @@ struct QueuePosition {
     /// Volume ahead of us in queue (starts at 100% of level)
     /// This is a simplification: we assume we join at the back
     size_ahead_ratio: f64,
-    /// Timestamp when we joined the queue
-    timestamp: std::time::SystemTime,
 }
 
 /// Tracks queue positions for all active orders
@@ -112,7 +110,6 @@ impl QueueTracker {
             // Assume we join at back of queue (100% ahead of us)
             // In reality, we'd calculate this from MarketSnapshot
             size_ahead_ratio: 1.0,
-            timestamp: std::time::SystemTime::now(),
         };
 
         self.positions.insert(order.id.clone(), position);
@@ -256,7 +253,7 @@ impl SimulatedExecutor {
         order_wrapper: &mut OrderStateWrapper,
         order_for_calc: &Order,
         _order_id: &OrderId,
-    ) -> Result<Fill> {
+    ) -> Result<Option<Fill>> {
         let remaining = order_for_calc.remaining_size();
 
         // Calculate fill size based on queue position and configuration
@@ -273,15 +270,17 @@ impl SimulatedExecutor {
             remaining
         };
 
+        if fill_size <= Decimal::ZERO {
+            return Ok(None); // No fill generated
+        }
+
         let fill_price = order_for_calc.price;
 
         // Convert to u64 fixed-point for state machine (WITH VALIDATION!)
         let fill_size_u64 = match (fill_size * Decimal::from(1_000_000_000)).to_u64() {
             Some(0) => {
-                return Err(anyhow!(
-                    "HALTING: Fill size converted to zero for order {}: {} BTC - cannot update state safely",
-                    order_for_calc.id, fill_size
-                ));
+                // Effectively zero size due to precision - treat as no fill
+                return Ok(None);
             }
             Some(size) => size, // Valid size
             None => {
@@ -359,7 +358,7 @@ impl SimulatedExecutor {
             fill.notional()
         );
 
-        Ok(fill)
+        Ok(Some(fill))
     }
 }
 
@@ -414,26 +413,28 @@ impl Executor for SimulatedExecutor {
         // Simulate fill (immediate or partial based on configuration)
         // In reality, limit orders may not fill immediately
         // Returns Err if conversion fails (halts trading)
-        let fill = self.simulate_fill(&mut order_wrapper, &order, &order_id)?;
+        let fill_opt = self.simulate_fill(&mut order_wrapper, &order, &order_id)?;
 
-        // Try to push fill to bounded queue
-        if let Err(returned_fill) = self.pending_fills.push(fill) {
-            // Queue is full - this indicates consumer is falling behind
-            self.dropped_fills += 1;
-            warn!(
-                "Fill queue overflow: dropped fill for order {} (queue size: {}, total dropped: {})",
-                returned_fill.order_id,
-                MAX_PENDING_FILLS,
-                self.dropped_fills
-            );
+        if let Some(fill) = fill_opt {
+            // Try to push fill to bounded queue
+            if let Err(returned_fill) = self.pending_fills.push(fill) {
+                // Queue is full - this indicates consumer is falling behind
+                self.dropped_fills += 1;
+                warn!(
+                    "Fill queue overflow: dropped fill for order {} (queue size: {}, total dropped: {})",
+                    returned_fill.order_id,
+                    MAX_PENDING_FILLS,
+                    self.dropped_fills
+                );
 
-            // Strategy: Drop oldest fill to make room for newest
-            // Alternative: Could drop newest or reject order
-            if let Some(_oldest) = self.pending_fills.pop() {
-                // Try again with the new fill
-                if self.pending_fills.push(returned_fill).is_err() {
-                    // Still failed (shouldn't happen after pop, but be safe)
-                    warn!("Fill queue still full after pop - fill lost");
+                // Strategy: Drop oldest fill to make room for newest
+                // Alternative: Could drop newest or reject order
+                if let Some(_oldest) = self.pending_fills.pop() {
+                    // Try again with the new fill
+                    if self.pending_fills.push(returned_fill).is_err() {
+                        // Still failed (shouldn't happen after pop, but be safe)
+                        warn!("Fill queue still full after pop - fill lost");
+                    }
                 }
             }
         }
