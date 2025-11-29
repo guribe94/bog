@@ -467,13 +467,17 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             + (snapshot.best_bid_price % 2 + snapshot.best_ask_price % 2) / 2;
         
         let unrealized = self.position.get_unrealized_pnl(mid_price);
-        let total_pnl = self.position.get_realized_pnl().saturating_add(unrealized);
+        // Use daily_pnl instead of total realized_pnl for daily tracking
+        let daily_total_pnl = self.position.get_daily_pnl().saturating_add(unrealized);
 
-        if total_pnl > self.peak_pnl.get() {
-            self.peak_pnl.set(total_pnl);
+        // Sync HWM to Position struct (atomic update)
+        self.position.update_daily_high_water_mark(daily_total_pnl);
+
+        if daily_total_pnl > self.peak_pnl.get() {
+            self.peak_pnl.set(daily_total_pnl);
         }
         let peak_pnl = self.peak_pnl.get();
-        let drawdown = peak_pnl.saturating_sub(total_pnl);
+        let drawdown = peak_pnl.saturating_sub(daily_total_pnl);
         
         if peak_pnl > 0 && MAX_DRAWDOWN > 0 {
             let allowed_drawdown = ((peak_pnl as i128) * MAX_DRAWDOWN as i128 / 1_000_000_000i128)
@@ -500,13 +504,14 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         if let Some(signal) = self.strategy.calculate(&self.book, &self.position) {
             // DAILY LOSS LIMIT CHECK
             // Must be checked before any execution logic
-            if self.position.get_realized_pnl() < -MAX_DAILY_LOSS {
+            // CRITICAL: Check Total PnL (Mark-to-Market), not just Realized
+            if daily_total_pnl < -MAX_DAILY_LOSS {
                 // Log once per tick (throttled by strategy output, but still)
                 // Ideally we'd throttle this log, but halting is priority
                 // We use warn here to avoid flooding error logs if strategy keeps signaling
                 tracing::warn!(
                     "Daily loss limit exceeded: {} < -{} - skipping signal",
-                    self.position.get_realized_pnl(),
+                    daily_total_pnl,
                     MAX_DAILY_LOSS
                 );
                 return Ok(());
@@ -786,6 +791,10 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     self.process_tick(&snapshot, data_fresh)?;
                 }
                 (None, _) => {
+                    // DRAIN FILLS: Even if no market data, we must process fills
+                    // to avoid queue overflow and keep position updated.
+                    self.drain_executor_fills()?;
+
                     // For live trading: empty buffer is normal, continue spinning
                     // For replay: would return None at end of file, which also just
                     // continues spinning (harmless since shutdown flag will be set)
@@ -887,7 +896,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 if notional > rust_decimal::Decimal::ZERO {
                     let fee_rate = fee / notional;
                     let fee_bps_decimal = fee_rate * rust_decimal::Decimal::from(10_000);
-                    fee_bps_decimal.to_u32().unwrap_or(2)
+                    // Convert to i32 (supporting negative fees/rebates)
+                    fee_bps_decimal.to_i32().unwrap_or(2)
                 } else {
                     2
                 }

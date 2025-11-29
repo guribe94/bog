@@ -197,6 +197,9 @@ pub struct Position {
     /// Daily PnL (fixed-point, 9 decimals)
     pub daily_pnl: AtomicI64,
 
+    /// Daily High Water Mark (fixed-point, 9 decimals)
+    pub daily_high_water_mark: AtomicI64,
+
     /// Total number of trades
     pub trade_count: AtomicU32,
 
@@ -205,7 +208,7 @@ pub struct Position {
     pub sequence: AtomicU64,
 
     /// Padding to 64 bytes
-    _padding: [u8; 12],
+    _padding: [u8; 8],
 }
 
 impl Position {
@@ -217,9 +220,10 @@ impl Position {
             entry_price: AtomicU64::new(0),
             realized_pnl: AtomicI64::new(0),
             daily_pnl: AtomicI64::new(0),
+            daily_high_water_mark: AtomicI64::new(0),
             trade_count: AtomicU32::new(0),
             sequence: AtomicU64::new(0),
-            _padding: [0; 12],
+            _padding: [0; 8],
         }
     }
 
@@ -345,6 +349,29 @@ impl Position {
         self.daily_pnl.load(Ordering::Relaxed)
     }
 
+    /// Get daily high water mark
+    #[inline(always)]
+    pub fn get_daily_high_water_mark(&self) -> i64 {
+        self.daily_high_water_mark.load(Ordering::Relaxed)
+    }
+
+    /// Update daily high water mark (CAS loop for max)
+    #[inline(always)]
+    pub fn update_daily_high_water_mark(&self, current_pnl: i64) {
+        let mut current = self.daily_high_water_mark.load(Ordering::Relaxed);
+        while current_pnl > current {
+            match self.daily_high_water_mark.compare_exchange_weak(
+                current,
+                current_pnl,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(v) => current = v,
+            }
+        }
+    }
+
     /// Update daily PnL
     #[inline(always)]
     pub fn update_daily_pnl(&self, delta: i64) {
@@ -352,9 +379,11 @@ impl Position {
     }
 
     /// Reset daily PnL (called at start of day)
+    /// Also resets HWM to 0 (assuming flat start, otherwise caller should set it)
     #[inline]
     pub fn reset_daily_pnl(&self) {
         self.daily_pnl.store(0, Ordering::Release);
+        self.daily_high_water_mark.store(0, Ordering::Release);
     }
 
     /// Increment trade count
@@ -537,7 +566,7 @@ impl Position {
         order_side: u8,
         price: u64,
         size: u64,
-        fee_bps: u32,
+        fee_bps: i32,
     ) -> Result<(), OverflowError> {
         // SeqLock: Start write (make odd)
         self.sequence.fetch_add(1, Ordering::Acquire);
@@ -591,28 +620,30 @@ impl Position {
             0 // Not closing, no realized PnL
         };
 
-        // Calculate fee for the entire fill (always paid)
+        // Calculate fee amount (positive = cost, negative = rebate)
         let fee_amount: i64 = if fee_bps == 0 || price == 0 || size == 0 {
             0
         } else {
+            // Use absolute fee_bps for calculation, then apply sign
+            let fee_bps_abs = fee_bps.abs() as u128;
             let fee_raw = (price as u128)
                 .saturating_mul(size as u128)
-                .saturating_mul(fee_bps as u128)
+                .saturating_mul(fee_bps_abs)
                 / (10_000u128 * 1_000_000_000u128);
 
             if fee_raw > i64::MAX as u128 {
-                // SeqLock: Abort write (restore even) - actually we must not leave it odd
-                // But since we're returning error, we should probably fix state or just accept it's borked.
-                // Better to finish the write sequence even if erroring out?
-                // Or just ensure we increment even if we error.
-                // For now, let's handle the error exit.
                  self.sequence.fetch_add(1, Ordering::Release);
                 return Err(OverflowError::RealizedPnlOverflow {
                     old: self.realized_pnl.load(Ordering::Acquire),
                     delta: i64::MIN, // signify overflow attempt
                 });
             }
-            fee_raw as i64
+            
+            if fee_bps < 0 {
+                -(fee_raw as i64) // Rebate (negative cost -> positive PnL)
+            } else {
+                fee_raw as i64 // Cost (positive cost -> negative PnL)
+            }
         };
 
         // Update position quantity with overflow check
@@ -688,9 +719,11 @@ impl Position {
             }
         }
 
-        // Deduct fees (always costs money when fee_amount > 0)
-        if fee_amount > 0 {
-            let fee_delta = -fee_amount;
+        // Deduct fees (or add rebates)
+        // fee_amount is positive for cost, negative for rebate
+        // We subtract fee_amount from PnL
+        if fee_amount != 0 {
+            let fee_delta = -fee_amount; // -cost or -(-rebate) = +rebate
             let res1 = self.update_realized_pnl_checked(fee_delta);
             let res2 = self.update_daily_pnl_checked(fee_delta);
              if res1.is_err() || res2.is_err() {
@@ -1381,5 +1414,28 @@ mod tests {
         assert_eq!(position.get_realized_pnl(), expected_realized);
         assert_eq!(position.get_daily_pnl(), expected_realized);
         assert_eq!(position.get_entry_price(), sell_price);
+    }
+
+    #[test]
+    fn test_maker_rebate_increases_pnl() {
+        let position = Position::new();
+
+        let price: u64 = 50_000 * SCALE as u64;
+        let size: u64 = 100_000_000; // 0.1 BTC
+        let fee_bps = -2; // -2 bps rebate (maker)
+
+        // Buy with rebate
+        position
+            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .expect("rebate fill should succeed");
+
+        // Rebate = 50,000 * 0.1 * 0.0002 = $1.00
+        // PnL should be +$1.00 (positive because we got paid)
+        let expected_rebate =
+            ((price as u128 * size as u128 * fee_bps.abs() as u128) / (10_000 * SCALE as u128)) as i64;
+        
+        assert_eq!(expected_rebate, SCALE); // $1.00
+        assert_eq!(position.get_realized_pnl(), expected_rebate);
+        assert_eq!(position.get_daily_pnl(), expected_rebate);
     }
 }
