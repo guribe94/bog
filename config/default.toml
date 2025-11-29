@@ -71,7 +71,7 @@ min_order_size = "0.0001"
 max_outstanding_orders = 10
 
 # Maximum daily loss (circuit breaker)
-max_daily_loss = "1000.0"
+max_daily_loss = "5000.0"
 
 # Maximum drawdown percentage (0.20 = 20%)
 max_drawdown_pct = 0.20

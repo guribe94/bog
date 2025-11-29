@@ -57,8 +57,11 @@
 //!             }
 //!             ReconnectResult::Failed(failed) => {
 //!                 // Max retries exceeded
-//!                 let reconnecting = failed.manual_retry();
+//!                 let reconnecting = failed.manual_retry(3);
 //!                 // Try again...
+//!             }
+//!             ReconnectResult::Reconnecting(_) => {
+//!                 // Still attempting to recover
 //!             }
 //!         }
 //!     }

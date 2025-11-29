@@ -235,7 +235,7 @@ impl ConfigProfile {
                 max_order_size: dec!(0.5),   // 0.5 BTC per order
                 min_order_size: dec!(0.0001),
                 max_outstanding_orders: 20,
-                max_daily_loss: dec!(1000.0), // $1000 daily loss
+                max_daily_loss: dec!(5000.0), // $5k daily loss
                 max_drawdown_pct: 0.20,       // 20%
             },
             metrics: MetricsConfig {

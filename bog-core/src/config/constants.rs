@@ -19,19 +19,19 @@ pub const MAX_SHORT: i64 = 1_000_000_000;
 #[cfg(feature = "max-short-2btc")]
 pub const MAX_SHORT: i64 = 2_000_000_000;
 
-/// Maximum drawdown allowed before halting (in fixed-point with 9 decimals)
-/// Default: 0.05 BTC loss
+/// Maximum drawdown allowed before halting (fraction, 9-decimal fixed-point)
+/// Default: 5% drawdown from peak realized PnL
 #[cfg(not(feature = "max-drawdown-10pct"))]
 pub const MAX_DRAWDOWN: i64 = 50_000_000;
 #[cfg(feature = "max-drawdown-10pct")]
 pub const MAX_DRAWDOWN: i64 = 100_000_000;
 
-/// Maximum daily loss allowed (in fixed-point with 9 decimals)
-/// Default: 0.10 BTC loss
+/// Maximum daily loss allowed (quote currency, 9 decimals)
+/// Default: $5,000 loss
 #[cfg(not(feature = "max-daily-loss-20pct"))]
-pub const MAX_DAILY_LOSS: i64 = 100_000_000;
+pub const MAX_DAILY_LOSS: i64 = 5_000 * 1_000_000_000;
 #[cfg(feature = "max-daily-loss-20pct")]
-pub const MAX_DAILY_LOSS: i64 = 200_000_000;
+pub const MAX_DAILY_LOSS: i64 = 10_000 * 1_000_000_000;
 
 // ===== RATE LIMITING =====
 
@@ -141,6 +141,10 @@ mod tests {
         // Ensure drawdown limits are positive
         assert!(MAX_DRAWDOWN > 0);
         assert!(MAX_DAILY_LOSS > 0);
+        #[cfg(not(feature = "max-daily-loss-20pct"))]
+        assert_eq!(MAX_DAILY_LOSS, 5_000 * 1_000_000_000);
+        #[cfg(feature = "max-daily-loss-20pct")]
+        assert_eq!(MAX_DAILY_LOSS, 10_000 * 1_000_000_000);
 
         // Daily loss should be >= drawdown
         assert!(MAX_DAILY_LOSS >= MAX_DRAWDOWN);

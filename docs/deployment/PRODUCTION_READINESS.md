@@ -121,7 +121,7 @@ Edit `config/production.toml`:
 [risk]
 max_position = 1.0        # BTC
 max_order_size = 0.5      # BTC
-max_daily_loss = 1000.0   # USD
+max_daily_loss = 5000.0   # USD
 rate_limit_orders_per_sec = 10
 
 [strategy.simple_spread]
@@ -572,7 +572,7 @@ max_order_size = 0.5
 min_order_size = 0.01
 
 # Loss limit (USD)
-max_daily_loss = 1000.0
+max_daily_loss = 5000.0
 
 # Rate limiting
 rate_limit_orders_per_sec = 10  # Conservative

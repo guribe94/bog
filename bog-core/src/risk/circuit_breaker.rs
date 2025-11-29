@@ -68,12 +68,17 @@
 //! ## Example Usage
 //!
 //! ```rust
+//! use bog_core::risk::{CircuitBreaker, BreakerState};
+//! use bog_core::data::MarketSnapshot;
+//! use tracing::error;
+//!
 //! let mut breaker = CircuitBreaker::new();
+//! # let market_snapshot: MarketSnapshot = unsafe { std::mem::zeroed() };
 //!
 //! match breaker.check(&market_snapshot) {
 //!     BreakerState::Normal => {
 //!         // Safe to trade
-//!         let signal = strategy.calculate(&market_snapshot);
+//!         // place orders here
 //!     }
 //!     BreakerState::Halted(reason) => {
 //!         error!("Trading halted: {}", reason);

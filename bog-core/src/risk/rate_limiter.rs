@@ -19,9 +19,16 @@
 //! ## Usage
 //!
 //! ```
-//! use bog_core::risk::RateLimiter;
+//! use bog_core::risk::{RateLimiter, RateLimiterConfig};
+//! use std::time::Duration;
 //!
-//! let limiter = RateLimiter::new(100, 10.0); // 100 orders/sec max, 10 burst
+//! let config = RateLimiterConfig {
+//!     max_orders_per_second: 100,
+//!     burst_capacity: 50,
+//!     refill_rate: 100.0,
+//!     refill_interval: Duration::from_secs(1),
+//! };
+//! let limiter = RateLimiter::new(config);
 //!
 //! if limiter.allow() {
 //!     // Place order

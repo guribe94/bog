@@ -37,13 +37,13 @@ pub trait Strategy {
 
 ### Complete Example: EMA Crossover
 
-Here's a complete implementation of an EMA crossover strategy using zero-sized types and fixed-point arithmetic:
+Here's a complete implementation of an EMA crossover strategy using minimal state and fixed-point arithmetic:
 
 ```rust
 //! EMA Crossover Strategy - Buy when fast EMA > slow EMA
 //!
 //! This strategy demonstrates:
-//! - Zero-sized type pattern for maximum performance
+//! - Minimal state pattern for maximum performance
 //! - Fixed-point arithmetic (9 decimal places)
 //! - Compile-time configuration via Cargo features
 //! - Inline everything for zero overhead
@@ -74,9 +74,9 @@ pub const EMA_SLOW_PERIODS: u32 = 50;
 // Order size configuration
 pub const ORDER_SIZE: u64 = 100_000_000; // 0.1 BTC in fixed-point
 
-/// EMA Crossover Strategy - Zero-Sized Type
+/// EMA Crossover Strategy - Minimal State
 ///
-/// Memory footprint: 0 bytes at runtime (parameters are const)
+/// Memory footprint: ~24 bytes at runtime (3 u64 fields)
 /// Performance: ~30ns per calculation (all inline, no allocations)
 pub struct EmaCrossover {
     // EMA state (mutable state stored here)
@@ -87,7 +87,7 @@ pub struct EmaCrossover {
 
 impl EmaCrossover {
     /// Create new EMA crossover strategy
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             fast_ema: 0,
             slow_ema: 0,

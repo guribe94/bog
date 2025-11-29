@@ -27,6 +27,7 @@ pub type RawMarketId = u64;
 ///
 /// # Example
 /// ```rust
+/// # use bog_core::data::types::encode_market_id;
 /// let encoded = encode_market_id(1, 1); // Lighter market 1
 /// assert_eq!(encoded, 1_000_001);
 /// ```
@@ -68,6 +69,7 @@ pub fn encode_market_id_checked(dex_type: u8, market_id: u64) -> Result<EncodedM
 ///
 /// # Example
 /// ```rust
+/// # use bog_core::data::types::decode_market_id;
 /// let (dex, market) = decode_market_id(1_000_001);
 /// assert_eq!(dex, 1);    // Lighter
 /// assert_eq!(market, 1); // market 1

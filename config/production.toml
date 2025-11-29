@@ -43,7 +43,7 @@ max_short = "1.0"           # Maximum 1.0 BTC short position
 max_order_size = "0.5"      # Maximum 0.5 BTC per order
 min_order_size = "0.0001"   # Minimum 0.0001 BTC
 max_outstanding_orders = 20  # Maximum 20 open orders
-max_daily_loss = "1000.0"   # Circuit breaker: $1000 daily loss
+max_daily_loss = "5000.0"   # Circuit breaker: $5k daily loss
 max_drawdown_pct = 0.20     # Circuit breaker: 20% drawdown
 
 [metrics]
@@ -88,7 +88,7 @@ position_limit = true
 
 # Daily loss limit rule
 daily_loss_limit = true
-# daily_loss_limit_override = "1500.0"  # Override risk.max_daily_loss
+# daily_loss_limit_override = "7500.0"  # Override risk.max_daily_loss
 
 # Huginn connection rule
 huginn_connection = true

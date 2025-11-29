@@ -568,19 +568,30 @@ impl Position {
                 // We divide by SCALE because both price and quantity are in fixed-point
                 let gross_pnl = (price_diff as i128 * closing_qty as i128 / 1_000_000_000) as i64;
 
-                // Calculate fee in fixed-point
-                // fee = (price * closing_qty * fee_bps) / (10000 * SCALE)
-                // Careful with order to avoid overflow
-                let fee = ((price as u128 * closing_qty as u128 * fee_bps as u128)
-                    / (10_000 * 1_000_000_000)) as i64;
-
-                // Net PnL = Gross PnL - Fee
-                gross_pnl.saturating_sub(fee)
+                gross_pnl
             } else {
                 0  // No entry price set, no PnL
             }
         } else {
             0  // Not closing, no realized PnL
+        };
+
+        // Calculate fee for the entire fill (always paid)
+        let fee_amount: i64 = if fee_bps == 0 || price == 0 || size == 0 {
+            0
+        } else {
+            let fee_raw = (price as u128)
+                .saturating_mul(size as u128)
+                .saturating_mul(fee_bps as u128)
+                / (10_000u128 * 1_000_000_000u128);
+
+            if fee_raw > i64::MAX as u128 {
+                return Err(OverflowError::RealizedPnlOverflow {
+                    old: self.realized_pnl.load(Ordering::Acquire),
+                    delta: i64::MIN, // signify overflow attempt
+                });
+            }
+            fee_raw as i64
         };
 
         // Update position quantity with overflow check
@@ -633,10 +644,17 @@ impl Position {
             self.entry_price.store(0, Ordering::Release);
         }
 
-        // Update realized PnL if we had any
+        // Update realized/daily PnL for price differential
         if pnl != 0 {
             self.update_realized_pnl_checked(pnl)?;
             self.update_daily_pnl_checked(pnl)?;
+        }
+
+        // Deduct fees (always costs money when fee_amount > 0)
+        if fee_amount > 0 {
+            let fee_delta = -fee_amount;
+            self.update_realized_pnl_checked(fee_delta)?;
+            self.update_daily_pnl_checked(fee_delta)?;
         }
 
         // Increment trade count
@@ -1219,5 +1237,81 @@ mod tests {
 
         let short_loss = position.get_unrealized_pnl(market_up);
         assert_eq!(short_loss, -500 * SCALE);
+    }
+
+    #[test]
+    fn test_fee_recorded_on_open_fill() {
+        let position = Position::new();
+
+        let price: u64 = 50_000 * SCALE as u64;
+        let size: u64 = 100_000_000; // 0.1 BTC
+        let fee_bps = 2;
+
+        position
+            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .expect("fee-calculation fill should succeed");
+
+        let expected_fee = ((price as u128 * size as u128 * fee_bps as u128)
+            / (10_000 * SCALE as u128)) as i64;
+        assert_eq!(position.get_realized_pnl(), -expected_fee);
+        assert_eq!(position.get_daily_pnl(), -expected_fee);
+        assert_eq!(position.get_quantity(), size as i64);
+    }
+
+    #[test]
+    fn test_round_trip_breakeven_with_fees() {
+        let position = Position::new();
+
+        let price: u64 = 50_000 * SCALE as u64;
+        let size: u64 = 100_000_000; // 0.1 BTC
+        let fee_bps = 2;
+
+        position
+            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .expect("buy fill should succeed");
+        position
+            .process_fill_fixed_with_fee(1, price, size, fee_bps)
+            .expect("sell fill should succeed");
+
+        let fee_per_leg = ((price as u128 * size as u128 * fee_bps as u128)
+            / (10_000 * SCALE as u128)) as i64;
+        let expected = -(fee_per_leg * 2);
+        assert_eq!(position.get_realized_pnl(), expected);
+        assert_eq!(position.get_daily_pnl(), expected);
+        assert_eq!(position.get_quantity(), 0);
+    }
+
+    #[test]
+    fn test_position_flip_fee_allocation() {
+        let position = Position::new();
+
+        let buy_price: u64 = 50_000 * SCALE as u64;
+        let sell_price: u64 = 60_000 * SCALE as u64;
+        let one_btc: u64 = SCALE as u64;
+        let fee_bps = 2;
+
+        // Long 1 BTC
+        position
+            .process_fill_fixed_with_fee(0, buy_price, one_btc, fee_bps)
+            .expect("long entry should succeed");
+        // Sell 2 BTC (flatten + open short)
+        position
+            .process_fill_fixed_with_fee(1, sell_price, one_btc * 2, fee_bps)
+            .expect("flip fill should succeed");
+
+        assert_eq!(position.get_quantity(), -(one_btc as i64));
+
+        let closed_qty = one_btc as i64;
+        let price_diff = sell_price as i64 - buy_price as i64;
+        let gross_profit =
+            ((price_diff as i128 * closed_qty as i128) / SCALE as i128) as i64;
+        let entry_fee = ((buy_price as u128 * one_btc as u128 * fee_bps as u128)
+            / (10_000 * SCALE as u128)) as i64;
+        let flip_fee = ((sell_price as u128 * (one_btc * 2) as u128 * fee_bps as u128)
+            / (10_000 * SCALE as u128)) as i64;
+        let expected_realized = gross_profit - (entry_fee + flip_fee);
+        assert_eq!(position.get_realized_pnl(), expected_realized);
+        assert_eq!(position.get_daily_pnl(), expected_realized);
+        assert_eq!(position.get_entry_price(), sell_price);
     }
 }

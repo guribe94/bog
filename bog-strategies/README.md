@@ -18,7 +18,7 @@ This crate provides market-making strategies optimized for high-frequency tradin
 | **SimpleSpread** | <100ns | **~5ns** | ✅ |
 | **InventoryBased** | <100ns | TBD | 🚧 |
 
-**Key Insight**: Zero-sized types (ZSTs) mean strategies occupy **0 bytes** of memory and compile to pure code with full LLVM optimization.
+**Key Insight**: Strategies are implemented with minimal state and zero heap allocations, compiling to highly optimized code. `SimpleSpread` is no longer a Zero-Sized Type (ZST) to support volatility tracking, but remains extremely lightweight (~32 bytes stack allocated).
 
 ## Quick Start
 
@@ -40,9 +40,8 @@ use bog_core::engine::Engine;
 use bog_core::execution::SimulatedExecutor;
 
 fn main() -> anyhow::Result<()> {
-    // Create strategy (0 bytes!)
-    let strategy = SimpleSpread;
-    assert_eq!(std::mem::size_of_val(&strategy), 0);
+    // Create strategy (initialized with state)
+    let strategy = SimpleSpread::new();
 
     // Create executor
     let executor = SimulatedExecutor::new_default();
@@ -67,7 +66,8 @@ fn main() -> anyhow::Result<()> {
 - Configurable order size (0.01, 0.1, 1.0 BTC)
 - Minimum spread filter
 - Inventory-based skew adjustment (Avellaneda-Stoikov)
-- Volatility-aware spread widening (stub - returns 1.0x currently)
+- **Volatility-aware spread widening**: Uses EWMA volatility to widen spreads (up to 2x) during high volatility regimes to prevent adverse selection.
+- **Position Limit Enforcement**: Automatically halts quoting on the side that would breach `MAX_POSITION` or `MAX_SHORT`.
 
 **Performance**: ~5ns per signal generation
 
@@ -143,12 +143,22 @@ Filters out tight markets where profitability is marginal.
 
 ## Architecture
 
-### Zero-Sized Types (ZSTs)
+### Minimal State Strategy
 
-Strategies are implemented as **zero-sized types**:
+Strategies are implemented as **stack-allocated structs** with minimal state:
 
 ```rust
-pub struct SimpleSpread;  // 0 bytes!
+pub struct SimpleSpread {
+    vol_tracker: EwmaVolatility,
+}
+
+impl SimpleSpread {
+    pub fn new() -> Self {
+        Self {
+            vol_tracker: EwmaVolatility::new(200),
+        }
+    }
+}
 
 impl Strategy for SimpleSpread {
     #[inline(always)]
@@ -163,7 +173,7 @@ impl Strategy for SimpleSpread {
 ```
 
 **Benefits**:
-- **0 bytes memory** - Strategy state is compile-time only
+- **Minimal memory** - ~32 bytes stack allocated
 - **Full inline** - LLVM optimizes across call boundaries
 - **No allocation** - Stack-only execution
 - **Cache-friendly** - No pointer dereferencing

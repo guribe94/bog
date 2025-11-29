@@ -99,11 +99,18 @@ spread_bps = ((ask - bid) / bid) * 10,000
 spread_bps = (5 / 50,000) * 10,000 = 1 bps 
 ```
 
-**Why**:
-- Too narrow (< 1 bps): Can't profit after fees → reject
-- Too wide (> 50 bps): Flash crash or bad data → reject
+**Check 2: Volatility adjustment**
+The strategy tracks market volatility using an EWMA (Exponentially Weighted Moving Average).
+- **Low Volatility (<10 bps)**: Use base spread (10 bps).
+- **High Volatility (>10 bps)**: Widen spread linearly up to 2x (20 bps) to compensate for increased adverse selection risk.
+- **Extreme Volatility (>50 bps)**: Cap at 2x spread.
 
-**Check 2: Sufficient liquidity** (>= 0.001 BTC each side)
+**Check 3: Position Limits**
+- **Long Limit**: If `position >= MAX_POSITION`, only quote Ask (reduce long).
+- **Short Limit**: If `position <= MAX_SHORT`, only quote Bid (reduce short).
+- **Normal**: Quote both sides.
+
+**Check 4: Sufficient liquidity** (>= 0.001 BTC each side)
 ```
 bid_size = 2.5 BTC 
 ask_size = 3.0 BTC 
@@ -500,7 +507,7 @@ bog_performance_tick_to_trade  # Should be <1μs
  All errors halt trading (no silent failures)
 
 ### Performance Optimized
- Zero-sized type (0 bytes)
+ Minimal state (~32 bytes stack allocated)
  Const generic configuration (0ns runtime cost)
  Fixed-point arithmetic (no heap allocations)
  Sub-microsecond latency (70ns measured)
@@ -554,6 +561,6 @@ bog_performance_tick_to_trade  # Should be <1μs
 
 ---
 
-**Last Updated**: 2025-11-21
+**Last Updated**: 2025-11-29
 **Status**:  Current
 **Maintained by**: Bog Team

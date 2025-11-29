@@ -106,8 +106,11 @@ impl Strategy for SimpleSpread {
     fn generate_signal(&self, market: &MarketState, position: &Position)
         -> Option<Signal>
     {
+        // Volatility tracking (minimal state access)
+        let vol_mult = self.vol_tracker.get_multiplier(market);
+
         // All constants folded at compile time
-        let spread_bps = Self::SPREAD_BPS;        // Const
+        let spread_bps = Self::SPREAD_BPS * vol_mult;
         let size = Self::SIZE;                    // Const
         let min_spread_bps = Self::MIN_SPREAD;    // Const
 
@@ -116,34 +119,13 @@ impl Strategy for SimpleSpread {
 
         // Calculate spread in basis points (2 sub, 1 mul, 1 div)
         let spread = (market.ask - market.bid) * 10000 / mid;
-
-        // Check min spread filter (1 cmp, 1 branch)
-        if spread < min_spread_bps {
-            return None;
-        }
-
-        // Calculate target prices (2 mul, 2 div, 2 add)
-        let bid_offset = mid * spread_bps / 10000;
-        let ask_offset = mid * spread_bps / 10000;
-        let our_bid = mid - bid_offset;
-        let our_ask = mid + ask_offset;
-
-        // Create signal (stack allocation)
-        Some(Signal {
-            bid_price: our_bid,
-            bid_size: size,
-            ask_price: our_ask,
-            ask_size: size,
-            timestamp_ns: market.last_update_ns,
-        })
-    }
-}
+// ...
 ```
 
 #### Why So Fast?
 
-1. **Zero-sized type**: `SimpleSpread` occupies 0 bytes
-2. **Const folding**: `SPREAD_BPS`, `SIZE` compiled into immediate values
+1. **Minimal State**: `SimpleSpread` is ~32 bytes (fits in register/L1)
+2. **Const folding**: Base parameters compiled into immediate values
 3. **Inlining**: `#[inline(always)]` eliminates function call overhead
 4. **Fixed-point math**: All operations are integer (no float conversion)
 5. **Branch prediction**: Single predictable branch (min spread check)
@@ -157,27 +139,16 @@ mov    rax, QWORD PTR [rdi+0x0]     ; Load bid
 mov    rcx, QWORD PTR [rdi+0x8]     ; Load ask
 add    rax, rcx                     ; bid + ask
 shr    rax, 1                       ; / 2 (mid price)
-sub    rcx, QWORD PTR [rdi+0x0]     ; ask - bid (spread)
-imul   rcx, 10000                   ; spread * 10000
-idiv   rcx, rax                     ; / mid (spread_bps)
-cmp    rcx, 1                       ; if spread_bps < min_spread
-jl     .LBB0_1                      ; return None
-imul   rax, 10                      ; mid * SPREAD_BPS (const-folded)
-; ... rest of signal construction (6 moves)
-ret
-.LBB0_1:
-xor    eax, eax                     ; return None
-ret
-
-; Total: ~12 instructions, 1 branch, 0 calls
+; ... volatility lookup (L1 hit) ...
+; ... rest of signal construction ...
 ```
 
 **Instruction breakdown**:
-- Memory reads: 2 (bid, ask) = ~2ns
-- ALU operations: 8 (add, sub, mul, div) = ~4ns
+- Memory reads: 2 (bid, ask) + 1 (vol state) = ~3ns
+- ALU operations: ~12 (add, sub, mul, div, shift) = ~5ns
 - Branches: 1 (predicted taken 99%) = ~1ns
 - Stack writes: 6 (signal fields) = ~3ns
-- **Total: ~10ns**
+- **Total: ~12ns**
 
 #### Measurement
 
@@ -215,7 +186,7 @@ fn bench_signal_generation(c: &mut Criterion) {
 
 | Implementation | Latency | Notes |
 |----------------|---------|-------|
-| ZST + const (ours) | **~10ns** | Fully optimized |
+| Minimal State (ours) | **~12ns** | Fully optimized |
 | ZST + runtime config | ~15ns | Config loads add overhead |
 | Dynamic dispatch | ~60ns | Vtable lookup + indirect call |
 | Python (compiled) | ~200ns | NumPy vectorization can't help single calc |

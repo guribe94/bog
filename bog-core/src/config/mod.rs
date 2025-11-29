@@ -325,7 +325,7 @@ mod tests {
                 max_order_size: dec!(0.5),
                 min_order_size: dec!(0.0001),
                 max_outstanding_orders: 10,
-                max_daily_loss: dec!(1000.0),
+                max_daily_loss: dec!(5000.0),
                 max_drawdown_pct: 0.20,
             },
             metrics: MetricsConfig::default(),

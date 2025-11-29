@@ -75,30 +75,24 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use bog_core::execution::{SimulatedExecutor, RealisticFillConfig};
-//! use bog_core::engine::{Engine, Strategy};
-//! use bog_strategies::SimpleSpread;
+//! use bog_core::execution::{Executor, RealisticFillConfig, SimulatedExecutor};
 //!
 //! // Create executor with realistic fill simulation
 //! let config = RealisticFillConfig {
-//!     fill_probability: 0.8,  // 80% fill rate
-//!     latency_range_us: 50..150,  // 50-150μs latency
-//!     slippage_bps: 1,  // 1 bp slippage
-//!     partial_fill_rate: 0.2,  // 20% partial fills
+//!     enable_queue_modeling: true,
+//!     enable_partial_fills: true,
+//!     front_of_queue_fill_rate: 0.8,
+//!     back_of_queue_fill_rate: 0.4,
 //! };
-//! let executor = SimulatedExecutor::new_with_config(config);
+//! let mut executor = SimulatedExecutor::with_config(config);
 //!
-//! // Create engine
-//! let strategy = SimpleSpread;
-//! let mut engine = Engine::new(strategy, executor);
-//!
-//! // Process market data
-//! # use bog_core::data::MarketSnapshot;
-//! # let snapshot: MarketSnapshot = unsafe { std::mem::zeroed() };
-//! engine.process_tick(&snapshot, true)?;
-//!
-//! // Get fills
-//! let fills = engine.get_fills();
+//! // Place orders / pull fills via the executor API
+//! # use rust_decimal_macros::dec;
+//! # use bog_core::execution::{Order, Side};
+//! let order = Order::post_only(Side::Buy, dec!(50_000), dec!(0.1));
+//! let order_id = executor.place_order(order)?;
+//! let fills = executor.get_fills();
+//! # executor.cancel_order(&order_id)?;
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 //!

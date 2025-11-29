@@ -25,7 +25,7 @@
 3. **Review configuration** (Cargo.toml features):
    - MAX_POSITION: 1.0 BTC
    - MAX_SHORT: 1.0 BTC
-   - MAX_DAILY_LOSS: $1000 USD
+   - MAX_DAILY_LOSS: $5000 USD (compile-time default, tune via `max-daily-loss-*` features)
    - Strategy: SimpleSpread, 10 bps spread, 0.1 BTC order size
 
 ## Deployment

@@ -229,7 +229,7 @@
 //! │  ┌──────────────────────────────────────────────────────────┐ │
 //! │  │ const MAX_POSITION: i64 = 1_000_000_000;  // 1.0 BTC     │ │
 //! │  │ const MAX_ORDER_SIZE: u64 = 500_000_000;  // 0.5 BTC     │ │
-//! │  │ const MAX_DAILY_LOSS: i64 = 1_000_000_000_000;  // $1000 │ │
+//! │  │ const MAX_DAILY_LOSS: i64 = 5_000_000_000_000;  // $5000 │ │
 //! │  │                                                           │ │
 //! │  │ Branch-free validation, no runtime overhead              │ │
 //! │  └──────────────────────────────────────────────────────────┘ │
@@ -255,18 +255,30 @@
 //! ## Usage Example
 //!
 //! ```rust,no_run
-//! use bog_core::prelude::*;
-//! use bog_strategies::SimpleSpread;
+//! use bog_core::core::{Position, Signal};
+//! use bog_core::data::MarketSnapshot;
+//! use bog_core::engine::{Engine, SimulatedExecutor, Strategy};
+//!
+//! struct ExampleStrategy;
+//!
+//! impl Strategy for ExampleStrategy {
+//!     fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+//!         None
+//!     }
+//!
+//!     fn name(&self) -> &'static str {
+//!         "ExampleStrategy"
+//!     }
+//! }
 //!
 //! // Create zero-overhead engine with strategy and executor
-//! let strategy = SimpleSpread;  // 0 bytes (ZST)
-//! let executor = bog_core::engine::SimulatedExecutor::new_default();
+//! let strategy = ExampleStrategy;
+//! let executor = SimulatedExecutor::new_default();
 //! let mut engine = Engine::new(strategy, executor);
 //!
 //! // Process market tick
-//! # use bog_core::data::MarketSnapshot;
-//! # let snapshot = unsafe { std::mem::zeroed() };
-//! engine.process_tick(&snapshot)?;
+//! # let snapshot: MarketSnapshot = unsafe { std::mem::zeroed() };
+//! engine.process_tick(&snapshot, true)?;
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 //!

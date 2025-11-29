@@ -40,7 +40,7 @@
 //! use bog_core::core::order_fsm::*;
 //! use bog_core::core::{OrderId, Side};
 //!
-//! # fn example() -> Result<(), &'static str> {
+//! # fn example() -> Result<(), FillError> {
 //! // Create a new pending order
 //! let order = OrderPending::new(
 //!     OrderId::new_random(),
@@ -54,19 +54,26 @@
 //!
 //! // Apply a partial fill
 //! match order.fill(500_000_000, 50_000_000_000_000) {
-//!     FillResult::PartiallyFilled(order) => {
-//!         // Order is now partially filled
-//!         println!("Partially filled: {} / {}", order.filled_quantity(), order.data().quantity);
+//!     FillResultOrError::Ok(FillResult::PartiallyFilled(order)) => {
+//!         println!(
+//!             "Partially filled: {} / {}",
+//!             order.filled_quantity(),
+//!             order.data().quantity
+//!         );
 //!
 //!         // Fill the rest
-//!         match order.fill(500_000_000, 50_000_000_000_000) {
-//!             FillResult::Filled(order) => {
-//!                 println!("Order fully filled!");
-//!             }
-//!             _ => {}
+//!         if let PartialFillResultOrError::Ok(FillResult::Filled(_filled)) =
+//!             order.fill(500_000_000, 50_000_000_000_000)
+//!         {
+//!             println!("Order fully filled!");
 //!         }
 //!     }
-//!     _ => {}
+//!     FillResultOrError::Ok(FillResult::Filled(_)) => {
+//!         println!("Filled in a single fill!");
+//!     }
+//!     FillResultOrError::Error(err, _) => {
+//!         println!("Fill rejected: {}", err);
+//!     }
 //! }
 //! # Ok(())
 //! # }

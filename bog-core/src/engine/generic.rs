@@ -115,7 +115,7 @@
 use crate::config::{
     MAX_POSITION, MAX_SHORT,
     MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
-    MAX_POST_STALE_CHANGE_BPS
+    MAX_POST_STALE_CHANGE_BPS, MAX_DRAWDOWN,
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
@@ -437,6 +437,34 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         self.last_fresh_bid.set(snapshot.best_bid_price);
         self.last_fresh_ask.set(snapshot.best_ask_price);
 
+        // Update peak realized PnL and enforce drawdown guard
+        let current_realized = self.position.get_realized_pnl();
+        if current_realized > self.peak_pnl.get() {
+            self.peak_pnl.set(current_realized);
+        }
+        let peak_pnl = self.peak_pnl.get();
+        let drawdown = peak_pnl.saturating_sub(current_realized);
+        if peak_pnl > 0 && MAX_DRAWDOWN > 0 {
+            let allowed_drawdown = ((peak_pnl as i128)
+                * MAX_DRAWDOWN as i128
+                / 1_000_000_000i128)
+                .clamp(i64::MIN as i128, i64::MAX as i128) as i64;
+
+            if allowed_drawdown > 0 && drawdown > allowed_drawdown {
+                tracing::error!(
+                    "Drawdown limit exceeded: drawdown={} > limit={} - halting trading",
+                    drawdown,
+                    allowed_drawdown
+                );
+                self.executor.cancel_all()?;
+                return Err(anyhow!(
+                    "Drawdown limit exceeded: drawdown={} > limit={}",
+                    drawdown,
+                    allowed_drawdown
+                ));
+            }
+        }
+
         // Calculate trading signal (hot path)
         // Measured: ~17ns for SimpleSpread
         if let Some(signal) = self.strategy.calculate(snapshot, &self.position) {
@@ -491,29 +519,27 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     }
                 },
                 crate::core::SignalAction::TakePosition => {
-                    // TakePosition is aggressive order
-                    if signal.bid_price > 0 {
-                        // Buying
-                        let potential_long = current_qty
-                            .checked_add(open_long_exposure)
-                            .and_then(|x| x.checked_add(signal.size as i64));
-                        
-                        match potential_long {
-                            Some(pos) => pos > MAX_POSITION,
-                            None => true
+                    match signal.side {
+                        crate::core::Side::Buy => {
+                            let potential_long = current_qty
+                                .checked_add(open_long_exposure)
+                                .and_then(|x| x.checked_add(signal.size as i64));
+
+                            match potential_long {
+                                Some(pos) => pos > MAX_POSITION,
+                                None => true,
+                            }
                         }
-                    } else if signal.ask_price > 0 {
-                        // Selling
-                        let potential_short = current_qty
-                            .checked_sub(open_short_exposure)
-                            .and_then(|x| x.checked_sub(signal.size as i64));
-                            
-                        match potential_short {
-                            Some(pos) => pos < -MAX_SHORT,
-                            None => true
+                        crate::core::Side::Sell => {
+                            let potential_short = current_qty
+                                .checked_sub(open_short_exposure)
+                                .and_then(|x| x.checked_sub(signal.size as i64));
+
+                            match potential_short {
+                                Some(pos) => pos < -MAX_SHORT,
+                                None => true,
+                            }
                         }
-                    } else {
-                        false  // No valid price, won't execute
                     }
                 },
                 crate::core::SignalAction::CancelAll => false,  // Cancels don't change position
@@ -863,7 +889,7 @@ pub struct EngineStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Signal, SignalAction};
+    use crate::core::{Signal, SignalAction, Side};
     use crate::data::SnapshotBuilder;
 
     /// Mock strategy for testing
@@ -1048,5 +1074,154 @@ mod tests {
         // Wait, my code has increment_signals() AFTER the check.
         // So if check fails, it returns Ok(()) early, and signal_count is NOT incremented.
         assert_eq!(engine.stats().signals_generated, 0, "Should skip execution due to risk limits");
+    }
+
+    #[test]
+    fn test_take_position_limit_enforcement() {
+        use crate::engine::risk::{MAX_ORDER_SIZE, MAX_POSITION};
+
+        struct TakePositionStrategy;
+        impl Strategy for TakePositionStrategy {
+            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+                Some(Signal::take_position(Side::Buy, MAX_ORDER_SIZE))
+            }
+
+            fn name(&self) -> &'static str {
+                "TakePositionStrategy"
+            }
+        }
+
+        let strategy = TakePositionStrategy;
+        let executor = MockExecutor { execute_count: 0 };
+        let mut engine = Engine::new(strategy, executor);
+
+        // Pre-load position close to the max long limit
+        let preload = MAX_POSITION - MAX_ORDER_SIZE as i64 + 1;
+        engine.position().update_quantity(preload);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(10)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        engine.process_tick(&snapshot, true).unwrap();
+
+        // Signal should be dropped before hitting executor
+        assert_eq!(engine.executor.execute_count, 0);
+        assert_eq!(engine.stats().signals_generated, 0);
+    }
+
+    #[test]
+    fn test_take_position_short_limit_enforcement() {
+        use crate::engine::risk::{MAX_ORDER_SIZE, MAX_SHORT};
+
+        struct ShortTakeStrategy;
+        impl Strategy for ShortTakeStrategy {
+            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+                Some(Signal::take_position(Side::Sell, MAX_ORDER_SIZE))
+            }
+
+            fn name(&self) -> &'static str {
+                "ShortTakeStrategy"
+            }
+        }
+
+        let strategy = ShortTakeStrategy;
+        let executor = MockExecutor { execute_count: 0 };
+        let mut engine = Engine::new(strategy, executor);
+
+        // Pre-load position close to the max short limit
+        let preload = -MAX_SHORT + MAX_ORDER_SIZE as i64 - 1;
+        engine.position().update_quantity(preload);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(11)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_005_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        engine.process_tick(&snapshot, true).unwrap();
+
+        // Signal should be dropped before hitting executor
+        assert_eq!(engine.executor.execute_count, 0);
+        assert_eq!(engine.stats().signals_generated, 0);
+    }
+
+    #[test]
+    fn test_drawdown_guard_prevents_execution() {
+        struct QuoteStrategy;
+        impl Strategy for QuoteStrategy {
+            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+                Some(Signal::quote_both(50_000_000_000_000, 50_010_000_000_000, 100_000_000))
+            }
+
+            fn name(&self) -> &'static str {
+                "QuoteStrategy"
+            }
+        }
+
+        let strategy = QuoteStrategy;
+        let executor = MockExecutor { execute_count: 0 };
+        let mut engine = Engine::new(strategy, executor);
+
+        // Simulate historical peak PnL
+        let peak = 10_000 * 1_000_000_000;
+        engine.peak_pnl.set(peak);
+
+        let allowed = ((peak as i128 * MAX_DRAWDOWN as i128) / 1_000_000_000i128) as i64;
+        // Current realized PnL sits more than allowed drawdown below peak
+        let current = peak - allowed - 1_000_000_000;
+        engine.position().update_realized_pnl(current);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(2)
+            .sequence(42)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_010_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        let result = engine.process_tick(&snapshot, true);
+        assert!(result.is_err(), "drawdown guard should halt processing");
+        assert_eq!(engine.executor.execute_count, 0);
+    }
+
+    #[test]
+    fn test_drawdown_guard_allows_within_limit() {
+        struct QuoteStrategy;
+        impl Strategy for QuoteStrategy {
+            fn calculate(&mut self, _snapshot: &MarketSnapshot, _position: &Position) -> Option<Signal> {
+                Some(Signal::quote_both(50_000_000_000_000, 50_010_000_000_000, 100_000_000))
+            }
+            fn name(&self) -> &'static str { "QuoteStrategy" }
+        }
+
+        let strategy = QuoteStrategy;
+        let executor = MockExecutor { execute_count: 0 };
+        let mut engine = Engine::new(strategy, executor);
+
+        let peak = 10_000 * 1_000_000_000;
+        engine.peak_pnl.set(peak);
+        let allowed = ((peak as i128 * MAX_DRAWDOWN as i128) / 1_000_000_000i128) as i64;
+
+        // Stay within allowed drawdown
+        let current = peak - allowed / 2;
+        engine.position().update_realized_pnl(current);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(2)
+            .sequence(43)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_010_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        let result = engine.process_tick(&snapshot, true);
+        assert!(result.is_ok(), "engine should continue within drawdown limit");
     }
 }

@@ -98,34 +98,32 @@
 //! ## Usage Example
 //!
 //! ```rust
-//! use bog_core::risk::{RiskManager, RiskLimits, RiskViolation};
-//! use bog_core::core::Signal;
+//! use bog_core::risk::{RiskLimits, RiskManager};
+//! use bog_core::strategy::Signal;
 //! use rust_decimal::Decimal;
+//! use rust_decimal::prelude::FromPrimitive;
+//! use rust_decimal_macros::dec;
 //!
 //! // Create risk manager with limits
 //! let limits = RiskLimits {
-//!     max_position: Decimal::from(1),  // 1.0 BTC
+//!     max_position: Decimal::from(1),        // 1.0 BTC
+//!    max_short: Decimal::from(1),           // 1.0 BTC short
 //!     max_order_size: Decimal::from_f64(0.5).unwrap(),
-//!     max_daily_loss: Decimal::from(1000),  // $1000
-//!     max_drawdown_pct: 20,  // 20%
 //!     min_order_size: Decimal::from_f64(0.001).unwrap(),
+//!     max_outstanding_orders: 10,
+//!     max_daily_loss: Decimal::from(5000),   // $5k
+//!     max_drawdown_pct: 0.20,                // 20%
 //! };
 //!
 //! let mut risk_manager = RiskManager::with_limits(limits);
 //!
 //! // Validate signal before execution
-//! let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000);
-//! match risk_manager.validate_signal(&signal) {
-//!     Ok(()) => {
-//!         // Safe to execute
-//!         println!("Signal validated");
-//!     }
-//!     Err(RiskViolation::PositionLimit { current, limit }) => {
-//!         eprintln!("Position limit exceeded: {} > {}", current, limit);
-//!     }
-//!     Err(e) => {
-//!         eprintln!("Risk violation: {:?}", e);
-//!     }
+//! let signal = Signal::QuoteBid {
+//!     price: dec!(50_000),
+//!     size: dec!(0.1),
+//! };
+//! if let Err(err) = risk_manager.validate_signal(&signal) {
+//!     eprintln!("Risk violation: {}", err);
 //! }
 //! ```
 //!
@@ -563,7 +561,7 @@ mod tests {
             max_order_size: dec!(0.5),
             min_order_size: dec!(0.01),
             max_outstanding_orders: 10,
-            max_daily_loss: dec!(1000.0),
+            max_daily_loss: dec!(5000.0),
             max_drawdown_pct: 0.20,
         }
     }

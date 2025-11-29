@@ -244,7 +244,7 @@ impl Default for ProductionExecutorConfig {
 /// ## Example
 ///
 /// ```rust
-/// use bog_core::execution::ProductionExecutor;
+/// use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig};
 ///
 /// let config = ProductionExecutorConfig::default();
 /// let executor = ProductionExecutor::new(config);

@@ -65,6 +65,9 @@
 //! use bog_core::orderbook::OrderBookManager;
 //! use bog_core::data::MarketSnapshot;
 //!
+//! # let market_id = 1;
+//! # let market_id = 1;
+//! # let snapshot: MarketSnapshot = unsafe { std::mem::zeroed() };
 //! let mut orderbook = OrderBookManager::new(market_id);
 //!
 //! // Sync from Huginn snapshot
