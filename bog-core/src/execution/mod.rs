@@ -153,7 +153,8 @@ pub trait Executor: Send {
     fn cancel_order(&mut self, order_id: &OrderId) -> Result<()>;
 
     /// Get recent fills (since last call)
-    fn get_fills(&mut self) -> Vec<Fill>;
+    /// Appends fills to the provided buffer to avoid allocation.
+    fn get_fills(&mut self, fills: &mut Vec<Fill>);
 
     /// Get order status
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus>;

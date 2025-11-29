@@ -467,25 +467,20 @@ impl Executor for SimulatedExecutor {
         }
     }
 
-    fn get_fills(&mut self) -> Vec<Fill> {
+    fn get_fills(&mut self, fills: &mut Vec<Fill>) {
         // Drain all fills from the queue
-        let mut fills = Vec::with_capacity(self.pending_fills.len());
-
         while let Some(fill) = self.pending_fills.pop() {
             fills.push(fill);
         }
 
         // Warn if queue was near capacity
-        if !fills.is_empty() && fills.len() > (MAX_PENDING_FILLS * 3) / 4 {
+        if !fills.is_empty() && self.pending_fills.len() > (MAX_PENDING_FILLS * 3) / 4 {
             warn!(
-                "High fill queue usage: {} fills drained (capacity: {}, dropped: {})",
-                fills.len(),
+                "High fill queue usage: fills drained (capacity: {}, dropped: {})",
                 MAX_PENDING_FILLS,
                 self.dropped_fills
             );
         }
-
-        fills
     }
 
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus> {
@@ -602,7 +597,8 @@ mod tests {
         assert!(executor.get_order_status(&order_id).is_some());
 
         // Check fill was created
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         let fill = &fills[0];
@@ -621,7 +617,8 @@ mod tests {
         let order_id = executor.place_order(order).unwrap();
 
         // Clear fills
-        executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
 
         // Try to cancel (but it's already filled in simulated mode)
         let result = executor.cancel_order(&order_id);
@@ -647,7 +644,8 @@ mod tests {
         let buy_order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         executor.place_order(buy_order).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(0.1)); // Position increases
@@ -659,7 +657,8 @@ mod tests {
         let sell_order = Order::limit(Side::Sell, dec!(50100), dec!(0.1));
         executor.place_order(sell_order).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         let fill = &fills[0];
 
         assert_eq!(fill.position_change(), dec!(-0.1)); // Position decreases
@@ -703,7 +702,8 @@ mod tests {
         let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
         executor.place_order(order).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         // Instant mode: should fill 100%
@@ -719,7 +719,8 @@ mod tests {
         let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
         executor.place_order(order).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         // Realistic mode with back-of-queue: should fill ~40% (0.4 BTC)
@@ -736,7 +737,8 @@ mod tests {
         let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
         executor.place_order(order).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         // Conservative mode: should fill ~20% (0.2 BTC)
@@ -758,8 +760,10 @@ mod tests {
         instant_executor.place_order(order1).unwrap();
         realistic_executor.place_order(order2).unwrap();
 
-        let instant_fills = instant_executor.get_fills();
-        let realistic_fills = realistic_executor.get_fills();
+        let mut instant_fills = Vec::new();
+        instant_executor.get_fills(&mut instant_fills);
+        let mut realistic_fills = Vec::new();
+        realistic_executor.get_fills(&mut realistic_fills);
 
         // Instant should fill more than realistic
         assert!(instant_fills[0].size > realistic_fills[0].size);

@@ -64,7 +64,8 @@ fn test_fill_queue_recovery_after_consumption() {
     }
 
     // Get fills (consume them)
-    let fills = executor.get_fills();
+    let mut fills = Vec::new();
+    executor.get_fills(&mut fills);
     assert!(!fills.is_empty(), "Should have fills");
 
     // Dropped fills should still be 0 (no overflow)
@@ -80,7 +81,8 @@ fn test_fill_queue_recovery_after_consumption() {
         let _ = executor.place_order(order);
     }
 
-    let more_fills = executor.get_fills();
+    let mut more_fills = Vec::new();
+    executor.get_fills(&mut more_fills);
     assert!(
         !more_fills.is_empty(),
         "Should have more fills after consumption"
@@ -117,7 +119,8 @@ fn test_multiple_fills_per_tick_no_overflow() {
         let _ = executor.place_order(sell);
 
         // Consume fills
-        let _fills = executor.get_fills();
+        let mut _fills = Vec::new();
+        executor.get_fills(&mut _fills);
     }
 
     // With proper cleanup, no fills should be dropped

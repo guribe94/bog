@@ -305,9 +305,8 @@ impl Executor for SimulatedExecutor {
         Ok(())
     }
 
-    fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
+    fn get_fills(&mut self, fills: &mut Vec<crate::execution::Fill>) {
         // Drain pending fills and convert to execution::Fill type
-        let mut fills = Vec::new();
         while let Some(pooled_fill) = self.pending_fills.pop() {
             // Convert PooledFill to execution::Fill
             // Convert u64 fixed-point (9 decimals) to Decimal
@@ -334,7 +333,6 @@ impl Executor for SimulatedExecutor {
 
             fills.push(fill);
         }
-        fills
     }
 
     fn dropped_fill_count(&self) -> u64 {
@@ -515,7 +513,8 @@ mod tests {
 
         executor.execute(signal, &position).unwrap();
 
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         let fill = &fills[0];

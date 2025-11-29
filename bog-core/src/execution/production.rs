@@ -645,9 +645,9 @@ impl Executor for ProductionExecutor {
         }
     }
 
-    fn get_fills(&mut self) -> Vec<Fill> {
-        let mut fills = self.pending_fills.lock();
-        std::mem::take(&mut *fills)
+    fn get_fills(&mut self, fills: &mut Vec<Fill>) {
+        let mut pending = self.pending_fills.lock();
+        fills.extend(std::mem::take(&mut *pending));
     }
 
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus> {
@@ -758,7 +758,8 @@ mod tests {
         assert_eq!(executor.metrics.fills_received.load(Ordering::Relaxed), 1);
 
         // Check fill was created
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 1);
 
         let fill = &fills[0];

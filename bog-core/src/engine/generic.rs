@@ -113,8 +113,8 @@
 //! - Target: <50ns engine overhead per tick ✅ **Achieved**
 
 use crate::config::{
-    MAX_DRAWDOWN, MAX_POSITION, MAX_POST_STALE_CHANGE_BPS, MAX_SHORT, MIN_QUOTE_INTERVAL_NS,
-    QUEUE_DEPTH_WARNING_THRESHOLD,
+    MAX_DAILY_LOSS, MAX_DRAWDOWN, MAX_POSITION, MAX_POST_STALE_CHANGE_BPS, MAX_SHORT,
+    MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
@@ -161,9 +161,9 @@ pub trait Executor {
 
     /// Get pending fills (to be processed by engine)
     ///
-    /// This returns all fills that have been generated but not yet consumed.
+    /// Appends fills to the provided buffer to avoid allocation.
     /// After calling this, the fill queue is cleared.
-    fn get_fills(&mut self) -> Vec<crate::execution::Fill>;
+    fn get_fills(&mut self, fills: &mut Vec<crate::execution::Fill>);
 
     /// Get the count of fills that were dropped due to queue overflow
     ///
@@ -482,6 +482,20 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // Calculate trading signal (hot path)
         // Measured: ~17ns for SimpleSpread
         if let Some(signal) = self.strategy.calculate(snapshot, &self.position) {
+            // DAILY LOSS LIMIT CHECK
+            // Must be checked before any execution logic
+            if self.position.get_realized_pnl() < -MAX_DAILY_LOSS {
+                // Log once per tick (throttled by strategy output, but still)
+                // Ideally we'd throttle this log, but halting is priority
+                // We use warn here to avoid flooding error logs if strategy keeps signaling
+                tracing::warn!(
+                    "Daily loss limit exceeded: {} < -{} - skipping signal",
+                    self.position.get_realized_pnl(),
+                    MAX_DAILY_LOSS
+                );
+                return Ok(());
+            }
+
             // PRE-TRADE POSITION LIMIT VALIDATION
             // Check if the signal would breach position limits BEFORE execution
             let current_qty = self.position.get_quantity();
@@ -805,27 +819,36 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 impl<S: Strategy, E: Executor> Engine<S, E> {
     #[inline(always)]
     fn drain_executor_fills(&mut self) -> Result<()> {
-        let fills = self.executor.get_fills();
-
-        if self.executor.dropped_fill_count() > 0 {
-            tracing::error!(
-                "HALTING: {} fills were dropped due to queue overflow - position tracking may be inconsistent",
-                self.executor.dropped_fill_count()
-            );
-            return Err(anyhow!(
-                "Fill queue overflow detected - {} fills dropped",
-                self.executor.dropped_fill_count()
-            ));
+        // Reuse a thread-local buffer to avoid allocations
+        thread_local! {
+            static FILL_BUFFER: std::cell::RefCell<Vec<crate::execution::Fill>> = std::cell::RefCell::new(Vec::with_capacity(crate::config::MAX_FILL_BATCH_SIZE));
         }
 
-        for fill in fills {
-            tracing::info!(
-                "Fill: order_id={:?}, side={:?}, price={}, size={}",
-                fill.order_id,
-                fill.side,
-                fill.price,
-                fill.size
-            );
+        FILL_BUFFER.with(|buffer_cell| -> Result<()> {
+            let mut buffer = buffer_cell.borrow_mut();
+            buffer.clear();
+            
+            self.executor.get_fills(&mut buffer);
+
+            if self.executor.dropped_fill_count() > 0 {
+                tracing::error!(
+                    "HALTING: {} fills were dropped due to queue overflow - position tracking may be inconsistent",
+                    self.executor.dropped_fill_count()
+                );
+                return Err(anyhow!(
+                    "Fill queue overflow detected - {} fills dropped",
+                    self.executor.dropped_fill_count()
+                ));
+            }
+
+            for fill in buffer.iter() {
+                tracing::debug!(
+                    "Fill: order_id={:?}, side={:?}, price={}, size={}",
+                    fill.order_id,
+                    fill.side,
+                    fill.price,
+                    fill.size
+                );
 
             let order_side = match fill.side {
                 crate::execution::types::Side::Buy => 0,
@@ -902,6 +925,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         }
 
         Ok(())
+        })
     }
 }
 
@@ -972,8 +996,8 @@ mod tests {
             "MockExecutor"
         }
 
-        fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
-            Vec::new()
+        fn get_fills(&mut self, _fills: &mut Vec<crate::execution::Fill>) {
+            // No fills
         }
 
         fn dropped_fill_count(&self) -> u64 {
@@ -1038,8 +1062,8 @@ mod tests {
             "PendingFillExecutor"
         }
 
-        fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
-            std::mem::take(&mut self.fills)
+        fn get_fills(&mut self, fills: &mut Vec<crate::execution::Fill>) {
+            fills.extend(std::mem::take(&mut self.fills));
         }
 
         fn dropped_fill_count(&self) -> u64 {
@@ -1207,9 +1231,9 @@ mod tests {
             fn name(&self) -> &'static str {
                 "ExposureMock"
             }
-            fn get_fills(&mut self) -> Vec<crate::execution::Fill> {
-                Vec::new()
-            }
+        fn get_fills(&mut self, _fills: &mut Vec<crate::execution::Fill>) {
+            // No fills
+        }
             fn dropped_fill_count(&self) -> u64 {
                 0
             }
@@ -1425,6 +1449,57 @@ mod tests {
         assert!(
             result.is_ok(),
             "engine should continue within drawdown limit"
+        );
+    }
+
+    #[test]
+    fn test_daily_loss_enforcement_in_engine() {
+        // Test that MAX_DAILY_LOSS is enforced in the engine main loop
+        use crate::config::MAX_DAILY_LOSS;
+
+        struct QuoteStrategy;
+        impl Strategy for QuoteStrategy {
+            fn calculate(
+                &mut self,
+                _snapshot: &MarketSnapshot,
+                _position: &Position,
+            ) -> Option<Signal> {
+                Some(Signal::quote_both(
+                    50_000_000_000_000,
+                    50_010_000_000_000,
+                    100_000_000,
+                ))
+            }
+            fn name(&self) -> &'static str {
+                "QuoteStrategy"
+            }
+        }
+
+        let strategy = QuoteStrategy;
+        let executor = MockExecutor { execute_count: 0 };
+        let mut engine = Engine::new(strategy, executor);
+
+        // Simulate daily loss exceeding limit
+        // MAX_DAILY_LOSS is positive const, we check against negative PnL
+        let loss = -MAX_DAILY_LOSS - 1_000_000_000; // $1 over limit
+        engine.position().update_realized_pnl(loss);
+
+        let snapshot = SnapshotBuilder::new()
+            .market_id(1)
+            .sequence(100)
+            .best_bid(50_000_000_000_000, 1_000_000_000)
+            .best_ask(50_010_000_000_000, 1_000_000_000)
+            .incremental_snapshot()
+            .build();
+
+        // Process tick
+        engine.process_tick(&snapshot, true).unwrap();
+
+        // Should NOT execute because Daily Loss Limit is exceeded
+        // If this fails (count=1), the bug is confirmed
+        assert_eq!(
+            engine.executor.execute_count, 0,
+            "Executor should not fire when daily loss limit exceeded"
         );
     }
 }

@@ -105,10 +105,10 @@ impl Executor for LighterExecutor {
         }
     }
 
-    fn get_fills(&mut self) -> Vec<Fill> {
+    fn get_fills(&mut self, fills: &mut Vec<Fill>) {
         // STUB: No real fills since we're not executing
         warn!("STUB: No fills available (not connected to real exchange)");
-        std::mem::take(&mut self.pending_fills)
+        fills.extend(std::mem::take(&mut self.pending_fills));
     }
 
     fn get_order_status(&self, order_id: &OrderId) -> Option<OrderStatus> {
@@ -302,7 +302,8 @@ mod tests {
         );
 
         // STUB returns no fills
-        let fills = executor.get_fills();
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
         assert_eq!(fills.len(), 0);
     }
 }

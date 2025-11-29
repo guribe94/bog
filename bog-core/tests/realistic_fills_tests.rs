@@ -31,7 +31,8 @@ fn test_instant_mode_fills_100_percent() {
     assert!(result.is_ok(), "Order placement should succeed");
 
     // Get fills
-    let fills = executor.get_fills();
+    let mut fills = Vec::new();
+    executor.get_fills(&mut fills);
     assert!(!fills.is_empty(), "Should have fills");
 
     // Verify 100% fill
@@ -67,7 +68,8 @@ fn test_realistic_mode_enables_partial_fills() {
 
         let result = executor.place_order(order.clone());
         if result.is_ok() {
-            let fills = executor.get_fills();
+            let mut fills = Vec::new();
+            executor.get_fills(&mut fills);
             if !fills.is_empty() {
                 let fill_ratio = fills[0].size / order.size;
                 fill_ratios.push(fill_ratio);
@@ -113,7 +115,8 @@ fn test_realistic_mode_applies_slippage() {
     let result = executor.place_order(buy_order);
     assert!(result.is_ok());
 
-    let fills = executor.get_fills();
+    let mut fills = Vec::new();
+    executor.get_fills(&mut fills);
     assert!(!fills.is_empty(), "Should have fill");
 
     let buy_fill = &fills[0];
@@ -150,7 +153,8 @@ fn test_realistic_mode_partial_fill_not_100() {
         );
 
         if executor.place_order(order.clone()).is_ok() {
-            let fills = executor.get_fills();
+            let mut fills = Vec::new();
+            executor.get_fills(&mut fills);
             if !fills.is_empty() {
                 let fill_pct = (fills[0].size / order.size) * Decimal::from(100);
                 if fill_pct < Decimal::from(100) {
@@ -199,7 +203,8 @@ fn test_fill_rates_statistics() {
         );
 
         if executor.place_order(order.clone()).is_ok() {
-            let fills = executor.get_fills();
+            let mut fills = Vec::new();
+            executor.get_fills(&mut fills);
             if !fills.is_empty() {
                 let fill_ratio = fills[0].size / order.size;
                 total_fill_ratio += fill_ratio;

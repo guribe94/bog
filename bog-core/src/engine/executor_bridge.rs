@@ -81,8 +81,8 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
         "BridgedSimulatedExecutor"
     }
 
-    fn get_fills(&mut self) -> Vec<Fill> {
-        self.executor.get_fills()
+    fn get_fills(&mut self, fills: &mut Vec<Fill>) {
+        self.executor.get_fills(fills)
     }
 
     fn dropped_fill_count(&self) -> u64 {
