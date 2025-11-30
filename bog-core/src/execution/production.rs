@@ -12,13 +12,14 @@
 
 use super::{ExecutionMode, Executor, Fill, Order, OrderId, OrderStatus};
 use crate::monitoring::MetricsRegistry;
+use crate::execution::journal::{AsyncJournal, JournalEntry, JournalEvent};
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write as IoWrite};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -79,34 +80,6 @@ impl OrderState {
             }
             _ => true,
         }
-    }
-}
-
-/// Journal event for persistence and recovery
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "event", content = "data")]
-enum JournalEvent {
-    OrderSubmit(Order),
-    OrderAck(OrderId),
-    Fill(Fill),
-    OrderCancel(OrderId),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JournalEntry {
-    timestamp: u64,
-    #[serde(flatten)]
-    event: JournalEvent,
-}
-
-impl JournalEntry {
-    fn new(event: JournalEvent) -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-            .as_millis() as u64;
-
-        Self { timestamp, event }
     }
 }
 
@@ -260,6 +233,8 @@ pub struct ProductionExecutor {
     config: ProductionExecutorConfig,
     /// Execution mode
     mode: ExecutionMode,
+    /// Async journal writer
+    async_journal: Option<AsyncJournal>,
 }
 
 impl ProductionExecutor {
@@ -282,8 +257,9 @@ impl ProductionExecutor {
             pending_fills: Arc::new(parking_lot::Mutex::new(Vec::new())),
             metrics: Arc::new(ExecutionMetrics::new()),
             prometheus_metrics: None,
-            config,
+            config: config.clone(), // Clone config for use in struct
             mode: ExecutionMode::Simulated,
+            async_journal: None,
         };
 
         // Recover from journal if enabled
@@ -297,6 +273,18 @@ impl ProductionExecutor {
                 }
                 Err(e) => {
                     error!("Failed to recover from journal: {}", e);
+                }
+            }
+        }
+
+        // Initialize async journal AFTER recovery
+        if config.enable_journal {
+            match AsyncJournal::new(config.journal_path.clone()) {
+                Ok(journal) => {
+                    executor.async_journal = Some(journal);
+                }
+                Err(e) => {
+                    error!("Failed to initialize async journal: {}", e);
                 }
             }
         }
@@ -344,22 +332,8 @@ impl ProductionExecutor {
             return;
         }
 
-        let mut file = match OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.config.journal_path)
-        {
-            Ok(f) => f,
-            Err(e) => {
-                error!("Failed to open journal file: {}", e);
-                return;
-            }
-        };
-
-        let entry = JournalEntry::new(event);
-
-        if let Ok(json) = serde_json::to_string(&entry) {
-            writeln!(file, "{}", json).ok();
+        if let Some(journal) = &self.async_journal {
+            journal.record(event);
         }
     }
 
@@ -733,6 +707,18 @@ impl Executor for ProductionExecutor {
         }
 
         Ok(())
+    }
+
+    fn amend_order(&mut self, order_id: &OrderId, new_order: Order) -> Result<OrderId> {
+        info!(
+            "PRODUCTION: Amending order {} -> {} @ {} (size: {})",
+            order_id, new_order.side, new_order.price, new_order.size
+        );
+
+        // For now, implement amend as cancel + place
+        // This ensures correct journaling (Cancel -> Submit) and metric tracking
+        self.cancel_order(order_id)?;
+        self.place_order(new_order)
     }
 }
 

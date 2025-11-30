@@ -86,7 +86,7 @@ pub enum TimeInForce {
 // This ensures a single source of truth for order state representation.
 
 /// An order to be submitted to the exchange
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Order {
     pub id: OrderId,
     pub side: Side,
@@ -165,7 +165,7 @@ impl Order {
 }
 
 /// A fill (trade execution)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Fill {
     pub order_id: OrderId,
     pub side: Side,

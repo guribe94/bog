@@ -121,6 +121,7 @@ pub mod order_bridge;
 pub mod production;
 pub mod simulated;
 pub mod types;
+pub mod journal;
 
 pub use lighter::LighterExecutor;
 pub use order_bridge::{legacy_order_to_pending, order_state_to_legacy, OrderStateWrapper};
@@ -193,6 +194,21 @@ pub trait Executor: Send {
             self.cancel_order(&order_id)?;
         }
         Ok(())
+    }
+
+    /// Atomic order amendment (replace)
+    ///
+    /// Updates an existing order's price or size.
+    /// - If size decreases: Queue priority SHOULD be preserved.
+    /// - If size increases: Queue priority MUST be reset (new order at back of queue).
+    /// - If price changes: Queue priority MUST be reset.
+    ///
+    /// Returns the order ID of the amended order (which may be the same ID or a new one).
+    ///
+    /// Default implementation is non-atomic: Cancel + Place.
+    fn amend_order(&mut self, order_id: &OrderId, new_order: Order) -> Result<OrderId> {
+        self.cancel_order(order_id)?;
+        self.place_order(new_order)
     }
 }
 

@@ -151,6 +151,18 @@ impl QueueTracker {
     fn remove_order(&mut self, order_id: &OrderId) {
         self.positions.remove(order_id);
     }
+
+    /// Get position ratio (0.0 = front, 1.0 = back)
+    fn get_position_ratio(&self, order_id: &OrderId) -> Option<f64> {
+        self.positions.get(order_id).map(|p| p.size_ahead_ratio)
+    }
+
+    /// Set position ratio manually (for atomic amend)
+    fn set_position_ratio(&mut self, order_id: &OrderId, ratio: f64) {
+        if let Some(pos) = self.positions.get_mut(order_id) {
+            pos.size_ahead_ratio = ratio;
+        }
+    }
 }
 
 /// Simulated executor for paper trading and backtesting
@@ -466,6 +478,39 @@ impl Executor for SimulatedExecutor {
         } else {
             Err(anyhow!("Order {} not found", order_id))
         }
+    }
+
+    fn amend_order(&mut self, order_id: &OrderId, new_order: Order) -> Result<OrderId> {
+        // Check if we should preserve priority (Size decrease AND price same)
+        let preserve_priority = if let Some(old_order) = self.orders.get(order_id) {
+            let old_data = old_order.to_legacy();
+            
+            old_data.price == new_order.price && new_order.size < old_data.remaining_size()
+        } else {
+            false
+        };
+
+        let old_ratio = if preserve_priority {
+            self.queue_tracker.get_position_ratio(order_id)
+        } else {
+            None
+        };
+
+        // Atomic Cancel + Place
+        self.cancel_order(order_id)?;
+        let new_id = self.place_order(new_order)?;
+
+        // Restore priority if applicable
+        if let Some(ratio) = old_ratio {
+            self.queue_tracker.set_position_ratio(&new_id, ratio);
+            info!(
+                "SIMULATED: Amended order {} (preserved queue priority: {:.2}%)",
+                new_id,
+                ratio * 100.0
+            );
+        }
+
+        Ok(new_id)
     }
 
     fn get_fills(&mut self, fills: &mut Vec<Fill>) {
@@ -802,5 +847,27 @@ mod tests {
         assert!(conservative.enable_partial_fills);
         assert_eq!(conservative.front_of_queue_fill_rate, 0.6);
         assert_eq!(conservative.back_of_queue_fill_rate, 0.2);
+    }
+
+    #[test]
+    fn test_amend_order_preserves_priority() {
+        let mut executor = SimulatedExecutor::new_realistic();
+        let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
+        let order_id = executor.place_order(order).unwrap();
+
+        // Amend: Decrease size (should preserve priority)
+        let new_order = Order::limit(Side::Buy, dec!(50000), dec!(0.5));
+        let new_id = executor.amend_order(&order_id, new_order).unwrap();
+
+        assert_ne!(new_id, order_id); // New ID generated
+
+        // Old order cancelled
+        assert!(matches!(
+            executor.get_order_status(&order_id).unwrap(),
+            OrderStatus::Cancelled
+        ));
+        
+        // New order active/filled
+        assert!(executor.get_order_status(&new_id).is_some());
     }
 }

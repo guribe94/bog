@@ -319,6 +319,15 @@ impl OrderPending {
         OrderRejected { data: self.data }
     }
 
+    /// Transition: Pending → Cancelled (cancelled before acknowledgement)
+    pub fn cancel(mut self) -> OrderCancelled {
+        let now = SystemTime::now();
+        self.data.completed_at = Some(now);
+        self.data.updated_at = now;
+        self.data.rejection_reason = Some("Cancelled while pending".to_string());
+        OrderCancelled { data: self.data }
+    }
+
     /// Get current status
     pub fn status(&self) -> OrderStatus {
         OrderStatus::Pending
@@ -858,6 +867,20 @@ mod tests {
     // ========================================================================
     // Valid Transition Tests
     // ========================================================================
+
+    #[test]
+    fn test_pending_to_cancelled() {
+        let order = create_test_order();
+        let order_id = order.data().id.clone();
+
+        // Pending -> Cancelled
+        // This allows cancelling before exchange acknowledgement (e.g. timeout)
+        let order = order.cancel();
+
+        assert_eq!(order.status(), OrderStatus::Cancelled);
+        assert!(order.data().completed_at.is_some());
+        assert_eq!(order.data().id, order_id);
+    }
 
     #[test]
     fn test_pending_to_open() {

@@ -134,6 +134,29 @@ impl L2OrderBook {
     /// Performance: ~20ns (copy 4 u64 values)
     #[inline]
     pub fn incremental_update(&mut self, snapshot: &MarketSnapshot) {
+        // Check for sequence gaps
+        if let Some(gap) = self.check_sequence_gap(snapshot.sequence) {
+            if gap > 1 {
+                // Gap > 1 means we missed at least one update.
+                // Since this is incremental, we might have missed updates to levels 1-9.
+                // We log this critical warning. The Engine or CircuitBreaker should decide whether to halt.
+                // For now, we assume levels 1-9 are potentially stale.
+                tracing::warn!(
+                    "SEQUENCE GAP detected in incremental update: {} -> {} (gap: {}). Depth levels 1-9 may be stale.",
+                    self.last_sequence,
+                    snapshot.sequence,
+                    gap
+                );
+                self.depth_stale = true;
+
+                // Clear potentially stale depth levels (1-9) to prevent strategies using invalid data
+                self.bid_prices[1..].fill(0);
+                self.bid_sizes[1..].fill(0);
+                self.ask_prices[1..].fill(0);
+                self.ask_sizes[1..].fill(0);
+            }
+        }
+
         // Update only level 0 (best bid/ask)
         self.bid_prices[0] = snapshot.best_bid_price;
         self.bid_sizes[0] = snapshot.best_bid_size;
@@ -985,5 +1008,43 @@ mod tests {
         // Test incremental (flag clear)
         set_full_snapshot(&mut snapshot, false);
         assert!(!is_full_snapshot(&snapshot), "Flag should be clear");
+    }
+
+    #[test]
+    fn test_sequence_gap_clears_depth() {
+        let mut book = L2OrderBook::new(1);
+
+        // Initialize with full snapshot
+        let mut snapshot_full = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_full, true);
+        snapshot_full.sequence = 100;
+        book.full_rebuild(&snapshot_full);
+
+        // Verify depth is populated
+        assert_ne!(book.bid_prices[5], 0);
+        assert_ne!(book.ask_prices[5], 0);
+        assert!(!book.depth_stale);
+
+        // Send incremental update with GAP (100 -> 105, gap of 4)
+        let mut snapshot_gap = create_test_snapshot();
+        set_full_snapshot(&mut snapshot_gap, false);
+        snapshot_gap.sequence = 105;
+
+        book.incremental_update(&snapshot_gap);
+
+        // Assert depth is cleared
+        for i in 1..DEPTH_LEVELS {
+            assert_eq!(book.bid_prices[i], 0, "Bid level {} should be 0", i);
+            assert_eq!(book.ask_prices[i], 0, "Ask level {} should be 0", i);
+            assert_eq!(book.bid_sizes[i], 0, "Bid size {} should be 0", i);
+            assert_eq!(book.ask_sizes[i], 0, "Ask size {} should be 0", i);
+        }
+
+        // Level 0 should be updated
+        assert_eq!(book.bid_prices[0], snapshot_gap.best_bid_price);
+        assert_eq!(book.ask_prices[0], snapshot_gap.best_ask_price);
+
+        // Depth stale flag should be set
+        assert!(book.depth_stale);
     }
 }

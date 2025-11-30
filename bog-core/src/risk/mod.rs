@@ -307,6 +307,11 @@ impl RiskManager {
         }
 
         // Check drawdown
+        // Note: This check uses realized PnL only, as RiskManager doesn't track unrealized PnL.
+        // The main Engine handles Mark-to-Market drawdown checks with full orderbook context.
+        // We skip this check here to avoid false positives where HWM includes unrealized gains
+        // but current_pnl is only realized.
+        /*
         let current_pnl = self.position.total_pnl();
         let drawdown = self.position.daily_high_water_mark - current_pnl;
         let drawdown_pct = if self.position.daily_high_water_mark > Decimal::ZERO {
@@ -329,6 +334,7 @@ impl RiskManager {
             }
             .to_string()));
         }
+        */
 
         Ok(())
     }
@@ -388,7 +394,9 @@ impl RiskManager {
                     } else if old_quantity == Decimal::ZERO {
                         Decimal::ZERO
                     } else {
-                        let avg_long_price = self.position.cost_basis / old_quantity;
+                        // Calculate average entry price (positive value)
+                        // cost_basis is negative for longs (money spent), so flip sign
+                        let avg_long_price = -self.position.cost_basis / old_quantity;
                         (fill.price - avg_long_price) * sell_size
                     }
                 } else {

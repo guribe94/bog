@@ -1425,6 +1425,7 @@ mod tests {
         
         // Set realized PnL to peak (so no realized drawdown)
         engine.position().update_realized_pnl(peak);
+        engine.position().update_daily_pnl(peak);
 
         // Setup position to cause UNREALIZED loss
         // Long 1 BTC @ 50k
@@ -1483,6 +1484,7 @@ mod tests {
         // Stay within allowed drawdown
         let current = peak - allowed / 2;
         engine.position().update_realized_pnl(current);
+        engine.position().update_daily_pnl(current);
 
         let snapshot = SnapshotBuilder::new()
             .market_id(2)
@@ -1530,6 +1532,7 @@ mod tests {
         // MAX_DAILY_LOSS is positive const, we check against negative PnL
         let loss = -MAX_DAILY_LOSS - 1_000_000_000; // $1 over limit
         engine.position().update_realized_pnl(loss);
+        engine.position().update_daily_pnl(loss);
 
         let snapshot = SnapshotBuilder::new()
             .market_id(1)
