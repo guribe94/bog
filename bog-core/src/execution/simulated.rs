@@ -67,11 +67,11 @@ impl RealisticFillConfig {
 #[derive(Debug, Clone)]
 struct QueuePosition {
     /// Order ID
-    order_id: OrderId,
+    _order_id: OrderId,
     /// Price level (u64 fixed-point)
-    price_level: u64,
+    _price_level: u64,
     /// Our order size
-    our_size: Decimal,
+    _our_size: Decimal,
     /// Volume ahead of us in queue (starts at 100% of level)
     /// This is a simplification: we assume we join at the back
     size_ahead_ratio: f64,
@@ -104,9 +104,9 @@ impl QueueTracker {
             .unwrap_or(0);
 
         let position = QueuePosition {
-            order_id: order.id.clone(),
-            price_level: price_u64,
-            our_size: order.size,
+            _order_id: order.id.clone(),
+            _price_level: price_u64,
+            _our_size: order.size,
             // Assume we join at back of queue (100% ahead of us)
             // In reality, we'd calculate this from MarketSnapshot
             size_ahead_ratio: 1.0,

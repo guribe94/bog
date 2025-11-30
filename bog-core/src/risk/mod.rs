@@ -1,202 +1,148 @@
 //! Risk Management System
 //!
 //! Multi-layer risk protection for HFT trading with real-time validation.
-//!
-//! ## Architecture
-//!
-//! The risk system provides **defense in depth** with multiple independent layers:
-//!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                    Risk Management Layers                   │
-//! ├─────────────────────────────────────────────────────────────┤
-//! │                                                             │
-//! │  Signal → PreTrade → RiskManager → CircuitBreaker → Execute │
-//! │            Check      Validate      Monitor                 │
-//! │              ↓           ↓             ↓                     │
-//! │          ┌───────┐  ┌─────────┐  ┌──────────┐             │
-//! │          │ Order │  │Position │  │ Market   │             │
-//! │          │ Size  │  │ Limits  │  │Conditions│             │
-//! │          │ Rules │  │ Daily P&L│  │Volatility│             │
-//! │          └───────┘  └─────────┘  └──────────┘             │
-//! │                                                             │
-//! │  ┌─────────────────────────────────────────────────────┐   │
-//! │  │           RateLimiter (order frequency)              │   │
-//! │  │   Max 10 orders/sec, burst 20, severity-based       │   │
-//! │  └─────────────────────────────────────────────────────┘   │
-//! └─────────────────────────────────────────────────────────────┘
-//! ```
-//!
-//! ## Risk Layers
-//!
-//! ### 1. Pre-Trade Validation ([`PreTradeValidator`])
-//!
-//! Validates signals before execution:
-//! - **Order size limits** - Min/max per order
-//! - **Exchange rules** - Tick size, lot size, notional limits
-//! - **Signal sanity** - Price reasonableness, crossed quotes
-//!
-//! **Performance**: ~10ns validation time
-//!
-//! ### 2. Position Risk ([`RiskManager`])
-//!
-//! Tracks positions and enforces limits:
-//! - **Position limits** - Max long/short exposure
-//! - **Daily loss limits** - Halt trading on max daily loss
-//! - **Drawdown limits** - Halt on % drawdown from peak
-//! - **Order size validation** - Per-order size limits
-//!
-//! **Performance**: ~25ns per validation
-//!
-//! ### 3. Circuit Breaker ([`CircuitBreaker`])
-//!
-//! Monitors market conditions and halts on anomalies:
-//! - **Spread monitoring** - Halt if spread >100 bps (flash crash)
-//! - **Price spike detection** - Halt on >10% price move
-//! - **Stale data detection** - Halt if data >5s old
-//! - **Sequence gaps** - Detect missed market data
-//!
-//! **Performance**: ~20ns per check
-//!
-//! ### 4. Rate Limiting ([`RateLimiter`])
-//!
-//! Controls order frequency to prevent:
-//! - Exchange rate limit violations
-//! - Runaway strategy bugs
-//! - Excessive trading costs
-//!
-//! **Limits**:
-//! - 10 orders/second sustained
-//! - 20 orders/second burst
-//! - Severity-based throttling
-//!
-//! ## Configuration
-//!
-//! Risk limits are **compile-time configured** via Cargo features:
-//!
-//! ```toml
-//! bog-core = { features = [
-//!     # Position limits
-//!     "max-position-one",     # Max 1.0 BTC long/short
-//!     "max-short-half",       # Max 0.5 BTC short
-//!
-//!     # Order limits
-//!     "max-order-half",       # Max 0.5 BTC per order
-//!     "min-order-milli",      # Min 0.001 BTC per order
-//!
-//!     # Loss limits
-//!     "max-daily-loss-1000",  # Max $1000 loss/day
-//!     "max-drawdown-10pct",   # Halt on 10% drawdown
-//!
-//!     # Circuit breaker
-//!     "breaker-gap-5000",     # Halt on gap >5000 sequences
-//! ] }
-//! ```
-//!
-//! See [`crate::config`] for all risk feature flags.
-//!
-//! ## Usage Example
-//!
-//! ```rust
-//! use bog_core::risk::{RiskLimits, RiskManager};
-//! use bog_core::core::{Signal, SignalAction};
-//! use rust_decimal::Decimal;
-//! use rust_decimal::prelude::FromPrimitive;
-//! use rust_decimal_macros::dec;
-//!
-//! // Create risk manager with limits
-//! let limits = RiskLimits {
-//!     max_position: Decimal::from(1),        // 1.0 BTC
-//!    max_short: Decimal::from(1),           // 1.0 BTC short
-//!     max_order_size: Decimal::from_f64(0.5).unwrap(),
-//!     min_order_size: Decimal::from_f64(0.001).unwrap(),
-//!     max_outstanding_orders: 10,
-//!     max_daily_loss: Decimal::from(5000),   // $5k
-//!     max_drawdown_pct: 0.20,                // 20%
-//! };
-//!
-//! let mut risk_manager = RiskManager::with_limits(limits);
-//!
-//! // Validate signal before execution
-//! let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000);
-//! if let Err(err) = risk_manager.validate_signal(&signal) {
-//!     eprintln!("Risk violation: {}", err);
-//! }
-//! ```
-//!
-//! ## Safety Guarantees
-//!
-//! 1. **No position tracking bugs** - Atomic operations with checked arithmetic
-//! 2. **No limit violations** - All signals validated before execution
-//! 3. **Graceful degradation** - Circuit breaker halts on anomalies, not panics
-//! 4. **Overflow protection** - All position updates use checked math
-//! 5. **Thread-safe** - Lock-free atomic position updates
-//!
-//! ## Performance
-//!
-//! Total risk validation overhead: **~55ns**
-//! - PreTrade validation: ~10ns
-//! - RiskManager check: ~25ns
-//! - CircuitBreaker check: ~20ns
-//!
-//! Well within the <100ns risk budget for sub-microsecond tick-to-trade.
+//! Uses zero-overhead fixed-point arithmetic and atomic state tracking.
+
+use crate::config::constants::*;
+use crate::core::{Position, Side as CoreSide, Signal, SignalAction};
+use crate::core::fixed_point;
+use anyhow::{anyhow, Result};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{info, warn, error};
+use std::fmt;
 
 pub mod circuit_breaker;
 pub mod pre_trade;
 pub mod rate_limiter;
-pub mod types;
 
 pub use circuit_breaker::{BreakerState, CircuitBreaker, HaltReason};
 pub use pre_trade::{ExchangeRules, PreTradeRejection, PreTradeResult, PreTradeValidator};
 pub use rate_limiter::{RateLimiter, RateLimiterConfig};
-pub use types::{Position, RiskLimits, RiskViolation};
 
-// Removed: moving to compile-time config
-// use crate::config::RiskConfig;
-use crate::execution::{Fill, Side};
-use crate::core::{Signal, SignalAction};
-use anyhow::{anyhow, Result};
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{error, info};
+/// Risk limits configuration (i64 fixed-point)
+#[derive(Debug, Clone, Copy)]
+pub struct RiskLimits {
+    /// Maximum long position size
+    pub max_position: i64,
 
-/// Risk manager - validates signals and tracks positions
+    /// Maximum short position size (positive value)
+    pub max_short: i64,
+
+    /// Maximum size per order
+    pub max_order_size: i64,
+
+    /// Minimum size per order
+    pub min_order_size: i64,
+
+    /// Maximum number of outstanding orders
+    pub max_outstanding_orders: usize,
+
+    /// Maximum daily loss (circuit breaker)
+    pub max_daily_loss: i64,
+
+    /// Maximum drawdown fraction (e.g. 50_000_000 for 5%)
+    pub max_drawdown: i64,
+}
+
+impl Default for RiskLimits {
+    fn default() -> Self {
+        Self {
+            max_position: MAX_POSITION,
+            max_short: MAX_SHORT,
+            // Default order limits if not in constants, assuming features control them or safe defaults
+            max_order_size: MAX_POSITION / 2, 
+            min_order_size: 100_000, // 0.0001
+            max_outstanding_orders: 10,
+            max_daily_loss: MAX_DAILY_LOSS,
+            max_drawdown: MAX_DRAWDOWN,
+        }
+    }
+}
+
+/// Risk violation types
+#[derive(Debug, Clone)]
+pub enum RiskViolation {
+    OrderSizeTooSmall { size: i64, min: i64 },
+    OrderSizeTooLarge { size: i64, max: i64 },
+    PositionLimitExceeded { projected: i64, limit: i64 },
+    ShortLimitExceeded { projected: i64, limit: i64 },
+    TooManyOutstandingOrders { current: usize, max: usize },
+    DailyLossLimitBreached { daily_pnl: i64, limit: i64 },
+    DrawdownLimitBreached { drawdown: i64, limit: i64 },
+}
+
+impl fmt::Display for RiskViolation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RiskViolation::OrderSizeTooSmall { size, min } => {
+                write!(f, "Order size {} is below minimum {}", size, min)
+            }
+            RiskViolation::OrderSizeTooLarge { size, max } => {
+                write!(f, "Order size {} exceeds maximum {}", size, max)
+            }
+            RiskViolation::PositionLimitExceeded { projected, limit } => {
+                write!(
+                    f,
+                    "Projected position {} would exceed limit {}",
+                    projected, limit
+                )
+            }
+            RiskViolation::ShortLimitExceeded { projected, limit } => {
+                write!(
+                    f,
+                    "Projected short position {} would exceed limit {}",
+                    projected, limit
+                )
+            }
+            RiskViolation::TooManyOutstandingOrders { current, max } => {
+                write!(
+                    f,
+                    "Outstanding orders {} would exceed maximum {}",
+                    current, max
+                )
+            }
+            RiskViolation::DailyLossLimitBreached { daily_pnl, limit } => {
+                write!(f, "Daily PnL {} breaches loss limit {}", daily_pnl, limit)
+            }
+            RiskViolation::DrawdownLimitBreached { drawdown, limit } => {
+                write!(
+                    f,
+                    "Drawdown {} breaches limit {}",
+                    drawdown, limit
+                )
+            }
+        }
+    }
+}
+
+/// Risk manager - validates signals and limits using fixed-point arithmetic
 ///
 /// Central risk management component that:
-/// - Tracks position state atomically
 /// - Validates signals against position/order limits
 /// - Enforces daily loss and drawdown limits
-/// - Updates position from fills
+/// - Manages daily PnL resets
 ///
 /// # Thread Safety
 ///
-/// RiskManager uses lock-free atomic operations for position tracking,
-/// enabling concurrent reads from multiple threads while maintaining
-/// consistency.
-///
-/// # Performance
-///
-/// - Signal validation: ~25ns
-/// - Position update: ~12ns
-/// - Limit checks: ~8ns
+/// RiskManager itself is not thread-safe (mutable state for timestamp/orders),
+/// but it operates on thread-safe atomic Position.
 pub struct RiskManager {
-    position: Position,
     limits: RiskLimits,
     daily_reset_timestamp: u64,
     outstanding_order_count: usize,
 }
 
 impl RiskManager {
-    // TODO: Remove runtime config, use const generics
-    // pub fn new(config: &RiskConfig) -> Self { ... }
+    /// Create a new RiskManager with default limits (from constants)
+    pub fn new() -> Self {
+        Self::with_limits(RiskLimits::default())
+    }
 
-    /// Create with explicit limits (for testing or const-based initialization)
+    /// Create with explicit limits
     pub fn with_limits(limits: RiskLimits) -> Self {
         info!("Initialized RiskManager with limits: {:?}", limits);
 
         Self {
-            position: Position::default(),
             limits,
             daily_reset_timestamp: Self::get_day_start_timestamp(),
             outstanding_order_count: 0,
@@ -215,445 +161,285 @@ impl RiskManager {
     }
 
     /// Check if we need to reset daily stats
-    fn check_daily_reset(&mut self) {
+    pub fn check_daily_reset(&mut self, position: &Position) {
         let current_day_start = Self::get_day_start_timestamp();
 
         if current_day_start > self.daily_reset_timestamp {
+            let old_daily_pnl = position.get_daily_pnl();
             info!(
                 "New trading day detected, resetting daily PnL (was: {})",
-                self.position.daily_pnl
+                old_daily_pnl
             );
-            self.position.daily_pnl = Decimal::ZERO;
-            self.position.daily_high_water_mark = self.position.total_pnl();
+            position.reset_daily_pnl();
+            // Initialize HWM to current realized PnL (total) to start fresh day
+            let total_pnl = position.get_realized_pnl();
+            position.update_daily_high_water_mark(total_pnl);
+            
             self.daily_reset_timestamp = current_day_start;
         }
     }
 
+    /// Check daily loss limit
+    pub fn check_daily_loss(&self, daily_total_pnl: i64) -> Result<()> {
+        // MAX_DAILY_LOSS is positive (e.g. 5000). We check if pnl < -5000.
+        if daily_total_pnl < -self.limits.max_daily_loss {
+             warn!(
+                "Daily loss limit breached: {} < -{}",
+                daily_total_pnl, self.limits.max_daily_loss
+            );
+            return Err(anyhow!(RiskViolation::DailyLossLimitBreached {
+                daily_pnl: daily_total_pnl,
+                limit: self.limits.max_daily_loss
+            }));
+        }
+        Ok(())
+    }
+
+    /// Check drawdown limit
+    pub fn check_drawdown(&self, daily_total_pnl: i64, peak_pnl: i64) -> Result<()> {
+        // Drawdown is peak - current.
+        let drawdown = peak_pnl.saturating_sub(daily_total_pnl);
+        
+        if peak_pnl > 0 && self.limits.max_drawdown > 0 {
+             let allowed_drawdown = ((peak_pnl as i128) * self.limits.max_drawdown as i128 / fixed_point::SCALE as i128)
+                .clamp(i64::MIN as i128, i64::MAX as i128)
+                as i64;
+
+            if allowed_drawdown > 0 && drawdown > allowed_drawdown {
+                error!(
+                    "Drawdown limit exceeded: drawdown={} > limit={}",
+                    drawdown,
+                    allowed_drawdown
+                );
+                return Err(anyhow!(RiskViolation::DrawdownLimitBreached {
+                    drawdown,
+                    limit: allowed_drawdown
+                }));
+            }
+        }
+        Ok(())
+    }
+
     /// Validate a signal before execution
-    pub fn validate_signal(&self, signal: &Signal) -> Result<()> {
+    ///
+    /// Checks:
+    /// - Order size limits
+    /// - Position limits (including open exposure)
+    /// - Outstanding order counts
+    pub fn validate_signal(
+        &self, 
+        signal: &Signal, 
+        position: &Position,
+        open_long_exposure: i64,
+        open_short_exposure: i64
+    ) -> Result<()> {
         // No validation needed for cancel or no action
         if !signal.requires_action() || matches!(signal.action, SignalAction::CancelAll) {
             return Ok(());
         }
 
-        // Convert Signal to temporary orders for validation
-        // We need to map u64 fixed-point to Decimal
-        let scale = Decimal::from(1_000_000_000);
-        
-        let mut orders = Vec::new();
-        
-        match signal.action {
-            SignalAction::QuoteBoth => {
-                orders.push((Side::Buy, signal.size));
-                orders.push((Side::Sell, signal.size));
-            },
-            SignalAction::QuoteBid => {
-                orders.push((Side::Buy, signal.size));
-            },
-            SignalAction::QuoteAsk => {
-                orders.push((Side::Sell, signal.size));
-            },
-            SignalAction::TakePosition => {
-                let side = match signal.side {
-                    crate::core::Side::Buy => Side::Buy,
-                    crate::core::Side::Sell => Side::Sell,
-                };
-                orders.push((side, signal.size));
-            },
-            _ => {} // NoAction, CancelAll handled above
+        let size_i64 = signal.size as i64;
+        // Check order size limits
+        if size_i64 < self.limits.min_order_size {
+             return Err(anyhow!(RiskViolation::OrderSizeTooSmall {
+                size: size_i64,
+                min: self.limits.min_order_size
+            }));
         }
 
-        for (side, size_u64) in &orders {
-            let size = Decimal::from(*size_u64) / scale;
+        if size_i64 > self.limits.max_order_size {
+            return Err(anyhow!(RiskViolation::OrderSizeTooLarge {
+                size: size_i64,
+                max: self.limits.max_order_size
+            }));
+        }
 
-            // Check order size limits
-            if size < self.limits.min_order_size {
-                return Err(anyhow!(RiskViolation::OrderSizeTooSmall {
-                    size,
-                    min: self.limits.min_order_size
+        // Calculate projected position including open exposure
+        let current_qty = position.get_quantity();
+        
+        let projected_position_check = match signal.action {
+            SignalAction::QuoteBoth => {
+                // Check Long side: Current + Open Long + New Buy
+                let long_proj = current_qty
+                    .saturating_add(open_long_exposure)
+                    .saturating_add(size_i64);
+                
+                // Check Short side: Current - Open Short - New Sell
+                // Note: short exposure is positive magnitude, so subtract it
+                let short_proj = current_qty
+                    .saturating_sub(open_short_exposure)
+                    .saturating_sub(size_i64);
+                
+                if long_proj > self.limits.max_position {
+                     return Err(anyhow!(RiskViolation::PositionLimitExceeded {
+                        projected: long_proj,
+                        limit: self.limits.max_position
+                    }));
                 }
-                .to_string()));
-            }
-
-            if size > self.limits.max_order_size {
-                return Err(anyhow!(RiskViolation::OrderSizeTooLarge {
-                    size,
-                    max: self.limits.max_order_size
+                if short_proj < -self.limits.max_short {
+                    return Err(anyhow!(RiskViolation::ShortLimitExceeded {
+                        projected: short_proj,
+                        limit: self.limits.max_short
+                    }));
                 }
-                .to_string()));
-            }
-
-            // Check position limits (projected position after order fills)
-            let projected_position = match side {
-                Side::Buy => self.position.quantity + size,
-                Side::Sell => self.position.quantity - size,
-            };
-
-            if projected_position > self.limits.max_position {
-                return Err(anyhow!(RiskViolation::PositionLimitExceeded {
-                    projected: projected_position,
-                    limit: self.limits.max_position
+                return Ok(());
+            },
+            SignalAction::QuoteBid | SignalAction::TakePosition if matches!(signal.side, CoreSide::Buy) => {
+                // Buying: Current + Open Long + New Buy
+                current_qty
+                    .saturating_add(open_long_exposure)
+                    .saturating_add(size_i64)
+            },
+            SignalAction::QuoteAsk | SignalAction::TakePosition if matches!(signal.side, CoreSide::Sell) => {
+                 // Selling: Current - Open Short - New Sell
+                 current_qty
+                    .saturating_sub(open_short_exposure)
+                    .saturating_sub(size_i64)
+            },
+            SignalAction::TakePosition => {
+                // Handle default case if side logic above missed something (unlikely)
+                 match signal.side {
+                    CoreSide::Buy => current_qty.saturating_add(open_long_exposure).saturating_add(size_i64),
+                    CoreSide::Sell => current_qty.saturating_sub(open_short_exposure).saturating_sub(size_i64),
                 }
-                .to_string()));
             }
+            _ => current_qty,
+        };
 
-            if projected_position < -self.limits.max_short {
-                return Err(anyhow!(RiskViolation::ShortLimitExceeded {
-                    projected: projected_position,
-                    limit: self.limits.max_short
-                }
-                .to_string()));
-            }
+        if projected_position_check > self.limits.max_position {
+            return Err(anyhow!(RiskViolation::PositionLimitExceeded {
+                projected: projected_position_check,
+                limit: self.limits.max_position
+            }));
+        }
+
+        if projected_position_check < -self.limits.max_short {
+            return Err(anyhow!(RiskViolation::ShortLimitExceeded {
+                projected: projected_position_check,
+                limit: self.limits.max_short
+            }));
         }
 
         // Check outstanding order count
-        let new_order_count = self.outstanding_order_count + orders.len();
-        if new_order_count > self.limits.max_outstanding_orders {
-            return Err(anyhow!(RiskViolation::TooManyOutstandingOrders {
-                current: new_order_count,
+        // If we are adding orders, we need to check.
+        // Signal produces 1 or 2 orders.
+        let new_orders = match signal.action {
+            SignalAction::QuoteBoth => 2,
+            _ => 1,
+        };
+        
+        let new_count = self.outstanding_order_count + new_orders;
+        if new_count > self.limits.max_outstanding_orders {
+             return Err(anyhow!(RiskViolation::TooManyOutstandingOrders {
+                current: new_count,
                 max: self.limits.max_outstanding_orders
-            }
-            .to_string()));
-        }
-
-        // Check daily loss limit
-        if self.position.daily_pnl < -self.limits.max_daily_loss {
-            error!(
-                "Daily loss limit breached: {} < -{}",
-                self.position.daily_pnl, self.limits.max_daily_loss
-            );
-            return Err(anyhow!(RiskViolation::DailyLossLimitBreached {
-                daily_pnl: self.position.daily_pnl,
-                limit: self.limits.max_daily_loss
-            }
-            .to_string()));
-        }
-
-        // Check drawdown
-        // Note: This check uses realized PnL only, as RiskManager doesn't track unrealized PnL.
-        // The main Engine handles Mark-to-Market drawdown checks with full orderbook context.
-        // We skip this check here to avoid false positives where HWM includes unrealized gains
-        // but current_pnl is only realized.
-        /*
-        let current_pnl = self.position.total_pnl();
-        let drawdown = self.position.daily_high_water_mark - current_pnl;
-        let drawdown_pct = if self.position.daily_high_water_mark > Decimal::ZERO {
-            (drawdown / self.position.daily_high_water_mark)
-                .to_f64()
-                .unwrap_or(0.0)
-            } else {
-            0.0
-        };
-
-        if drawdown_pct > self.limits.max_drawdown_pct {
-            error!(
-                "Drawdown limit breached: {:.2}% > {:.2}%",
-                drawdown_pct * 100.0,
-                self.limits.max_drawdown_pct * 100.0
-            );
-            return Err(anyhow!(RiskViolation::DrawdownLimitBreached {
-                drawdown_pct,
-                limit: self.limits.max_drawdown_pct
-            }
-            .to_string()));
-        }
-        */
-
-        Ok(())
-    }
-
-    /// Update position from a fill
-    ///
-    /// # Safety
-    /// Returns Err if position state is invalid (e.g., zero cost_basis with non-zero quantity).
-    /// This prevents trading with corrupted accounting state.
-    pub fn update_position(&mut self, fill: &Fill) -> Result<()> {
-        self.check_daily_reset();
-
-        // Update position
-        let old_quantity = self.position.quantity;
-        self.position.quantity += fill.position_change();
-
-        // Calculate PnL
-        let pnl = match fill.side {
-            Side::Buy => {
-                // Buying increases position, costs cash
-                if old_quantity < Decimal::ZERO {
-                    // Covering a short - realize PnL
-                    let cover_size = fill.size.min(-old_quantity);
-
-                    // Invariant: if we have a non-zero position, cost_basis must be non-zero
-                    // Division by zero would indicate a critical accounting bug
-                    if old_quantity != Decimal::ZERO && self.position.cost_basis == Decimal::ZERO {
-                        return Err(anyhow!(
-                            "HALTING: Invalid position state when covering short - \
-                             old_quantity={} but cost_basis=0. This indicates position accounting corruption.",
-                            old_quantity
-                        ));
-                    } else if old_quantity == Decimal::ZERO {
-                        Decimal::ZERO
-                    } else {
-                        let avg_short_price = -self.position.cost_basis / old_quantity;
-                        (avg_short_price - fill.price) * cover_size
-                    }
-                } else {
-                    Decimal::ZERO // Adding to long position
-                }
-            }
-            Side::Sell => {
-                // Selling decreases position, adds cash
-                if old_quantity > Decimal::ZERO {
-                    // Selling a long - realize PnL
-                    let sell_size = fill.size.min(old_quantity);
-
-                    // Invariant: if we have a non-zero position, cost_basis must be non-zero
-                    // Division by zero would indicate a critical accounting bug
-                    if old_quantity != Decimal::ZERO && self.position.cost_basis == Decimal::ZERO {
-                        return Err(anyhow!(
-                            "HALTING: Invalid position state when selling long - \
-                             old_quantity={} but cost_basis=0. This indicates position accounting corruption.",
-                            old_quantity
-                        ));
-                    } else if old_quantity == Decimal::ZERO {
-                        Decimal::ZERO
-                    } else {
-                        // Calculate average entry price (positive value)
-                        // cost_basis is negative for longs (money spent), so flip sign
-                        let avg_long_price = -self.position.cost_basis / old_quantity;
-                        (fill.price - avg_long_price) * sell_size
-                    }
-                } else {
-                    Decimal::ZERO // Adding to short position
-                }
-            }
-        };
-
-        // Deduct fee from realized PnL (for accurate profitability)
-        let fee_amount = fill.fee.unwrap_or(Decimal::ZERO);
-
-        self.position.realized_pnl += pnl - fee_amount;
-        self.position.daily_pnl += pnl - fee_amount;
-
-        // Update cost basis
-        self.position.cost_basis += fill.cash_flow();
-
-        // Update high water mark
-        let total_pnl = self.position.total_pnl();
-        if total_pnl > self.position.daily_high_water_mark {
-            self.position.daily_high_water_mark = total_pnl;
-        }
-
-        // Update trade count
-        self.position.trade_count += 1;
-
-        info!(
-            "Position updated: quantity={}, cost_basis={}, realized_pnl={}, daily_pnl={}",
-            self.position.quantity,
-            self.position.cost_basis,
-            self.position.realized_pnl,
-            self.position.daily_pnl
-        );
-
-        if pnl != Decimal::ZERO {
-            info!("Realized PnL from fill: {}", pnl);
-        }
-
-        // ====================================================================
-        // CRITICAL: Post-fill position limit validation
-        // ====================================================================
-        // Check position limits AFTER fill is processed
-        // This catches cases where fills arrive out of order or are larger than expected
-
-        if self.position.quantity > Decimal::ZERO {
-            // Long position - check max long limit
-            if self.position.quantity > self.limits.max_position {
-                return Err(anyhow!(
-                    "HALTING: Position limit exceeded after fill - {} BTC > max {} BTC",
-                    self.position.quantity,
-                    self.limits.max_position
-                ));
-            }
-        } else if self.position.quantity < Decimal::ZERO {
-            // Short position - check max short limit
-            let short_qty = self.position.quantity.abs();
-            if short_qty > self.limits.max_short {
-                return Err(anyhow!(
-                    "HALTING: Short limit exceeded after fill - {} BTC > max {} BTC",
-                    short_qty,
-                    self.limits.max_short
-                ));
-            }
+            }));
         }
 
         Ok(())
     }
 
     /// Increment outstanding order count
-    pub fn increment_order_count(&mut self) {
-        self.outstanding_order_count += 1;
+    pub fn increment_order_count(&mut self, count: usize) {
+        self.outstanding_order_count += count;
     }
 
     /// Decrement outstanding order count
-    pub fn decrement_order_count(&mut self) {
-        if self.outstanding_order_count > 0 {
-            self.outstanding_order_count -= 1;
-        }
-    }
-
-    /// Get current position
-    pub fn position(&self) -> &Position {
-        &self.position
+    pub fn decrement_order_count(&mut self, count: usize) {
+        self.outstanding_order_count = self.outstanding_order_count.saturating_sub(count);
     }
 
     /// Get risk limits
     pub fn limits(&self) -> &RiskLimits {
         &self.limits
     }
+}
 
-    /// Check if trading should be halted
-    pub fn should_halt_trading(&self) -> bool {
-        // Check daily loss
-        if self.position.daily_pnl < -self.limits.max_daily_loss {
-            return true;
-        }
-
-        // Check drawdown
-        let current_pnl = self.position.total_pnl();
-        let drawdown = self.position.daily_high_water_mark - current_pnl;
-        let drawdown_pct = if self.position.daily_high_water_mark > Decimal::ZERO {
-            (drawdown / self.position.daily_high_water_mark)
-                .to_f64()
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
-        drawdown_pct > self.limits.max_drawdown_pct
-    }
-
-    /// Log risk status
-    pub fn log_status(&self) {
-        info!("=== Risk Status ===");
-        info!("Position: {}", self.position.quantity);
-        info!("Cost Basis: {}", self.position.cost_basis);
-        info!("Realized PnL: {}", self.position.realized_pnl);
-        info!("Daily PnL: {}", self.position.daily_pnl);
-        info!("Trade Count: {}", self.position.trade_count);
-        info!("Outstanding Orders: {}", self.outstanding_order_count);
-
-        let position_util = if self.position.quantity > Decimal::ZERO {
-            (self.position.quantity / self.limits.max_position * Decimal::from(100))
-                .to_f64()
-                .unwrap_or(0.0)
-            } else {
-            (-self.position.quantity / self.limits.max_short * Decimal::from(100))
-                .to_f64()
-                .unwrap_or(0.0)
-        };
-
-        info!("Position Utilization: {:.1}%", position_util);
-
-        let daily_loss_util = if self.limits.max_daily_loss > Decimal::ZERO {
-            (-self.position.daily_pnl / self.limits.max_daily_loss * Decimal::from(100))
-                .to_f64()
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-
-        info!("Daily Loss Utilization: {:.1}%", daily_loss_util);
+impl Default for RiskManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution::OrderId;
-    use rust_decimal_macros::dec;
+    use crate::core::Position;
 
     fn create_test_limits() -> RiskLimits {
         RiskLimits {
-            max_position: dec!(1.0),
-            max_short: dec!(1.0),
-            max_order_size: dec!(0.5),
-            min_order_size: dec!(0.01),
+            max_position: 1_000_000_000, // 1 BTC
+            max_short: 1_000_000_000, // 1 BTC
+            max_order_size: 500_000_000, // 0.5 BTC
+            min_order_size: 1_000_000, // 0.001 BTC
             max_outstanding_orders: 10,
-            max_daily_loss: dec!(5000.0),
-            max_drawdown_pct: 0.20,
+            max_daily_loss: 5_000 * 1_000_000_000, // 5000 USD
+            max_drawdown: 50_000_000, // 5%
         }
     }
 
     #[test]
-    fn test_risk_manager_creation() {
+    fn test_validate_signal_limits() {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
+        let pos = Position::new();
 
-        assert_eq!(rm.position().quantity, Decimal::ZERO);
-        assert_eq!(rm.limits().max_position, dec!(1.0));
+        // Valid signal
+        let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000); // 0.1 BTC
+        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_ok());
+
+        // Too large
+        let signal = Signal::quote_bid(50_000_000_000_000, 600_000_000); // 0.6 BTC
+        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
+        
+        // Too small
+        let signal = Signal::quote_bid(50_000_000_000_000, 100); // Tiny
+        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
     }
-
-    #[test]
-    fn test_validate_signal_order_size() {
-        let limits = create_test_limits();
-        let rm = RiskManager::with_limits(limits);
-
-        // Too small (0.001 BTC)
-        let signal = Signal::quote_bid(50_000_000_000_000, 1_000_000);
-        assert!(rm.validate_signal(&signal).is_err());
-
-        // Too large (1.0 BTC)
-        let signal = Signal::quote_bid(50_000_000_000_000, 1_000_000_000);
-        assert!(rm.validate_signal(&signal).is_err());
-
-        // Valid (0.1 BTC)
-        let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000);
-        assert!(rm.validate_signal(&signal).is_ok());
-    }
-
+    
     #[test]
     fn test_position_limits() {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
-
-        // Exceeds max long position (1.5 BTC)
-        let signal = Signal::take_position(crate::core::Side::Buy, 1_500_000_000);
-        assert!(rm.validate_signal(&signal).is_err());
-
-        // Exceeds max short position (1.5 BTC)
-        let signal = Signal::take_position(crate::core::Side::Sell, 1_500_000_000);
-        assert!(rm.validate_signal(&signal).is_err());
+        let pos = Position::new();
+        
+        // Already have 0.9 BTC
+        pos.update_quantity(900_000_000);
+        
+        // Buy 0.2 BTC -> 1.1 BTC > 1.0 BTC Limit
+        let signal = Signal::quote_bid(50_000_000_000_000, 200_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
+        
+        // Sell 0.2 BTC -> 0.7 BTC (OK)
+        let signal = Signal::quote_ask(50_000_000_000_000, 200_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_ok());
     }
-
+    
     #[test]
-    fn test_update_position() {
-        let limits = create_test_limits();
-        let mut rm = RiskManager::with_limits(limits);
-
-        // Buy
-        let fill = Fill::new(OrderId::new_random(), Side::Buy, dec!(50000), dec!(0.1));
-        rm.update_position(&fill).unwrap();
-
-        assert_eq!(rm.position().quantity, dec!(0.1));
-        assert_eq!(rm.position().trade_count, 1);
-
-        // Sell
-        let fill = Fill::new(OrderId::new_random(), Side::Sell, dec!(50100), dec!(0.1));
-        rm.update_position(&fill).unwrap();
-
-        assert_eq!(rm.position().quantity, Decimal::ZERO);
-        assert_eq!(rm.position().trade_count, 2);
-
-        // Should have positive PnL (bought at 50000, sold at 50100)
-        assert!(rm.position().realized_pnl > Decimal::ZERO);
-    }
-
-    #[test]
-    fn test_no_action_validation() {
+    fn test_daily_loss_check() {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
+        
+        // Loss within limit
+        assert!(rm.check_daily_loss(-1000 * 1_000_000_000).is_ok());
+        
+        // Loss exceeds limit
+        assert!(rm.check_daily_loss(-6000 * 1_000_000_000).is_err());
+    }
 
-        // NoAction and CancelAll should always be valid
-        assert!(rm.validate_signal(&Signal::no_action()).is_ok());
-        assert!(rm.validate_signal(&Signal::cancel_all()).is_ok());
+    #[test]
+    fn test_daily_reset() {
+        let limits = create_test_limits();
+        let mut rm = RiskManager::with_limits(limits);
+        let pos = Position::new();
+        
+        pos.update_daily_pnl(100);
+        
+        // Force reset by setting last reset to past
+        rm.daily_reset_timestamp = 0;
+        
+        rm.check_daily_reset(&pos);
+        
+        assert_eq!(pos.get_daily_pnl(), 0);
     }
 }

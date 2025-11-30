@@ -23,8 +23,6 @@
 
 use crate::resilience::KillSwitch;
 use anyhow::Result;
-use rust_decimal::prelude::ToPrimitive;
-use rust_decimal::Decimal;
 use tracing::{debug, warn};
 
 /// Pre-trade validation result
@@ -53,21 +51,21 @@ pub enum PreTradeRejection {
     ConnectionUnhealthy,
     /// Insufficient account balance
     InsufficientBalance {
-        required: Decimal,
-        available: Decimal,
+        required: u64,
+        available: u64,
     },
     /// Insufficient margin
     InsufficientMargin,
     /// Order size below exchange minimum
-    SizeBelowMinimum { size: Decimal, minimum: Decimal },
+    SizeBelowMinimum { size: u64, minimum: u64 },
     /// Order size above exchange maximum
-    SizeAboveMaximum { size: Decimal, maximum: Decimal },
+    SizeAboveMaximum { size: u64, maximum: u64 },
     /// Price not on valid tick
-    InvalidTick { price: Decimal, tick_size: Decimal },
+    InvalidTick { price: u64, tick_size: u64 },
     /// Price too far from market (safety check)
     PriceTooFarFromMarket {
-        price: Decimal,
-        mid: Decimal,
+        price: u64,
+        mid: u64,
         max_distance_bps: u32,
     },
 }
@@ -117,11 +115,11 @@ impl std::fmt::Display for PreTradeRejection {
 #[derive(Debug, Clone)]
 pub struct ExchangeRules {
     /// Minimum order size
-    pub min_order_size: Decimal,
+    pub min_order_size: u64,
     /// Maximum order size
-    pub max_order_size: Decimal,
+    pub max_order_size: u64,
     /// Tick size (price increment)
-    pub tick_size: Decimal,
+    pub tick_size: u64,
     /// Maximum price distance from mid (in bps) - safety check
     pub max_price_distance_bps: u32,
 }
@@ -129,12 +127,11 @@ pub struct ExchangeRules {
 impl ExchangeRules {
     /// Lighter DEX rules (BTC/USD)
     pub fn lighter_btc_usd() -> Self {
-        use rust_decimal_macros::dec;
         Self {
-            min_order_size: dec!(0.001), // 0.001 BTC minimum
-            max_order_size: dec!(10.0),  // 10 BTC maximum per order
-            tick_size: dec!(0.01),       // $0.01 tick size
-            max_price_distance_bps: 500, // 5% from mid (safety check)
+            min_order_size: 1_000_000,      // 0.001 BTC minimum (9 decimals)
+            max_order_size: 10_000_000_000, // 10 BTC maximum per order
+            tick_size: 10_000_000,          // $0.01 tick size (9 decimals)
+            max_price_distance_bps: 500,    // 5% from mid (safety check)
         }
     }
 }
@@ -165,7 +162,7 @@ impl PreTradeValidator {
     /// Validate order before placement
     ///
     /// Performs all pre-trade checks and returns Allowed or Rejected.
-    pub fn validate(&self, price: Decimal, size: Decimal, mid_price: Decimal) -> PreTradeResult {
+    pub fn validate(&self, price: u64, size: u64, mid_price: u64) -> PreTradeResult {
         // 1. Check kill switch
         if let Some(ref ks) = self.kill_switch {
             if ks.should_stop() {
@@ -214,16 +211,17 @@ impl PreTradeValidator {
         }
 
         // 4. Price sanity check (not too far from market)
-        if mid_price > Decimal::ZERO {
+        if mid_price > 0 {
             let distance = if price > mid_price {
                 price - mid_price
             } else {
                 mid_price - price
             };
 
-            let distance_bps = ((distance / mid_price) * Decimal::from(10000))
-                .to_u32()
-                .unwrap_or(u32::MAX);
+            // Calculate distance in BPS using u128 to prevent overflow
+            // bps = (distance * 10000) / mid_price
+            let distance_bps = (distance as u128 * 10_000) / mid_price as u128;
+            let distance_bps = distance_bps as u32;
 
             if distance_bps > self.rules.max_price_distance_bps {
                 warn!(
@@ -243,17 +241,17 @@ impl PreTradeValidator {
     }
 
     /// Check if price is on a valid tick
-    fn is_on_tick(&self, price: Decimal) -> bool {
-        if self.rules.tick_size == Decimal::ZERO {
+    fn is_on_tick(&self, price: u64) -> bool {
+        if self.rules.tick_size == 0 {
             return true; // No tick size restriction
         }
 
         let remainder = price % self.rules.tick_size;
-        remainder == Decimal::ZERO
+        remainder == 0
     }
 
     /// Validate account balance (stub - implement when SDK available)
-    pub fn check_balance(&self, _required: Decimal) -> Result<()> {
+    pub fn check_balance(&self, _required: u64) -> Result<()> {
         // TODO: Implement when Lighter SDK available
         // Query account balance from exchange
         // Verify we have enough funds
@@ -261,7 +259,7 @@ impl PreTradeValidator {
     }
 
     /// Validate margin availability (stub - implement when SDK available)
-    pub fn check_margin(&self, _required: Decimal) -> Result<()> {
+    pub fn check_margin(&self, _required: u64) -> Result<()> {
         // TODO: Implement when Lighter SDK available
         // Query margin status
         // Verify we have enough margin
@@ -280,10 +278,19 @@ impl PreTradeValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rust_decimal_macros::dec;
 
     fn create_test_validator() -> PreTradeValidator {
         PreTradeValidator::new(ExchangeRules::lighter_btc_usd())
+    }
+
+    // Helper to create fixed point values (9 decimals)
+    fn val(amount: u64) -> u64 {
+        amount * 1_000_000_000
+    }
+
+    // Helper to create price values (9 decimals)
+    fn price(amount: u64) -> u64 {
+        amount * 1_000_000_000
     }
 
     #[test]
@@ -291,9 +298,9 @@ mod tests {
         let validator = create_test_validator();
 
         let result = validator.validate(
-            dec!(50000.00), // Price
-            dec!(0.1),      // Size
-            dec!(50000.50), // Mid
+            price(50000), // Price
+            val(1) / 10,  // Size (0.1)
+            price(50000) + 500_000_000, // Mid (50000.50)
         );
 
         assert!(result.is_allowed());
@@ -304,9 +311,9 @@ mod tests {
         let validator = create_test_validator();
 
         let result = validator.validate(
-            dec!(50000.00),
-            dec!(0.0001), // Below 0.001 minimum
-            dec!(50000.50),
+            price(50000),
+            100_000, // Below 0.001 minimum (1_000_000)
+            price(50000) + 500_000_000,
         );
 
         assert!(matches!(
@@ -320,9 +327,9 @@ mod tests {
         let validator = create_test_validator();
 
         let result = validator.validate(
-            dec!(50000.00),
-            dec!(15.0), // Above 10.0 maximum
-            dec!(50000.50),
+            price(50000),
+            val(15), // Above 10.0 maximum
+            price(50000) + 500_000_000,
         );
 
         assert!(matches!(
@@ -335,10 +342,12 @@ mod tests {
     fn test_invalid_tick() {
         let validator = create_test_validator();
 
+        // 50000.123 (tick size is 0.01 = 10_000_000)
+        // .123 = 123_000_000. 123_000_000 % 10_000_000 = 3_000_000 != 0
         let result = validator.validate(
-            dec!(50000.123), // Not on $0.01 tick
-            dec!(0.1),
-            dec!(50000.50),
+            price(50000) + 123_000_000, 
+            val(1) / 10,
+            price(50000) + 500_000_000,
         );
 
         assert!(matches!(
@@ -352,9 +361,9 @@ mod tests {
         let validator = create_test_validator();
 
         let result = validator.validate(
-            dec!(50000.00), // On $0.01 tick
-            dec!(0.1),
-            dec!(50000.50),
+            price(50000), // On $0.01 tick
+            val(1) / 10,
+            price(50000) + 500_000_000,
         );
 
         assert!(result.is_allowed());
@@ -365,9 +374,9 @@ mod tests {
         let validator = create_test_validator();
 
         let result = validator.validate(
-            dec!(55000.00), // 10% above mid (exceeds 5% limit)
-            dec!(0.1),
-            dec!(50000.00),
+            price(55000), // 10% above mid (exceeds 5% limit)
+            val(1) / 10,
+            price(50000),
         );
 
         assert!(matches!(
@@ -385,14 +394,14 @@ mod tests {
         );
 
         // Should allow when running
-        let result = validator.validate(dec!(50000), dec!(0.1), dec!(50000));
+        let result = validator.validate(price(50000), val(1) / 10, price(50000));
         assert!(result.is_allowed());
 
         // Activate kill switch
         kill_switch.shutdown("Test");
 
         // Should reject
-        let result = validator.validate(dec!(50000), dec!(0.1), dec!(50000));
+        let result = validator.validate(price(50000), val(1) / 10, price(50000));
         assert!(matches!(
             result,
             PreTradeResult::Rejected(PreTradeRejection::KillSwitchActive)
@@ -410,7 +419,7 @@ mod tests {
         // Pause trading
         kill_switch.pause();
 
-        let result = validator.validate(dec!(50000), dec!(0.1), dec!(50000));
+        let result = validator.validate(price(50000), val(1) / 10, price(50000));
         assert!(matches!(
             result,
             PreTradeResult::Rejected(PreTradeRejection::TradingPaused)
@@ -419,7 +428,7 @@ mod tests {
         // Resume
         kill_switch.resume();
 
-        let result = validator.validate(dec!(50000), dec!(0.1), dec!(50000));
+        let result = validator.validate(price(50000), val(1) / 10, price(50000));
         assert!(result.is_allowed());
     }
 }

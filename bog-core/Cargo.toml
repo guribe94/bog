@@ -149,6 +149,13 @@ rate-limit-200ms = []       # Minimum 200ms between orders
 queue-warning-200 = []      # Warn if queue depth exceeds 200
 stale-recovery-5pct = []    # Recover from stale data with 5% buffer
 breaker-gap-5000 = []       # Circuit breaker triggers at 5000 message gap
+breaker-spike-10pct = []    # Circuit breaker triggers on 10% price spike
+breaker-zero-5 = []         # Circuit breaker triggers on 5 zero prices
+inventory-impact-10bps = [] # Inventory impact parameter 10bps
+vol-threshold-200bps = []   # Volatility threshold 200bps
+fee-5bps = []               # Fee 5bps
+fill-batch-200 = []         # Fill batch size 200
+pool-size-2048 = []         # Pool size 2048
 
 # Testing features
 testing = []                # Enable test-only code paths

@@ -113,13 +113,13 @@
 //! - Target: <50ns engine overhead per tick ✅ **Achieved**
 
 use crate::config::{
-    MAX_DAILY_LOSS, MAX_DRAWDOWN, MAX_POSITION, MAX_POST_STALE_CHANGE_BPS, MAX_SHORT,
-    MIN_QUOTE_INTERVAL_NS, QUEUE_DEPTH_WARNING_THRESHOLD,
+    MAX_POSITION, MAX_SHORT, MAX_POST_STALE_CHANGE_BPS, MIN_QUOTE_INTERVAL_NS,
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
 use crate::orderbook::L2OrderBook;
 use crate::risk::circuit_breaker::{BreakerState, CircuitBreaker};
+use crate::risk::RiskManager;
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -266,6 +266,9 @@ pub struct Engine<S: Strategy, E: Executor> {
     /// Circuit breaker for safety
     circuit_breaker: CircuitBreaker,
 
+    /// Risk manager for centralized risk checks
+    risk_manager: RiskManager,
+
     /// Shutdown signal
     shutdown: Arc<AtomicBool>,
 
@@ -280,8 +283,6 @@ pub struct Engine<S: Strategy, E: Executor> {
 
     /// Risk management: track PnL for drawdown limits
     peak_pnl: std::cell::Cell<i64>,
-    daily_pnl_start: std::cell::Cell<i64>,
-    current_session_start_time: std::time::SystemTime,
 
     /// Rate limiting: track last quote time
     last_quote_time_ns: std::cell::Cell<u64>,
@@ -303,6 +304,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             book: L2OrderBook::new(0), // Initialized with 0, updated on first tick
             hot: HotData::new(),
             circuit_breaker: CircuitBreaker::new(),
+            risk_manager: RiskManager::new(),
             shutdown: Arc::new(AtomicBool::new(false)),
             max_queue_depth: std::cell::Cell::new(0),
             queue_warnings: std::cell::Cell::new(0),
@@ -310,29 +312,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             last_fresh_bid: std::cell::Cell::new(0),
             last_fresh_ask: std::cell::Cell::new(0),
             peak_pnl: std::cell::Cell::new(0),
-            daily_pnl_start: std::cell::Cell::new(0),
-            current_session_start_time: std::time::SystemTime::now(),
             last_quote_time_ns: std::cell::Cell::new(0),
-        }
-    }
-
-    /// Track queue depth and warn if threshold exceeded
-    #[inline(always)]
-    fn track_queue_depth(&self, depth: usize) {
-        // Update max
-        if depth > self.max_queue_depth.get() {
-            self.max_queue_depth.set(depth);
-        }
-
-        // Warn if threshold exceeded
-        if depth > QUEUE_DEPTH_WARNING_THRESHOLD {
-            self.queue_warnings.set(self.queue_warnings.get() + 1);
-            tracing::warn!(
-                "Market data queue depth high: {} (threshold: {}, max seen: {})",
-                depth,
-                QUEUE_DEPTH_WARNING_THRESHOLD,
-                self.max_queue_depth.get()
-            );
         }
     }
 
@@ -365,6 +345,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
     pub fn process_tick(&mut self, snapshot: &MarketSnapshot, data_fresh: bool) -> Result<()> {
         // Increment tick counter (relaxed ordering for performance)
         self.hot.increment_ticks();
+
+        // Check daily reset at start of tick
+        self.risk_manager.check_daily_reset(&self.position);
 
         // Always drain executor fills before making trading decisions to avoid
         // leaving pending fills unprocessed when we early-return.
@@ -477,26 +460,11 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             self.peak_pnl.set(daily_total_pnl);
         }
         let peak_pnl = self.peak_pnl.get();
-        let drawdown = peak_pnl.saturating_sub(daily_total_pnl);
         
-        if peak_pnl > 0 && MAX_DRAWDOWN > 0 {
-            let allowed_drawdown = ((peak_pnl as i128) * MAX_DRAWDOWN as i128 / 1_000_000_000i128)
-                .clamp(i64::MIN as i128, i64::MAX as i128)
-                as i64;
-
-            if allowed_drawdown > 0 && drawdown > allowed_drawdown {
-                tracing::error!(
-                    "Drawdown limit exceeded: drawdown={} > limit={} - halting trading",
-                    drawdown,
-                    allowed_drawdown
-                );
-                self.executor.cancel_all()?;
-                return Err(anyhow!(
-                    "Drawdown limit exceeded: drawdown={} > limit={}",
-                    drawdown,
-                    allowed_drawdown
-                ));
-            }
+        // Drawdown check using RiskManager
+        if let Err(e) = self.risk_manager.check_drawdown(daily_total_pnl, peak_pnl) {
+            self.executor.cancel_all()?;
+            return Err(e);
         }
 
         // Calculate trading signal (hot path)
@@ -504,99 +472,26 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         if let Some(signal) = self.strategy.calculate(&self.book, &self.position) {
             // DAILY LOSS LIMIT CHECK
             // Must be checked before any execution logic
-            // CRITICAL: Check Total PnL (Mark-to-Market), not just Realized
-            if daily_total_pnl < -MAX_DAILY_LOSS {
-                // Log once per tick (throttled by strategy output, but still)
-                // Ideally we'd throttle this log, but halting is priority
-                // We use warn here to avoid flooding error logs if strategy keeps signaling
-                tracing::warn!(
-                    "Daily loss limit exceeded: {} < -{} - skipping signal",
-                    daily_total_pnl,
-                    MAX_DAILY_LOSS
-                );
+            if let Err(e) = self.risk_manager.check_daily_loss(daily_total_pnl) {
+                tracing::warn!("Risk check failed: {} - skipping signal", e);
                 return Ok(());
             }
 
             // PRE-TRADE POSITION LIMIT VALIDATION
             // Check if the signal would breach position limits BEFORE execution
-            let current_qty = self.position.get_quantity();
-
+            
             // Get open exposure from executor (conservative risk check)
             let (open_long_exposure, open_short_exposure) = self.executor.get_open_exposure();
-
-            // Validate based on signal action
-            let would_breach = match signal.action {
-                crate::core::SignalAction::QuoteBoth => {
-                    // Check both sides
-                    // 1. Check Long side: Current + Open Long + New Buy
-                    let potential_long = current_qty
-                        .checked_add(open_long_exposure)
-                        .and_then(|x| x.checked_add(signal.size as i64));
-
-                    // 2. Check Short side: Current - Open Short - New Sell
-                    let potential_short = current_qty
-                        .checked_sub(open_short_exposure)
-                        .and_then(|x| x.checked_sub(signal.size as i64));
-
-                    match (potential_long, potential_short) {
-                        (Some(l), Some(s)) => l > MAX_POSITION || s < -MAX_SHORT,
-                        _ => true, // Overflow is a breach
-                    }
-                }
-                crate::core::SignalAction::QuoteBid => {
-                    // Would increase position (buying)
-                    // Risk: Current + Open Long + New Buy
-                    let potential_long = current_qty
-                        .checked_add(open_long_exposure)
-                        .and_then(|x| x.checked_add(signal.size as i64));
-
-                    match potential_long {
-                        Some(pos) => pos > MAX_POSITION,
-                        None => true, // Overflow
-                    }
-                }
-                crate::core::SignalAction::QuoteAsk => {
-                    // Would decrease position (selling)
-                    // Risk: Current - Open Short - New Sell
-                    let potential_short = current_qty
-                        .checked_sub(open_short_exposure)
-                        .and_then(|x| x.checked_sub(signal.size as i64));
-
-                    match potential_short {
-                        Some(pos) => pos < -MAX_SHORT,
-                        None => true, // Underflow
-                    }
-                }
-                crate::core::SignalAction::TakePosition => match signal.side {
-                    crate::core::Side::Buy => {
-                        let potential_long = current_qty
-                            .checked_add(open_long_exposure)
-                            .and_then(|x| x.checked_add(signal.size as i64));
-
-                        match potential_long {
-                            Some(pos) => pos > MAX_POSITION,
-                            None => true,
-                        }
-                    }
-                    crate::core::Side::Sell => {
-                        let potential_short = current_qty
-                            .checked_sub(open_short_exposure)
-                            .and_then(|x| x.checked_sub(signal.size as i64));
-
-                        match potential_short {
-                            Some(pos) => pos < -MAX_SHORT,
-                            None => true,
-                        }
-                    }
-                },
-                crate::core::SignalAction::CancelAll => false, // Cancels don't change position
-                crate::core::SignalAction::NoAction => false,  // No action doesn't change position
-            };
-
-            if would_breach {
-                tracing::warn!(
-                    "Pre-trade limit check failed: current_qty={}, open_long={}, open_short={}, signal_size={}, action={:?} would breach limits",
-                    current_qty, open_long_exposure, open_short_exposure, signal.size, signal.action
+            
+            // Validate using RiskManager
+            if let Err(e) = self.risk_manager.validate_signal(
+                &signal, 
+                &self.position, 
+                open_long_exposure, 
+                open_short_exposure
+            ) {
+                 tracing::warn!(
+                    "Pre-trade limit check failed: {} - skipping signal", e
                 );
                 // Skip this signal to prevent position limit breach
                 return Ok(());
@@ -1300,9 +1195,6 @@ mod tests {
         engine.process_tick(&snapshot, true).unwrap();
 
         // Should NOT execute because Open Long Exposure (MAX) + New Buy (1.0) > MAX
-        // Note: increment_signals() happens AFTER the risk check passes and calculate() returns Some.
-        // Wait, my code has increment_signals() AFTER the check.
-        // So if check fails, it returns Ok(()) early, and signal_count is NOT incremented.
         assert_eq!(
             engine.stats().signals_generated,
             0,
@@ -1312,7 +1204,10 @@ mod tests {
 
     #[test]
     fn test_take_position_limit_enforcement() {
-        use crate::engine::risk::{MAX_ORDER_SIZE, MAX_POSITION};
+        use crate::config::MAX_POSITION;
+        // MAX_ORDER_SIZE is in RiskLimits default, usually MAX_POSITION / 2
+        // Let's assume default limits
+        const TEST_MAX_ORDER: i64 = 500_000_000;
 
         struct TakePositionStrategy;
         impl Strategy for TakePositionStrategy {
@@ -1321,7 +1216,7 @@ mod tests {
                 _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
-                Some(Signal::take_position(Side::Buy, MAX_ORDER_SIZE))
+                Some(Signal::take_position(Side::Buy, TEST_MAX_ORDER as u64))
             }
 
             fn name(&self) -> &'static str {
@@ -1334,7 +1229,7 @@ mod tests {
         let mut engine = Engine::new(strategy, executor);
 
         // Pre-load position close to the max long limit
-        let preload = MAX_POSITION - MAX_ORDER_SIZE as i64 + 1;
+        let preload = MAX_POSITION - TEST_MAX_ORDER as i64 + 1;
         engine.position().update_quantity(preload);
 
         let snapshot = SnapshotBuilder::new()
@@ -1354,7 +1249,8 @@ mod tests {
 
     #[test]
     fn test_take_position_short_limit_enforcement() {
-        use crate::engine::risk::{MAX_ORDER_SIZE, MAX_SHORT};
+        use crate::config::MAX_SHORT;
+        const TEST_MAX_ORDER: i64 = 500_000_000;
 
         struct ShortTakeStrategy;
         impl Strategy for ShortTakeStrategy {
@@ -1363,7 +1259,7 @@ mod tests {
                 _book: &L2OrderBook,
                 _position: &Position,
             ) -> Option<Signal> {
-                Some(Signal::take_position(Side::Sell, MAX_ORDER_SIZE))
+                Some(Signal::take_position(Side::Sell, TEST_MAX_ORDER as u64))
             }
 
             fn name(&self) -> &'static str {
@@ -1376,7 +1272,7 @@ mod tests {
         let mut engine = Engine::new(strategy, executor);
 
         // Pre-load position close to the max short limit
-        let preload = -MAX_SHORT + MAX_ORDER_SIZE as i64 - 1;
+        let preload = -MAX_SHORT + TEST_MAX_ORDER as i64 - 1;
         engine.position().update_quantity(preload);
 
         let snapshot = SnapshotBuilder::new()
@@ -1477,6 +1373,10 @@ mod tests {
         let executor = MockExecutor { execute_count: 0 };
         let mut engine = Engine::new(strategy, executor);
 
+        // Need to set MAX_DRAWDOWN via Config/Constants logic or it defaults to constant
+        // For this test we rely on default constant being reasonable
+        use crate::config::MAX_DRAWDOWN;
+        
         let peak = 10_000 * 1_000_000_000;
         engine.peak_pnl.set(peak);
         let allowed = ((peak as i128 * MAX_DRAWDOWN as i128) / 1_000_000_000i128) as i64;

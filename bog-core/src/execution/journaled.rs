@@ -54,7 +54,7 @@ impl OrderState {
     }
 
     /// Calculate total filled volume
-    fn total_fill_volume(&self) -> Decimal {
+    fn _total_fill_volume(&self) -> Decimal {
         self.fills.iter().map(|f| f.notional()).sum()
     }
 
@@ -309,7 +309,7 @@ impl JournaledExecutor {
     }
 
     /// Record metrics to Prometheus if enabled
-    fn record_prometheus_metrics(&self) {
+    fn _record_prometheus_metrics(&self) {
         if let Some(prom) = &self.prometheus_metrics {
             // Update trading metrics
             let submitted = self.metrics.orders_submitted.load(Ordering::Relaxed);

@@ -179,7 +179,7 @@ impl AlertRule for HighRejectionRateRule {
     fn evaluate(&self, context: &RuleContext) -> Option<Alert> {
         // Calculate rejection rate from metrics
         // This is a simplified implementation - production would aggregate over time window
-        let metrics = context.metrics.trading();
+        let _metrics = context.metrics.trading();
 
         // Get total orders and rejections
         // Note: In production, we'd need to aggregate these from Prometheus

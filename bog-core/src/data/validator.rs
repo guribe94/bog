@@ -416,7 +416,7 @@ impl SnapshotValidator {
     }
 
     /// Capture invalid snapshot to disk for debugging
-    fn capture_invalid_snapshot(&self, snapshot: &MarketSnapshot, error: &ValidationError) {
+    fn _capture_invalid_snapshot(&self, snapshot: &MarketSnapshot, error: &ValidationError) {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

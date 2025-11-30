@@ -187,7 +187,7 @@ pub enum AlertOutput {
 #[derive(Debug, Clone)]
 struct AlertState {
     /// First occurrence timestamp
-    first_seen: SystemTime,
+    _first_seen: SystemTime,
     /// Last occurrence timestamp
     last_seen: SystemTime,
     /// Number of occurrences
@@ -200,7 +200,7 @@ impl AlertState {
     fn new() -> Self {
         let now = SystemTime::now();
         Self {
-            first_seen: now,
+            _first_seen: now,
             last_seen: now,
             count: 1,
             last_sent: None,

@@ -917,11 +917,11 @@ impl Strategy for SimpleSpread {
         let max_pos = MAX_POSITION as i64;
         let max_short = -(MAX_SHORT as i64);
 
-        if current_qty >= max_pos {
-            // At max long limit - only quote Ask (reduce position)
+        if current_qty >= max_pos || current_qty.saturating_add(ORDER_SIZE as i64) > max_pos {
+            // At max long limit (or would exceed) - only quote Ask (reduce position)
             Some(Signal::quote_ask(our_ask, ORDER_SIZE))
-        } else if current_qty <= max_short {
-            // At max short limit - only quote Bid (reduce position)
+        } else if current_qty <= max_short || current_qty.saturating_sub(ORDER_SIZE as i64) < max_short {
+            // At max short limit (or would exceed) - only quote Bid (reduce position)
             Some(Signal::quote_bid(our_bid, ORDER_SIZE))
         } else {
             // Normal quoting

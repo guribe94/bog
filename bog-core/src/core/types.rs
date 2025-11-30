@@ -42,6 +42,11 @@ impl OrderId {
     /// - Instant::elapsed() overhead
     ///
     /// Keeping simple implementation for better pipeline performance.
+    ///
+    /// # Limitations
+    ///
+    /// Casting `u128` nanoseconds to `u64` will overflow around the year 2554 AD.
+    /// This timestamp truncation is acceptable for the current operational timeframe.
     #[inline]
     pub fn generate() -> Self {
         use rand::Rng;
@@ -790,6 +795,9 @@ impl Position {
             let qty = self.quantity.load(Ordering::Relaxed);
             let entry_price = self.entry_price.load(Ordering::Relaxed);
             
+            // Fence to prevent data reads from being reordered after seq2 check
+            std::sync::atomic::fence(Ordering::Acquire);
+
             let seq2 = self.sequence.load(Ordering::Acquire);
             
             if seq1 != seq2 {

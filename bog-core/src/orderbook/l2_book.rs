@@ -136,8 +136,8 @@ impl L2OrderBook {
     pub fn incremental_update(&mut self, snapshot: &MarketSnapshot) {
         // Check for sequence gaps
         if let Some(gap) = self.check_sequence_gap(snapshot.sequence) {
-            if gap > 1 {
-                // Gap > 1 means we missed at least one update.
+            if gap >= 1 {
+                // Gap >= 1 means we missed at least one update.
                 // Since this is incremental, we might have missed updates to levels 1-9.
                 // We log this critical warning. The Engine or CircuitBreaker should decide whether to halt.
                 // For now, we assume levels 1-9 are potentially stale.
@@ -168,7 +168,7 @@ impl L2OrderBook {
 
         self.last_sequence = snapshot.sequence;
         self.last_update_ns = snapshot.exchange_timestamp_ns;
-        self.depth_stale = true; // Depth levels (1-9) not updated, potentially stale
+        // self.depth_stale = true; // REMOVED: Incremental updates preserve depth if no gap
     }
 
     /// Get best bid price (level 0)

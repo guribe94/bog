@@ -2,7 +2,7 @@ use crate::execution::{Fill, Order, OrderId};
 use anyhow::Result;
 use crossbeam::channel::{bounded, Sender, Receiver};
 use serde::{Deserialize, Serialize};
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use std::thread;
@@ -120,6 +120,7 @@ impl Drop for AsyncJournal {
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
+    use std::fs::File;
     use tempfile::NamedTempFile;
     use rust_decimal_macros::dec;
     use crate::execution::{Side, OrderType, TimeInForce, OrderStatus};

@@ -16,6 +16,7 @@ rust_decimal.workspace = true
 rust_decimal_macros.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 approx.workspace = true
@@ -70,3 +71,5 @@ depth-1 = []   # Top-of-book only (1 level)
 depth-3 = []   # Use 3 levels
 depth-5 = []   # Use 5 levels (default for depth features)
 depth-10 = []  # Use all 10 levels (maximum depth)
+
+logging = []   # Enable logging
