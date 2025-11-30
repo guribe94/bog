@@ -317,7 +317,6 @@ pub mod engine; // NEW: Const generic engine
 pub mod execution;
 pub mod orderbook;
 pub mod risk;
-pub mod strategy;
 pub mod utils;
 
 // Monitoring & Observability (NEW)

@@ -99,7 +99,7 @@
 //!
 //! ```rust
 //! use bog_core::risk::{RiskLimits, RiskManager};
-//! use bog_core::strategy::Signal;
+//! use bog_core::core::{Signal, SignalAction};
 //! use rust_decimal::Decimal;
 //! use rust_decimal::prelude::FromPrimitive;
 //! use rust_decimal_macros::dec;
@@ -118,10 +118,7 @@
 //! let mut risk_manager = RiskManager::with_limits(limits);
 //!
 //! // Validate signal before execution
-//! let signal = Signal::QuoteBid {
-//!     price: dec!(50_000),
-//!     size: dec!(0.1),
-//! };
+//! let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000);
 //! if let Err(err) = risk_manager.validate_signal(&signal) {
 //!     eprintln!("Risk violation: {}", err);
 //! }
@@ -157,7 +154,7 @@ pub use types::{Position, RiskLimits, RiskViolation};
 // Removed: moving to compile-time config
 // use crate::config::RiskConfig;
 use crate::execution::{Fill, Side};
-use crate::strategy::Signal;
+use crate::core::{Signal, SignalAction};
 use anyhow::{anyhow, Result};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
@@ -235,35 +232,61 @@ impl RiskManager {
     /// Validate a signal before execution
     pub fn validate_signal(&self, signal: &Signal) -> Result<()> {
         // No validation needed for cancel or no action
-        if matches!(signal, Signal::CancelAll | Signal::NoAction) {
+        if !signal.requires_action() || matches!(signal.action, SignalAction::CancelAll) {
             return Ok(());
         }
 
-        // Get orders from signal
-        let orders = signal.to_orders();
+        // Convert Signal to temporary orders for validation
+        // We need to map u64 fixed-point to Decimal
+        let scale = Decimal::from(1_000_000_000);
+        
+        let mut orders = Vec::new();
+        
+        match signal.action {
+            SignalAction::QuoteBoth => {
+                orders.push((Side::Buy, signal.size));
+                orders.push((Side::Sell, signal.size));
+            },
+            SignalAction::QuoteBid => {
+                orders.push((Side::Buy, signal.size));
+            },
+            SignalAction::QuoteAsk => {
+                orders.push((Side::Sell, signal.size));
+            },
+            SignalAction::TakePosition => {
+                let side = match signal.side {
+                    crate::core::Side::Buy => Side::Buy,
+                    crate::core::Side::Sell => Side::Sell,
+                };
+                orders.push((side, signal.size));
+            },
+            _ => {} // NoAction, CancelAll handled above
+        }
 
-        for order in &orders {
+        for (side, size_u64) in &orders {
+            let size = Decimal::from(*size_u64) / scale;
+
             // Check order size limits
-            if order.size < self.limits.min_order_size {
+            if size < self.limits.min_order_size {
                 return Err(anyhow!(RiskViolation::OrderSizeTooSmall {
-                    size: order.size,
+                    size,
                     min: self.limits.min_order_size
                 }
                 .to_string()));
             }
 
-            if order.size > self.limits.max_order_size {
+            if size > self.limits.max_order_size {
                 return Err(anyhow!(RiskViolation::OrderSizeTooLarge {
-                    size: order.size,
+                    size,
                     max: self.limits.max_order_size
                 }
                 .to_string()));
             }
 
             // Check position limits (projected position after order fills)
-            let projected_position = match order.side {
-                Side::Buy => self.position.quantity + order.size,
-                Side::Sell => self.position.quantity - order.size,
+            let projected_position = match side {
+                Side::Buy => self.position.quantity + size,
+                Side::Sell => self.position.quantity - size,
             };
 
             if projected_position > self.limits.max_position {
@@ -318,7 +341,7 @@ impl RiskManager {
             (drawdown / self.position.daily_high_water_mark)
                 .to_f64()
                 .unwrap_or(0.0)
-        } else {
+            } else {
             0.0
         };
 
@@ -522,7 +545,7 @@ impl RiskManager {
             (self.position.quantity / self.limits.max_position * Decimal::from(100))
                 .to_f64()
                 .unwrap_or(0.0)
-        } else {
+            } else {
             (-self.position.quantity / self.limits.max_short * Decimal::from(100))
                 .to_f64()
                 .unwrap_or(0.0)
@@ -574,25 +597,16 @@ mod tests {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
 
-        // Too small
-        let signal = Signal::QuoteBid {
-            price: dec!(50000),
-            size: dec!(0.001),
-        };
+        // Too small (0.001 BTC)
+        let signal = Signal::quote_bid(50_000_000_000_000, 1_000_000);
         assert!(rm.validate_signal(&signal).is_err());
 
-        // Too large
-        let signal = Signal::QuoteBid {
-            price: dec!(50000),
-            size: dec!(1.0),
-        };
+        // Too large (1.0 BTC)
+        let signal = Signal::quote_bid(50_000_000_000_000, 1_000_000_000);
         assert!(rm.validate_signal(&signal).is_err());
 
-        // Valid
-        let signal = Signal::QuoteBid {
-            price: dec!(50000),
-            size: dec!(0.1),
-        };
+        // Valid (0.1 BTC)
+        let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000);
         assert!(rm.validate_signal(&signal).is_ok());
     }
 
@@ -601,18 +615,12 @@ mod tests {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
 
-        // Exceeds max long position
-        let signal = Signal::TakePosition {
-            side: Side::Buy,
-            size: dec!(1.5),
-        };
+        // Exceeds max long position (1.5 BTC)
+        let signal = Signal::take_position(crate::core::Side::Buy, 1_500_000_000);
         assert!(rm.validate_signal(&signal).is_err());
 
-        // Exceeds max short position
-        let signal = Signal::TakePosition {
-            side: Side::Sell,
-            size: dec!(1.5),
-        };
+        // Exceeds max short position (1.5 BTC)
+        let signal = Signal::take_position(crate::core::Side::Sell, 1_500_000_000);
         assert!(rm.validate_signal(&signal).is_err());
     }
 
@@ -623,14 +631,14 @@ mod tests {
 
         // Buy
         let fill = Fill::new(OrderId::new_random(), Side::Buy, dec!(50000), dec!(0.1));
-        rm.update_position(&fill);
+        rm.update_position(&fill).unwrap();
 
         assert_eq!(rm.position().quantity, dec!(0.1));
         assert_eq!(rm.position().trade_count, 1);
 
         // Sell
         let fill = Fill::new(OrderId::new_random(), Side::Sell, dec!(50100), dec!(0.1));
-        rm.update_position(&fill);
+        rm.update_position(&fill).unwrap();
 
         assert_eq!(rm.position().quantity, Decimal::ZERO);
         assert_eq!(rm.position().trade_count, 2);
@@ -645,7 +653,7 @@ mod tests {
         let rm = RiskManager::with_limits(limits);
 
         // NoAction and CancelAll should always be valid
-        assert!(rm.validate_signal(&Signal::NoAction).is_ok());
-        assert!(rm.validate_signal(&Signal::CancelAll).is_ok());
+        assert!(rm.validate_signal(&Signal::no_action()).is_ok());
+        assert!(rm.validate_signal(&Signal::cancel_all()).is_ok());
     }
 }

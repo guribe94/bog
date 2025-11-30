@@ -167,7 +167,7 @@ impl ExecutionMetrics {
 
 /// Configuration for production executor
 #[derive(Debug, Clone)]
-pub struct ProductionExecutorConfig {
+pub struct JournaledExecutorConfig {
     /// Enable execution journal (persists orders/fills to disk)
     pub enable_journal: bool,
     /// Journal file path
@@ -184,7 +184,7 @@ pub struct ProductionExecutorConfig {
     pub instant_fills: bool,
 }
 
-impl Default for ProductionExecutorConfig {
+impl Default for JournaledExecutorConfig {
     fn default() -> Self {
         Self {
             enable_journal: true,
@@ -215,12 +215,12 @@ impl Default for ProductionExecutorConfig {
 /// ## Example
 ///
 /// ```rust
-/// use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig};
+/// use bog_core::execution::{JournaledExecutor, JournaledExecutorConfig};
 ///
-/// let config = ProductionExecutorConfig::default();
-/// let executor = ProductionExecutor::new(config);
+/// let config = JournaledExecutorConfig::default();
+/// let executor = JournaledExecutor::new(config);
 /// ```
-pub struct ProductionExecutor {
+pub struct JournaledExecutor {
     /// Thread-safe order state tracking
     orders: Arc<DashMap<OrderId, OrderState>>,
     /// Pending fills waiting to be consumed
@@ -230,18 +230,18 @@ pub struct ProductionExecutor {
     /// Prometheus metrics registry (optional)
     prometheus_metrics: Option<Arc<MetricsRegistry>>,
     /// Configuration
-    config: ProductionExecutorConfig,
+    config: JournaledExecutorConfig,
     /// Execution mode
     mode: ExecutionMode,
     /// Async journal writer
     async_journal: Option<AsyncJournal>,
 }
 
-impl ProductionExecutor {
+impl JournaledExecutor {
     /// Create a new production executor
-    pub fn new(config: ProductionExecutorConfig) -> Self {
+    pub fn new(config: JournaledExecutorConfig) -> Self {
         info!(
-            "Initializing ProductionExecutor (journal={}, recover={}, fill_delay={}ms)",
+            "Initializing JournaledExecutor (journal={}, recover={}, fill_delay={}ms)",
             config.enable_journal, config.recover_on_startup, config.fill_delay_ms
         );
 
@@ -294,7 +294,7 @@ impl ProductionExecutor {
 
     /// Create with default configuration
     pub fn new_default() -> Self {
-        Self::new(ProductionExecutorConfig::default())
+        Self::new(JournaledExecutorConfig::default())
     }
 
     /// Get execution metrics
@@ -539,7 +539,7 @@ impl ProductionExecutor {
     }
 }
 
-impl Executor for ProductionExecutor {
+impl Executor for JournaledExecutor {
     fn place_order(&mut self, mut order: Order) -> Result<OrderId> {
         info!(
             "PRODUCTION: Placing order {} {} @ {} (size: {})",
@@ -722,10 +722,10 @@ impl Executor for ProductionExecutor {
     }
 }
 
-impl Drop for ProductionExecutor {
+impl Drop for JournaledExecutor {
     fn drop(&mut self) {
         info!(
-            "Shutting down ProductionExecutor. Final stats: {}",
+            "Shutting down JournaledExecutor. Final stats: {}",
             self.order_stats()
         );
     }
@@ -739,22 +739,22 @@ mod tests {
 
     #[test]
     fn test_production_executor_creation() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             ..Default::default()
         };
-        let executor = ProductionExecutor::new(config);
+        let executor = JournaledExecutor::new(config);
         assert_eq!(executor.execution_mode(), ExecutionMode::Simulated);
     }
 
     #[test]
     fn test_place_and_fill_order() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: true,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         let order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         let order_id = executor.place_order(order).unwrap();
@@ -787,12 +787,12 @@ mod tests {
 
     #[test]
     fn test_cancel_order() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: false, // Don't auto-fill so we can cancel
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         let order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         let order_id = executor.place_order(order).unwrap();
@@ -818,12 +818,12 @@ mod tests {
 
     #[test]
     fn test_cancel_all_orders() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: false,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         let order1 = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         let order2 = Order::limit(Side::Sell, dec!(50010), dec!(0.2));
@@ -844,11 +844,11 @@ mod tests {
 
     #[test]
     fn test_invalid_order_size() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         let order = Order::limit(Side::Buy, dec!(50000), dec!(0));
         let result = executor.place_order(order);
@@ -859,12 +859,12 @@ mod tests {
 
     #[test]
     fn test_execution_metrics() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: true,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         // Place multiple orders
         for _ in 0..5 {
@@ -885,12 +885,12 @@ mod tests {
 
     #[test]
     fn test_order_stats_string() {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: true,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         let order = Order::limit(Side::Buy, dec!(50000), dec!(0.1));
         executor.place_order(order).unwrap();
@@ -948,7 +948,7 @@ mod tests {
         temp_file.flush().unwrap();
 
         // Create executor with recovery enabled
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false, // Don't write during recovery
             journal_path: journal_path.clone(),
             recover_on_startup: true,
@@ -957,7 +957,7 @@ mod tests {
             ..Default::default()
         };
 
-        let executor = ProductionExecutor::new(config);
+        let executor = JournaledExecutor::new(config);
 
         // Verify recovered state
         assert_eq!(executor.metrics.orders_submitted.load(Ordering::Relaxed), 1);
@@ -994,7 +994,7 @@ mod tests {
 
         temp_file.flush().unwrap();
 
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             journal_path: journal_path.clone(),
             recover_on_startup: true,
@@ -1003,7 +1003,7 @@ mod tests {
             ..Default::default()
         };
 
-        let executor = ProductionExecutor::new(config);
+        let executor = JournaledExecutor::new(config);
 
         // Verify cancelled state
         assert_eq!(
@@ -1017,12 +1017,12 @@ mod tests {
     fn test_prometheus_integration() {
         use crate::monitoring::MetricsRegistry;
 
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: false,
             instant_fills: true,
             ..Default::default()
         };
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
 
         // Set up Prometheus metrics
         let prom_metrics = Arc::new(MetricsRegistry::new().unwrap());

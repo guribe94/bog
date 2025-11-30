@@ -1,17 +1,17 @@
 //! Simple Spread Strategy - PAPER TRADING
 //!
-//! WARNING: This binary uses ProductionExecutor in SIMULATED mode.
+//! WARNING: This binary uses JournaledExecutor in SIMULATED mode.
 //! THIS IS FOR PAPER TRADING / TESTING ONLY
 //! DO NOT USE FOR REAL MONEY TRADING
 //!
 //! This binary combines:
 //! - SimpleSpread strategy (zero-sized type)
-//! - ProductionExecutor (configured for simulation with journaling)
+//! - JournaledExecutor (configured for simulation with journaling)
 //! - Real Huginn market data via shared memory
 //! - Full compile-time monomorphization
 //!
 //! Purpose: Test strategies with real market data without risking capital
-//! For live trading: Ensure ProductionExecutor is configured for live execution.
+//! For live trading: Ensure JournaledExecutor is configured for live execution.
 
 use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
@@ -21,7 +21,7 @@ use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::engine::{
     AlertConfig, AlertManager, AlertType, Engine, GapRecoveryConfig, GapRecoveryManager,
 };
-use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig};
+use bog_core::execution::{JournaledExecutor, JournaledExecutorConfig};
 use bog_core::resilience::{install_panic_handler, KillSwitch};
 use bog_strategies::simple_spread::{MIN_SPREAD_BPS, ORDER_SIZE, SPREAD_BPS};
 use bog_strategies::SimpleSpread;
@@ -141,10 +141,10 @@ fn main() -> Result<()> {
 
     // Create executor
     // PAPER TRADING: Replace with LighterExecutor for live trading
-    warn!("PAPER TRADING: ProductionExecutor active (simulated mode) - NO REAL ORDERS!");
+    warn!("PAPER TRADING: JournaledExecutor active (simulated mode) - NO REAL ORDERS!");
     warn!("All trades are simulated and journaled. No funds at risk.");
     
-    let executor_config = ProductionExecutorConfig {
+    let executor_config = JournaledExecutorConfig {
         enable_journal: true,
         journal_path: PathBuf::from("data/paper_trading_journal.jsonl"),
         recover_on_startup: true,
@@ -153,7 +153,7 @@ fn main() -> Result<()> {
         ..Default::default()
     };
     
-    let executor = ProductionExecutor::new(executor_config);
+    let executor = JournaledExecutor::new(executor_config);
     
     // Calculate net position from recovered journal (if any)
     let recovered_position = executor.calculate_net_position();

@@ -47,7 +47,7 @@
 //!
 //! **Status**: 🚧 Stub implementation
 //!
-//! ### [`ProductionExecutor`] - Full Production (Legacy)
+//! ### [`JournaledExecutor`] - Full Production (Legacy)
 //!
 //! Complete production executor with:
 //! - **State journaling** - Crash recovery
@@ -118,14 +118,14 @@
 
 pub mod lighter;
 pub mod order_bridge;
-pub mod production;
+pub mod journaled;
 pub mod simulated;
 pub mod types;
 pub mod journal;
 
 pub use lighter::LighterExecutor;
 pub use order_bridge::{legacy_order_to_pending, order_state_to_legacy, OrderStateWrapper};
-pub use production::{ExecutionMetrics, ProductionExecutor, ProductionExecutorConfig};
+pub use journaled::{ExecutionMetrics, JournaledExecutor, JournaledExecutorConfig};
 pub use simulated::{RealisticFillConfig, SimulatedExecutor};
 pub use types::{ExecutionMode, Fill, Order, OrderId, OrderStatus, OrderType, Side, TimeInForce};
 
@@ -142,7 +142,7 @@ use anyhow::Result;
 ///
 /// - [`SimulatedExecutor`] - Instant fills for backtesting
 /// - [`LighterExecutor`] - Live trading via Lighter DEX
-/// - [`ProductionExecutor`] - Full production with journaling
+/// - [`JournaledExecutor`] - Full production with journaling
 ///
 /// # Example
 ///

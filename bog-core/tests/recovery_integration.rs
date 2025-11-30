@@ -1,4 +1,4 @@
-use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig, Executor, Order, Side};
+use bog_core::execution::{JournaledExecutor, JournaledExecutorConfig, Executor, Order, Side};
 use bog_core::engine::{Engine, Strategy};
 use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::core::{Position, Signal};
@@ -25,11 +25,11 @@ fn test_engine_recovery_from_journal() -> Result<()> {
     
     // Close the file handle so the executor can open it, but keep the path valid (NamedTempFile keeps it until drop)
     // Actually, NamedTempFile deletes on drop. We can clone the path. 
-    // ProductionExecutor opens with append=true.
+    // JournaledExecutor opens with append=true.
     
     // 2. Run 1 (Simulation)
     {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: true,
             journal_path: journal_path.clone(),
             recover_on_startup: false, // First run
@@ -38,7 +38,7 @@ fn test_engine_recovery_from_journal() -> Result<()> {
             ..Default::default()
         };
         
-        let mut executor = ProductionExecutor::new(config);
+        let mut executor = JournaledExecutor::new(config);
         
         // Place and fill an order (Buy 1.0 BTC @ 50,000)
         let order = Order::limit(Side::Buy, dec!(50000), dec!(1.0));
@@ -53,7 +53,7 @@ fn test_engine_recovery_from_journal() -> Result<()> {
     
     // 3. Run 2 (Recovery)
     {
-        let config = ProductionExecutorConfig {
+        let config = JournaledExecutorConfig {
             enable_journal: true,
             journal_path: journal_path.clone(),
             recover_on_startup: true, // Enable recovery
@@ -62,7 +62,7 @@ fn test_engine_recovery_from_journal() -> Result<()> {
             ..Default::default()
         };
         
-        let executor = ProductionExecutor::new(config);
+        let executor = JournaledExecutor::new(config);
         
         // Calculate net position from recovered state
         let net_position = executor.calculate_net_position();

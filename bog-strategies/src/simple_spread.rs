@@ -454,6 +454,22 @@ impl SimpleSpread {
     #[inline(always)]
     #[allow(dead_code)]
     fn calculate_vwap_mid_price(book: &L2OrderBook, max_levels: usize) -> Option<u64> {
+        // If depth is stale (e.g. sequence gap), do not use it for VWAP.
+        // Fall back to simple top-of-book mid price.
+        if book.depth_stale {
+            // Only log periodically to avoid spam
+            #[cfg(feature = "logging")]
+            tracing::warn!("Depth stale, falling back to simple mid price");
+            
+            if book.best_bid_price() > 0 && book.best_ask_price() > 0 {
+                let bid = book.best_bid_price();
+                let ask = book.best_ask_price();
+                let mid = bid / 2 + ask / 2 + (bid % 2 + ask % 2) / 2;
+                return Some(mid);
+            }
+            return None;
+        }
+
         // Try to calculate VWAP for bid and ask sides
         let bid_vwap = book.vwap(true, max_levels);
         let ask_vwap = book.vwap(false, max_levels);
@@ -493,6 +509,9 @@ impl SimpleSpread {
     #[inline(always)]
     #[allow(dead_code)]
     fn calculate_imbalance(book: &L2OrderBook, _max_levels: usize) -> i64 {
+        if book.depth_stale {
+            return 0; // Assume balanced if depth is stale
+        }
         book.imbalance()
     }
 
@@ -561,6 +580,10 @@ impl SimpleSpread {
     #[inline(always)]
     #[allow(dead_code)]
     fn select_quote_level(book: &L2OrderBook, is_bid: bool) -> usize {
+        if book.depth_stale {
+            return 0; // Default to top-of-book if depth is stale
+        }
+
         let (prices, sizes) = if is_bid {
             (&book.bid_prices, &book.bid_sizes)
         } else {

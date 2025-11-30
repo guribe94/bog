@@ -3,7 +3,7 @@
 //! Demonstrates how to set up comprehensive monitoring for a production trading bot:
 //! - Prometheus metrics export
 //! - Alert rules for risk and system health
-//! - ProductionExecutor with integrated observability
+//! - JournaledExecutor with integrated observability
 //!
 //! This example shows the complete setup pattern for a production deployment.
 
@@ -153,13 +153,13 @@ fn main() -> Result<()> {
     println!("     (Use tokio::spawn to run in production)\n");
 
     // ===================================================================
-    // STEP 7: ProductionExecutor integration
+    // STEP 7: JournaledExecutor integration
     // ===================================================================
-    println!("⚙️  ProductionExecutor integration:");
+    println!("⚙️  JournaledExecutor integration:");
 
-    use bog_core::execution::{ProductionExecutor, ProductionExecutorConfig};
+    use bog_core::execution::{JournaledExecutor, JournaledExecutorConfig};
 
-    let exec_config = ProductionExecutorConfig {
+    let exec_config = JournaledExecutorConfig {
         enable_journal: true,
         journal_path: PathBuf::from("/tmp/bog_execution.jsonl"),
         recover_on_startup: true,
@@ -169,10 +169,10 @@ fn main() -> Result<()> {
         instant_fills: false,
     };
 
-    let mut executor = ProductionExecutor::new(exec_config);
+    let mut executor = JournaledExecutor::new(exec_config);
     executor.set_prometheus_metrics(metrics.clone());
 
-    println!("   ✓ Created ProductionExecutor with:");
+    println!("   ✓ Created JournaledExecutor with:");
     println!("     - Execution journal enabled");
     println!("     - Prometheus metrics integration");
     println!("     - Fill simulation (100ms delay)\n");
@@ -189,7 +189,7 @@ fn main() -> Result<()> {
     println!("  2. ✅ HTTP metrics server (for Prometheus scraping)");
     println!("  3. ✅ AlertManager (Console, File, Webhook outputs)");
     println!("  4. ✅ RuleEngine (5 production alert rules)");
-    println!("  5. ✅ ProductionExecutor (with metrics integration)");
+    println!("  5. ✅ JournaledExecutor (with metrics integration)");
     println!();
     println!("Alert Status:");
     println!("  • Active alerts: {}", alert_manager.active_count());
