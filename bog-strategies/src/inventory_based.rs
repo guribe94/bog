@@ -14,6 +14,7 @@
 use bog_core::core::{Position, Signal};
 use bog_core::engine::Strategy;
 use bog_core::orderbook::L2OrderBook;
+use bog_core::config::constants::TICK_SIZE;
 
 // ===== CONFIGURATION FROM CARGO FEATURES =====
 
@@ -118,8 +119,26 @@ impl Strategy for InventoryBased {
         let half_spread = Self::calculate_spread(adjusted_mid);
 
         // Calculate quote prices
-        let our_bid = adjusted_mid.saturating_sub(half_spread);
-        let our_ask = adjusted_mid.saturating_add(half_spread);
+        let raw_bid = adjusted_mid.saturating_sub(half_spread);
+        let raw_ask = adjusted_mid.saturating_add(half_spread);
+
+        // Round to tick size
+        let mut our_bid = (raw_bid / TICK_SIZE) * TICK_SIZE;
+        let mut our_ask = (raw_ask / TICK_SIZE) * TICK_SIZE;
+        
+        // Ensure we don't cross the book or quote zero spread
+        if our_ask <= our_bid {
+             // Force at least 1 tick spread
+             our_ask = our_bid + TICK_SIZE;
+        }
+        
+        // Ensure symmetry around mid if possible, or widen if needed
+        // If mid is not on tick, rounding might shift it.
+        
+        // Final safety check: ask > bid
+        if our_ask <= our_bid {
+            return None;
+        }
 
         // Return signal
         Some(Signal::quote_both(our_bid, our_ask, ORDER_SIZE))
@@ -191,5 +210,43 @@ mod tests {
         assert!(ORDER_SIZE > 0);
         assert!(VOLATILITY_BPS > 0);
         assert!(TIME_HORIZON_SECS > 0);
+    }
+
+    #[test]
+    fn test_zero_spread_prevention() {
+        let mut strategy = InventoryBased;
+        let mut book = L2OrderBook::new(1);
+        
+        // Set up a book with a very tight/small price
+        // Mid = 1000 (very small). 10bps of 1000 = 1. Half spread = 0.5 -> 0.
+        // This should produce bid=1000, ask=1000 if not handled.
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            exchange_timestamp_ns: 0,
+            local_recv_ns: 0,
+            local_publish_ns: 0,
+            best_bid_price: 999,
+            best_bid_size: 1_000_000,
+            best_ask_price: 1001,
+            best_ask_size: 1_000_000,
+            bid_prices: [0; 10],
+            bid_sizes: [0; 10],
+            ask_prices: [0; 10],
+            ask_sizes: [0; 10],
+            snapshot_flags: 0,
+            dex_type: 1,
+            _padding: [0; 54],
+        };
+        book.sync_from_snapshot(&snapshot);
+        
+        let position = Position::new();
+        // We need to unwrap because we want to assert properties of the signal
+        let signal = strategy.calculate(&book, &position).unwrap();
+        
+        println!("Bid: {}, Ask: {}", signal.bid_price, signal.ask_price);
+        
+        // We expect bid < ask strictly
+        assert!(signal.bid_price < signal.ask_price, "Bid {} must be less than Ask {}", signal.bid_price, signal.ask_price);
     }
 }

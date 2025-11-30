@@ -173,7 +173,7 @@ fn validate_position_limits(signal: &Signal, position: &Position) -> Result<()> 
     }
 
     // Check daily loss limit
-    let daily_pnl = position.get_realized_pnl();
+    let daily_pnl = position.get_daily_pnl();
     if daily_pnl < -MAX_DAILY_LOSS {
         return Err(anyhow!(RiskViolation::DailyLossLimit.as_str()));
     }
@@ -553,5 +553,25 @@ mod tests {
         position2.update_quantity(-MAX_SHORT + MAX_ORDER_SIZE as i64 / 2);
         let signal = Signal::take_position(Side::Sell, MAX_ORDER_SIZE);
         assert!(validate_signal(&signal, &position2).is_err());
+    }
+
+    #[test]
+    fn test_daily_loss_checks_daily_not_total() {
+        let position = Position::new();
+        
+        // Set total realized PnL to positive (made money historically)
+        position.update_realized_pnl(MAX_DAILY_LOSS * 2);
+        
+        // Set daily PnL to negative (lost money today)
+        // Note: update_daily_pnl adds to 0.
+        position.update_daily_pnl(-MAX_DAILY_LOSS - 1);
+        
+        // Should reject because DAILY PnL is bad, even if total is good
+        let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000);
+        
+        // This validates that we are checking get_daily_pnl() and not get_realized_pnl()
+        let result = validate_signal(&signal, &position);
+        assert!(result.is_err(), "Should reject when daily PnL limit breached");
+        assert!(result.unwrap_err().to_string().contains("Daily loss limit"));
     }
 }

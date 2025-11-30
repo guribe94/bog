@@ -488,7 +488,8 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 &signal, 
                 &self.position, 
                 open_long_exposure, 
-                open_short_exposure
+                open_short_exposure,
+                mid_price
             ) {
                  tracing::warn!(
                     "Pre-trade limit check failed: {} - skipping signal", e

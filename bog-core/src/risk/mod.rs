@@ -2,21 +2,29 @@
 //!
 //! Multi-layer risk protection for HFT trading with real-time validation.
 //! Uses zero-overhead fixed-point arithmetic and atomic state tracking.
+//!
+//! ## Validation Layers
+//!
+//! ```text
+//! Strategy → Risk Limits → Circuit Breaker → Rate Limiter → RISK MANAGER → Exchange
+//!            ✓ Position     ✓ Flash crash   ✓ Not spam     ✓ Kill Switch
+//!            ✓ Order size   ✓ Spread        ✓ Burst OK     ✓ Tick Size
+//!            ✓ Daily loss   ✓ Liquidity                    ✓ Price Sanity
+//! ```
 
 use crate::config::constants::*;
 use crate::core::{Position, Side as CoreSide, Signal, SignalAction};
 use crate::core::fixed_point;
+use crate::resilience::KillSwitch;
 use anyhow::{anyhow, Result};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn, error};
+use tracing::{info, warn, error, debug};
 use std::fmt;
 
 pub mod circuit_breaker;
-pub mod pre_trade;
 pub mod rate_limiter;
 
 pub use circuit_breaker::{BreakerState, CircuitBreaker, HaltReason};
-pub use pre_trade::{ExchangeRules, PreTradeRejection, PreTradeResult, PreTradeValidator};
 pub use rate_limiter::{RateLimiter, RateLimiterConfig};
 
 /// Risk limits configuration (i64 fixed-point)
@@ -42,6 +50,12 @@ pub struct RiskLimits {
 
     /// Maximum drawdown fraction (e.g. 50_000_000 for 5%)
     pub max_drawdown: i64,
+
+    /// Tick size (price increment)
+    pub tick_size: u64,
+
+    /// Maximum price distance from mid (in bps) - safety check
+    pub max_price_distance_bps: u32,
 }
 
 impl Default for RiskLimits {
@@ -51,10 +65,12 @@ impl Default for RiskLimits {
             max_short: MAX_SHORT,
             // Default order limits if not in constants, assuming features control them or safe defaults
             max_order_size: MAX_POSITION / 2, 
-            min_order_size: 100_000, // 0.0001
+            min_order_size: 1_000_000, // 0.001 BTC (assuming 9 decimals)
             max_outstanding_orders: 10,
             max_daily_loss: MAX_DAILY_LOSS,
             max_drawdown: MAX_DRAWDOWN,
+            tick_size: 10_000_000, // $0.01 tick size (9 decimals)
+            max_price_distance_bps: 500, // 5% from mid
         }
     }
 }
@@ -69,6 +85,10 @@ pub enum RiskViolation {
     TooManyOutstandingOrders { current: usize, max: usize },
     DailyLossLimitBreached { daily_pnl: i64, limit: i64 },
     DrawdownLimitBreached { drawdown: i64, limit: i64 },
+    KillSwitchActive,
+    TradingPaused,
+    InvalidTick { price: u64, tick_size: u64 },
+    PriceTooFarFromMid { price: u64, mid: u64, max_distance_bps: u32 },
 }
 
 impl fmt::Display for RiskViolation {
@@ -111,6 +131,18 @@ impl fmt::Display for RiskViolation {
                     drawdown, limit
                 )
             }
+            RiskViolation::KillSwitchActive => write!(f, "Kill switch active"),
+            RiskViolation::TradingPaused => write!(f, "Trading paused"),
+            RiskViolation::InvalidTick { price, tick_size } => {
+                write!(f, "Price {} not on tick size {}", price, tick_size)
+            }
+            RiskViolation::PriceTooFarFromMid { price, mid, max_distance_bps } => {
+                write!(
+                    f,
+                    "Price {} too far from mid {} (max: {}bps)",
+                    price, mid, max_distance_bps
+                )
+            }
         }
     }
 }
@@ -121,6 +153,7 @@ impl fmt::Display for RiskViolation {
 /// - Validates signals against position/order limits
 /// - Enforces daily loss and drawdown limits
 /// - Manages daily PnL resets
+/// - Enforces Kill Switch and Price Sanity checks
 ///
 /// # Thread Safety
 ///
@@ -130,6 +163,7 @@ pub struct RiskManager {
     limits: RiskLimits,
     daily_reset_timestamp: u64,
     outstanding_order_count: usize,
+    kill_switch: Option<KillSwitch>,
 }
 
 impl RiskManager {
@@ -146,6 +180,19 @@ impl RiskManager {
             limits,
             daily_reset_timestamp: Self::get_day_start_timestamp(),
             outstanding_order_count: 0,
+            kill_switch: None,
+        }
+    }
+
+    /// Create with kill switch integration
+    pub fn with_kill_switch(limits: RiskLimits, kill_switch: KillSwitch) -> Self {
+        info!("Initialized RiskManager with limits: {:?} and KillSwitch", limits);
+
+        Self {
+            limits,
+            daily_reset_timestamp: Self::get_day_start_timestamp(),
+            outstanding_order_count: 0,
+            kill_switch: Some(kill_switch),
         }
     }
 
@@ -223,19 +270,35 @@ impl RiskManager {
     /// Validate a signal before execution
     ///
     /// Checks:
+    /// - Kill Switch
     /// - Order size limits
     /// - Position limits (including open exposure)
     /// - Outstanding order counts
+    /// - Price Tick
+    /// - Price Distance from Mid
     pub fn validate_signal(
         &self, 
         signal: &Signal, 
         position: &Position,
         open_long_exposure: i64,
-        open_short_exposure: i64
+        open_short_exposure: i64,
+        mid_price: u64
     ) -> Result<()> {
         // No validation needed for cancel or no action
         if !signal.requires_action() || matches!(signal.action, SignalAction::CancelAll) {
             return Ok(());
+        }
+
+        // 1. Check kill switch
+        if let Some(ref ks) = self.kill_switch {
+            if ks.should_stop() {
+                debug!("Risk check: Kill switch active");
+                return Err(anyhow!(RiskViolation::KillSwitchActive));
+            }
+            if ks.is_paused() {
+                debug!("Risk check: Trading paused");
+                return Err(anyhow!(RiskViolation::TradingPaused));
+            }
         }
 
         let size_i64 = signal.size as i64;
@@ -252,6 +315,31 @@ impl RiskManager {
                 size: size_i64,
                 max: self.limits.max_order_size
             }));
+        }
+
+        // Check Price Sanity (Tick and Distance)
+        match signal.action {
+            SignalAction::QuoteBoth => {
+                self.validate_price(signal.bid_price, mid_price)?;
+                self.validate_price(signal.ask_price, mid_price)?;
+            },
+            SignalAction::QuoteBid => {
+                self.validate_price(signal.bid_price, mid_price)?;
+            },
+            SignalAction::QuoteAsk => {
+                self.validate_price(signal.ask_price, mid_price)?;
+            },
+            // TakePosition usually implies market order or aggressive limit, 
+            // if prices are 0 we skip price validation.
+            SignalAction::TakePosition => {
+                if signal.bid_price > 0 {
+                     self.validate_price(signal.bid_price, mid_price)?;
+                }
+                if signal.ask_price > 0 {
+                     self.validate_price(signal.ask_price, mid_price)?;
+                }
+            }
+            _ => {}
         }
 
         // Calculate projected position including open exposure
@@ -339,6 +427,53 @@ impl RiskManager {
         Ok(())
     }
 
+    /// Helper to validate a single price
+    fn validate_price(&self, price: u64, mid_price: u64) -> Result<()> {
+        if price == 0 {
+            return Ok(());
+        }
+
+        // Check tick size
+        if self.limits.tick_size > 0 && price % self.limits.tick_size != 0 {
+             warn!(
+                "Risk check: Price {} not on tick size {}",
+                price, self.limits.tick_size
+            );
+            return Err(anyhow!(RiskViolation::InvalidTick {
+                price,
+                tick_size: self.limits.tick_size
+            }));
+        }
+
+        // Check distance from mid
+        if mid_price > 0 {
+            let distance = if price > mid_price {
+                price - mid_price
+            } else {
+                mid_price - price
+            };
+
+            // Calculate distance in BPS using u128 to prevent overflow
+            // bps = (distance * 10000) / mid_price
+            let distance_bps = (distance as u128 * 10_000) / mid_price as u128;
+            let distance_bps = distance_bps as u32;
+
+            if distance_bps > self.limits.max_price_distance_bps {
+                warn!(
+                    "Risk check: Price too far from mid ({}bps > {}bps)",
+                    distance_bps, self.limits.max_price_distance_bps
+                );
+                return Err(anyhow!(RiskViolation::PriceTooFarFromMid {
+                    price,
+                    mid: mid_price,
+                    max_distance_bps: self.limits.max_price_distance_bps
+                }));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Increment outstanding order count
     pub fn increment_order_count(&mut self, count: usize) {
         self.outstanding_order_count += count;
@@ -375,7 +510,14 @@ mod tests {
             max_outstanding_orders: 10,
             max_daily_loss: 5_000 * 1_000_000_000, // 5000 USD
             max_drawdown: 50_000_000, // 5%
+            tick_size: 10_000_000, // 0.01
+            max_price_distance_bps: 500, // 5%
         }
+    }
+
+    // Helper to create price values (9 decimals)
+    fn price(amount: u64) -> u64 {
+        amount * 1_000_000_000
     }
 
     #[test]
@@ -383,18 +525,19 @@ mod tests {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
         let pos = Position::new();
+        let mid = price(50000);
 
         // Valid signal
-        let signal = Signal::quote_bid(50_000_000_000_000, 100_000_000); // 0.1 BTC
-        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_ok());
+        let signal = Signal::quote_bid(price(50000), 100_000_000); // 0.1 BTC
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_ok());
 
         // Too large
-        let signal = Signal::quote_bid(50_000_000_000_000, 600_000_000); // 0.6 BTC
-        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
+        let signal = Signal::quote_bid(price(50000), 600_000_000); // 0.6 BTC
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
         
         // Too small
-        let signal = Signal::quote_bid(50_000_000_000_000, 100); // Tiny
-        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
+        let signal = Signal::quote_bid(price(50000), 100); // Tiny
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
     }
     
     #[test]
@@ -402,17 +545,18 @@ mod tests {
         let limits = create_test_limits();
         let rm = RiskManager::with_limits(limits);
         let pos = Position::new();
+        let mid = price(50000);
         
         // Already have 0.9 BTC
         pos.update_quantity(900_000_000);
         
         // Buy 0.2 BTC -> 1.1 BTC > 1.0 BTC Limit
-        let signal = Signal::quote_bid(50_000_000_000_000, 200_000_000);
-        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_err());
+        let signal = Signal::quote_bid(price(50000), 200_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
         
         // Sell 0.2 BTC -> 0.7 BTC (OK)
-        let signal = Signal::quote_ask(50_000_000_000_000, 200_000_000);
-        assert!(rm.validate_signal(&signal, &pos, 0, 0).is_ok());
+        let signal = Signal::quote_ask(price(50000), 200_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_ok());
     }
     
     #[test]
@@ -441,5 +585,38 @@ mod tests {
         rm.check_daily_reset(&pos);
         
         assert_eq!(pos.get_daily_pnl(), 0);
+    }
+
+    #[test]
+    fn test_price_validation() {
+        let limits = create_test_limits();
+        let rm = RiskManager::with_limits(limits);
+        let pos = Position::new();
+        let mid = price(50000);
+
+        // Invalid tick
+        let signal = Signal::quote_bid(price(50000) + 1, 100_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
+
+        // Price too far
+        let signal = Signal::quote_bid(price(55000), 100_000_000); // 10% away
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
+    }
+
+    #[test]
+    fn test_kill_switch() {
+        let limits = create_test_limits();
+        let ks = KillSwitch::new();
+        let rm = RiskManager::with_kill_switch(limits, ks.clone());
+        let pos = Position::new();
+        let mid = price(50000);
+
+        // Normal
+        let signal = Signal::quote_bid(price(50000), 100_000_000);
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_ok());
+
+        // Trip kill switch
+        ks.shutdown("test");
+        assert!(rm.validate_signal(&signal, &pos, 0, 0, mid).is_err());
     }
 }
