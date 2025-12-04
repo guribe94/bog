@@ -146,11 +146,11 @@ impl Default for ValidationConfig {
         Self {
             max_age_ns: 5_000_000_000,        // 5 seconds
             max_spread_bps: 1000,             // 10%
-            min_spread_bps: 1,                // 0.01% (1bp minimum)
+            min_spread_bps: 0,                // Allow 0bps spreads (Lighter DEX has tight markets)
             max_price_change_bps: 500,        // 5% per snapshot
             min_total_liquidity: 100_000_000, // 0.1 BTC in fixed-point
             validate_depth: true,
-            allow_locked: false,
+            allow_locked: true,               // Allow locked orderbooks (common on Lighter DEX)
         }
     }
 }
@@ -331,7 +331,8 @@ impl SnapshotValidator {
             return Err(ValidationError::InvalidPrice);
         }
 
-        let spread = snapshot.best_ask_price - snapshot.best_bid_price;
+        // Use saturating_sub to handle locked orderbooks where ask == bid
+        let spread = snapshot.best_ask_price.saturating_sub(snapshot.best_bid_price);
         let spread_bps = (spread * 10_000) / snapshot.best_bid_price;
 
         // Check if spread is too wide
@@ -340,7 +341,8 @@ impl SnapshotValidator {
         }
 
         // Check if spread is suspiciously narrow (possible data error)
-        if spread_bps < self.config.min_spread_bps {
+        // Only check if min_spread_bps > 0 (0 means disabled)
+        if self.config.min_spread_bps > 0 && spread_bps < self.config.min_spread_bps {
             return Err(ValidationError::SpreadTooNarrow { spread_bps });
         }
 
@@ -587,6 +589,24 @@ impl SnapshotValidator {
 mod tests {
     use super::*;
 
+    fn make_valid_snapshot() -> MarketSnapshot {
+        let now_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+
+        let mut snapshot = MarketSnapshot::default();
+        snapshot.sequence = 1;
+        snapshot.market_id = 1000001;
+        snapshot.exchange_timestamp_ns = now_ns - 100_000_000; // 100ms ago
+        snapshot.best_bid_price = 93650_000_000_000;
+        snapshot.best_bid_size = 1_000_000_000;
+        snapshot.best_ask_price = 93660_000_000_000; // 10 price units spread (~1bps)
+        snapshot.best_ask_size = 1_000_000_000;
+        snapshot.set_full_snapshot(true);
+        snapshot
+    }
+
     #[test]
     fn test_validator_creation() {
         let validator = SnapshotValidator::new();
@@ -611,5 +631,81 @@ mod tests {
         let bid = 100u64;
         let ask = 100u64;
         assert_eq!(bid, ask);
+    }
+
+    #[test]
+    fn test_zero_spread_allowed_by_default() {
+        // Default config now allows 0bps spreads
+        let mut validator = SnapshotValidator::new();
+        let mut snapshot = make_valid_snapshot();
+        snapshot.best_ask_price = snapshot.best_bid_price; // Locked market (0 spread)
+
+        let result = validator.validate(&snapshot);
+        assert!(result.is_ok(), "Zero spread should be allowed by default: {:?}", result);
+    }
+
+    #[test]
+    fn test_zero_spread_rejected_when_min_spread_configured() {
+        let mut config = ValidationConfig::default();
+        config.min_spread_bps = 1; // Require at least 1bps
+        config.allow_locked = false;
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        snapshot.best_ask_price = snapshot.best_bid_price; // Locked market
+
+        let result = validator.validate(&snapshot);
+        assert!(result.is_err(), "Zero spread should be rejected when min_spread_bps=1");
+    }
+
+    #[test]
+    fn test_locked_market_allowed_by_default() {
+        let mut validator = SnapshotValidator::new();
+        let mut snapshot = make_valid_snapshot();
+        snapshot.best_ask_price = snapshot.best_bid_price; // Locked
+
+        let result = validator.validate(&snapshot);
+        assert!(result.is_ok(), "Locked market should be allowed by default: {:?}", result);
+    }
+
+    #[test]
+    fn test_locked_market_rejected_when_not_allowed() {
+        let mut config = ValidationConfig::default();
+        config.allow_locked = false;
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        snapshot.best_ask_price = snapshot.best_bid_price; // Locked
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            matches!(result, Err(ValidationError::OrderbookLocked { .. })),
+            "Locked market should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_normal_spread_always_passes() {
+        let mut validator = SnapshotValidator::new();
+        let snapshot = make_valid_snapshot(); // Has ~1bps spread
+
+        let result = validator.validate(&snapshot);
+        assert!(result.is_ok(), "Normal spread should pass: {:?}", result);
+    }
+
+    #[test]
+    fn test_wide_spread_rejected() {
+        let mut validator = SnapshotValidator::new();
+        let mut snapshot = make_valid_snapshot();
+        // Create 15% spread (1500 bps), exceeds default max of 1000 bps
+        snapshot.best_ask_price = snapshot.best_bid_price + (snapshot.best_bid_price * 15 / 100);
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            matches!(result, Err(ValidationError::SpreadTooWide { .. })),
+            "Wide spread should be rejected: {:?}",
+            result
+        );
     }
 }

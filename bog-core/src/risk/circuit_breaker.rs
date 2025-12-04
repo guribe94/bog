@@ -93,16 +93,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
 
 /// Maximum spread in basis points before circuit breaker trips
-/// Default: 100bps (1%) - anything wider is likely a flash crash
-pub const MAX_SPREAD_BPS: u64 = 100;
+/// Default: 1000bps (10%) - suitable for volatile low-liquidity altcoins like FARTCOIN
+/// Note: Major pairs like BTC may want 100bps, but altcoins often have 5-10% spreads
+pub const MAX_SPREAD_BPS: u64 = 1000;
 
 /// Maximum price change between ticks (percentage)
 /// Default: 10% - anything larger is likely erroneous data
 pub const MAX_PRICE_CHANGE_PCT: u64 = 10;
 
 /// Minimum bid/ask size in fixed-point (9 decimals)
-/// Default: 0.01 BTC = 10_000_000
-pub const MIN_LIQUIDITY: u64 = 10_000_000;
+/// Default: 0 - disabled for altcoin trading where one side is often empty
+/// For major pairs, consider setting to 10_000_000 (0.01 BTC)
+pub const MIN_LIQUIDITY: u64 = 0;
 
 /// Maximum data age in nanoseconds (5 seconds)
 /// Older data is considered stale
@@ -442,9 +444,9 @@ mod tests {
     fn test_excessive_spread_trips_breaker() {
         let mut breaker = CircuitBreaker::new();
 
-        // Flash crash: spread goes from 2bps to 500bps
+        // Flash crash: spread goes to 1100bps (11%) which exceeds MAX_SPREAD_BPS (1000bps)
         let mut snapshot = create_normal_snapshot();
-        snapshot.best_ask_price = 52_500_000_000_000; // 5% spread (500bps)
+        snapshot.best_ask_price = 55_500_000_000_000; // 11% spread (1100bps)
 
         // First 2 violations: warnings only
         breaker.check(&snapshot);
@@ -458,7 +460,7 @@ mod tests {
         assert_eq!(breaker.total_trips(), 1);
 
         if let BreakerState::Halted(HaltReason::ExcessiveSpread { spread_bps, .. }) = state {
-            assert_eq!(spread_bps, 500);
+            assert_eq!(spread_bps, 1100); // (55500-50000)/50000*10000 = 1100bps
         } else {
             panic!("Expected ExcessiveSpread");
         }
@@ -551,7 +553,7 @@ mod tests {
         let mut breaker = CircuitBreaker::new();
 
         let mut snapshot = create_normal_snapshot();
-        snapshot.best_ask_price = 52_500_000_000_000; // Wide spread
+        snapshot.best_ask_price = 55_500_000_000_000; // 1100bps spread (exceeds 1000bps limit)
 
         // First violation: warning
         breaker.check(&snapshot);
@@ -573,9 +575,9 @@ mod tests {
     fn test_violations_reset_on_normal_tick() {
         let mut breaker = CircuitBreaker::new();
 
-        // 2 violations
+        // 2 violations (1100bps exceeds 1000bps limit)
         let mut bad_snapshot = create_normal_snapshot();
-        bad_snapshot.best_ask_price = 52_500_000_000_000;
+        bad_snapshot.best_ask_price = 55_500_000_000_000;
         breaker.check(&bad_snapshot);
         breaker.check(&bad_snapshot);
         assert_eq!(breaker.consecutive_violations, 2);

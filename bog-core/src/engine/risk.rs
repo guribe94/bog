@@ -410,8 +410,8 @@ mod tests {
     fn test_daily_loss_limit() {
         let position = Position::new();
 
-        // Simulate daily loss exceeding limit
-        position.update_realized_pnl(-MAX_DAILY_LOSS - 1);
+        // Simulate daily loss exceeding limit (use update_daily_pnl, not update_realized_pnl)
+        position.update_daily_pnl(-MAX_DAILY_LOSS - 1);
 
         // Any order should be rejected when daily loss limit is hit
         let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000);
@@ -426,14 +426,14 @@ mod tests {
         let position = Position::new();
 
         // Exactly at daily loss limit (should be valid)
-        position.update_realized_pnl(-MAX_DAILY_LOSS);
+        position.update_daily_pnl(-MAX_DAILY_LOSS);
 
         let signal = Signal::quote_both(50_000_000_000_000, 50_005_000_000_000, 100_000_000);
 
         assert!(validate_signal(&signal, &position).is_ok());
 
         // One more unit over the limit (should fail)
-        position.update_realized_pnl(-1);
+        position.update_daily_pnl(-1);
         assert!(validate_signal(&signal, &position).is_err());
     }
 

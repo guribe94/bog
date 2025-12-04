@@ -189,9 +189,11 @@ fn main() -> Result<()> {
     // Create snapshot validator with enhanced checks
     let mut validation_config = ValidationConfig::default();
     validation_config.max_spread_bps = 1000; // 10% max spread
-    validation_config.min_spread_bps = 1; // 1bp minimum
+    validation_config.min_spread_bps = 0; // Allow 0bps spreads (Lighter DEX has tight markets)
+    validation_config.allow_locked = true; // Allow locked orderbooks (common on Lighter DEX)
     validation_config.max_price_change_bps = 500; // 5% max change per snapshot
     validation_config.validate_depth = true; // Validate all 10 levels
+    validation_config.min_total_liquidity = 0; // Allow zero liquidity (altcoins like FARTCOIN often have empty sides)
     let mut validator = SnapshotValidator::with_config(validation_config);
     info!(
         "Enhanced data validation enabled (depth={}, spike detection={}bps)",

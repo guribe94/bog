@@ -81,22 +81,31 @@ impl StaleDataBreaker {
 
     /// Report that no data was available (empty poll)
     ///
-    /// Increment stale detection counter
+    /// Increment stale detection counter.
+    /// Note: Empty polls are normal when consumer catches up to producer.
+    /// We only mark as stale/offline based on actual data age, not poll count alone.
     #[inline]
     pub fn mark_empty_poll(&mut self) {
         self.consecutive_empty_polls += 1;
 
-        // Check for offline condition: too many empty polls
-        if self.consecutive_empty_polls > self.config.max_empty_polls {
+        // Check actual data age - this is the real indicator of staleness
+        let age = self.last_update.elapsed();
+
+        // Only transition to Offline if BOTH conditions are met:
+        // 1. Too many empty polls (producer might be dead)
+        // 2. Data is actually old (not just consumer caught up)
+        if self.consecutive_empty_polls > self.config.max_empty_polls && age >= self.config.max_age
+        {
             self.state = StaleDataState::Offline;
             return;
         }
 
-        // Check for stale condition: data too old
-        let age = self.last_update.elapsed();
+        // Only transition to Stale if data is actually old
+        // This prevents false positives when consumer is just caught up with producer
         if age >= self.config.max_age {
             self.state = StaleDataState::Stale;
         }
+        // If data is fresh (age < max_age), keep current state (likely Fresh)
     }
 
     /// Get current state
@@ -142,12 +151,16 @@ mod tests {
     fn test_mark_fresh_resets_state() {
         // Use custom config with low threshold so we can trigger non-fresh state
         let config = StaleDataConfig {
-            max_age: Duration::from_secs(5),
+            max_age: Duration::from_millis(50),
             max_empty_polls: 5,
         };
         let mut breaker = StaleDataBreaker::new(config);
 
+        // Wait for data to become stale first
+        std::thread::sleep(Duration::from_millis(100));
+
         // Mark enough empty polls to trigger offline state
+        // Now BOTH conditions are met: data is old AND many empty polls
         for _ in 0..6 {
             breaker.mark_empty_poll();
         }
@@ -174,18 +187,42 @@ mod tests {
     #[test]
     fn test_offline_detection() {
         let config = StaleDataConfig {
-            max_age: Duration::from_secs(5),
+            max_age: Duration::from_millis(50),
             max_empty_polls: 10,
         };
         let mut breaker = StaleDataBreaker::new(config);
 
-        // Mark 11 empty polls
+        // Wait for data to become stale
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Mark 11 empty polls - now both conditions (stale + many polls) are met
         for _ in 0..11 {
             breaker.mark_empty_poll();
         }
 
         assert!(breaker.is_offline());
         assert_eq!(breaker.state(), StaleDataState::Offline);
+    }
+
+    #[test]
+    fn test_empty_polls_dont_cause_stale_when_data_recent() {
+        let config = StaleDataConfig {
+            max_age: Duration::from_secs(5),
+            max_empty_polls: 10,
+        };
+        let mut breaker = StaleDataBreaker::new(config);
+
+        // Receive fresh data
+        breaker.mark_fresh();
+
+        // Many empty polls immediately after (consumer caught up)
+        for _ in 0..15 {
+            breaker.mark_empty_poll();
+        }
+
+        // Should still be fresh because data age < max_age
+        // This is the key fix: empty polls alone don't cause staleness
+        assert!(breaker.is_fresh());
     }
 
     #[test]
@@ -218,12 +255,15 @@ mod tests {
     #[test]
     fn test_reset_clears_state() {
         let config = StaleDataConfig {
-            max_age: Duration::from_millis(100),
+            max_age: Duration::from_millis(50),
             max_empty_polls: 10,
         };
         let mut breaker = StaleDataBreaker::new(config);
 
-        // Mark offline
+        // Wait for data to become stale first
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Mark offline - now BOTH conditions are met
         for _ in 0..11 {
             breaker.mark_empty_poll();
         }

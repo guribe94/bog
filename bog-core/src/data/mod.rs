@@ -93,15 +93,17 @@ pub fn validate_snapshot_with_time(
         return Err(SnapshotValidationError::ZeroAskPrice);
     }
 
-    // Check 3: Non-zero bid size
-    if snapshot.best_bid_size == 0 {
-        return Err(SnapshotValidationError::ZeroBidSize);
-    }
+    // Check 3: Non-zero bid size (relaxed for low-liquidity markets)
+    // Note: Zero size is allowed - we just won't be able to hit that side
+    // The strategy layer should handle this appropriately
+    // if snapshot.best_bid_size == 0 {
+    //     return Err(SnapshotValidationError::ZeroBidSize);
+    // }
 
-    // Check 4: Non-zero ask size
-    if snapshot.best_ask_size == 0 {
-        return Err(SnapshotValidationError::ZeroAskSize);
-    }
+    // Check 4: Non-zero ask size (relaxed for low-liquidity markets)
+    // if snapshot.best_ask_size == 0 {
+    //     return Err(SnapshotValidationError::ZeroAskSize);
+    // }
 
     // Check 5: Not crossed (bid < ask)
     if snapshot.best_bid_price >= snapshot.best_ask_price {
@@ -173,7 +175,14 @@ pub fn validate_snapshot(
 /// Uses a default max age of 5 seconds for staleness check.
 pub fn is_valid_snapshot(snapshot: &MarketSnapshot) -> bool {
     const DEFAULT_MAX_AGE_NS: u64 = 5_000_000_000; // 5 seconds
-    validate_snapshot(snapshot, DEFAULT_MAX_AGE_NS).is_ok()
+    match validate_snapshot(snapshot, DEFAULT_MAX_AGE_NS) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("is_valid_snapshot FAILED: {:?} (bid_price={}, ask_price={}, bid_size={}, ask_size={})",
+                e, snapshot.best_bid_price, snapshot.best_ask_price, snapshot.best_bid_size, snapshot.best_ask_size);
+            false
+        }
+    }
 }
 
 /// Check if orderbook is crossed (bid >= ask)
