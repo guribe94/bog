@@ -166,6 +166,7 @@ const _: () = {
 mod tests {
     use super::*;
     use bog_core::data::MarketSnapshot;
+    use huginn::shm::PADDING_SIZE;
 
     #[test]
     fn test_inventory_based_is_zst() {
@@ -177,6 +178,8 @@ mod tests {
         let mut strategy = InventoryBased;
 
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -192,7 +195,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -216,11 +219,13 @@ mod tests {
     fn test_zero_spread_prevention() {
         let mut strategy = InventoryBased;
         let mut book = L2OrderBook::new(1);
-        
+
         // Set up a book with a very tight/small price
         // Mid = 1000 (very small). 10bps of 1000 = 1. Half spread = 0.5 -> 0.
         // This should produce bid=1000, ask=1000 if not handled.
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -236,7 +241,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
         book.sync_from_snapshot(&snapshot);
         

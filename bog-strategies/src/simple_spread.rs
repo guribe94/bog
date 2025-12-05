@@ -288,15 +288,29 @@ pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
 pub struct SimpleSpread {
     /// Volatility tracker (EWMA)
     vol_tracker: EwmaVolatility,
+    /// Maximum market spread in basis points to consider valid for trading
+    /// Spreads wider than this will not trigger quotes (market too wide)
+    /// Default: 500 bps (5%)
+    max_market_spread_bps: u32,
 }
 
 impl SimpleSpread {
-    /// Create a new SimpleSpread strategy
+    /// Create a new SimpleSpread strategy with default max spread (500 bps)
     pub fn new() -> Self {
+        Self::new_with_max_spread(500)
+    }
+
+    /// Create a new SimpleSpread strategy with custom max market spread
+    ///
+    /// # Arguments
+    /// * `max_market_spread_bps` - Maximum market spread in basis points to consider valid
+    ///   Spreads wider than this will not trigger quotes. Default: 500 (5%)
+    pub fn new_with_max_spread(max_market_spread_bps: u32) -> Self {
         Self {
             // Initialize EWMA with alpha = 200 (0.2)
             // This gives good responsiveness to volatility spikes while smoothing noise
             vol_tracker: EwmaVolatility::new(200),
+            max_market_spread_bps,
         }
     }
 
@@ -404,9 +418,9 @@ impl SimpleSpread {
 
     /// Check if market spread is within valid bounds
     ///
-    /// Returns true if MIN_SPREAD_BPS <= spread <= MAX_SPREAD_BPS
+    /// Returns true if MIN_SPREAD_BPS <= spread <= self.max_market_spread_bps
     #[inline(always)]
-    fn is_spread_valid(bid: u64, ask: u64) -> bool {
+    fn is_spread_valid(&self, bid: u64, ask: u64) -> bool {
         if bid == 0 || ask <= bid {
             return false;
         }
@@ -415,8 +429,8 @@ impl SimpleSpread {
         let spread = ask - bid;
         let spread_bps = (spread * 10_000) / bid;
 
-        // Must be >= MIN and <= MAX
-        spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= MAX_SPREAD_BPS as u64
+        // Must be >= MIN and <= configured max
+        spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= self.max_market_spread_bps as u64
     }
 
     /// Validate price is within sane bounds
@@ -693,9 +707,9 @@ impl Strategy for SimpleSpread {
             return None;
         }
 
-        // 3. Spread validation (MIN <= spread <= MAX)
+        // 3. Spread validation (MIN <= spread <= configured max)
         // This catches both too-tight spreads and flash crashes
-        if !Self::is_spread_valid(bid, ask) {
+        if !self.is_spread_valid(bid, ask) {
             return None;
         }
 
@@ -891,7 +905,7 @@ impl Strategy for SimpleSpread {
         }
 
         // Ensure our spread is still profitable after adjustments
-        if !Self::is_spread_valid(our_bid, our_ask) {
+        if !self.is_spread_valid(our_bid, our_ask) {
             return None;
         }
 
@@ -944,6 +958,7 @@ mod tests {
     use crate::test_helpers::create_basic_snapshot;
     use bog_core::core::{Position, SignalAction};
     use bog_core::data::MarketSnapshot;
+    use huginn::shm::PADDING_SIZE;
 
     // Helper function to create a default position for tests
     fn create_test_position() -> Position {
@@ -996,11 +1011,14 @@ mod tests {
 
     #[test]
     fn test_spread_validation() {
+        // Create strategy with default max (500 bps)
+        let strategy = SimpleSpread::new();
+
         // Normal spread (should pass)
         let bid = 50_000_000_000_000u64;
         let ask = 50_010_000_000_000u64; // 2bps spread
 
-        assert!(SimpleSpread::is_spread_valid(bid, ask));
+        assert!(strategy.is_spread_valid(bid, ask));
 
         // Tight spread - test based on actual MIN_SPREAD_BPS
         let bid_tight = 50_000_000_000_000u64;
@@ -1009,30 +1027,40 @@ mod tests {
         // Calculate actual spread
         let spread_bps = ((ask_tight - bid_tight) * 10_000) / bid_tight;
 
-        // Result depends on MIN_SPREAD_BPS const
-        let result = SimpleSpread::is_spread_valid(bid_tight, ask_tight);
-        let expected = spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= MAX_SPREAD_BPS as u64;
+        // Result depends on MIN_SPREAD_BPS const and configured max
+        let result = strategy.is_spread_valid(bid_tight, ask_tight);
+        let expected = spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= 500;
         assert_eq!(
             result, expected,
             "Spread {}bps should be valid={} (MIN={}, MAX={})",
-            spread_bps, expected, MIN_SPREAD_BPS, MAX_SPREAD_BPS
+            spread_bps, expected, MIN_SPREAD_BPS, 500
         );
 
-        // Flash crash spread (should fail - exceeds MAX_SPREAD_BPS)
+        // Wide spread (500bps) should pass with default max of 500 bps
         let bid_wide = 50_000_000_000_000u64;
         let ask_wide = 52_500_000_000_000u64; // 500bps spread
 
-        assert!(!SimpleSpread::is_spread_valid(bid_wide, ask_wide));
+        assert!(strategy.is_spread_valid(bid_wide, ask_wide));
+
+        // Very wide spread (501bps) should fail
+        let ask_too_wide = 52_505_000_000_000u64; // 501bps spread
+        assert!(!strategy.is_spread_valid(bid_wide, ask_too_wide));
+
+        // Test with custom max spread (50 bps - the old default)
+        let strict_strategy = SimpleSpread::new_with_max_spread(50);
+        assert!(!strict_strategy.is_spread_valid(bid_wide, ask_wide)); // 500bps > 50, should fail
     }
 
     #[test]
     fn test_invalid_prices() {
+        let strategy = SimpleSpread::new();
+
         // Zero prices
-        assert!(!SimpleSpread::is_spread_valid(0, 100));
-        assert!(!SimpleSpread::is_spread_valid(100, 0));
+        assert!(!strategy.is_spread_valid(0, 100));
+        assert!(!strategy.is_spread_valid(100, 0));
 
         // Crossed book
-        assert!(!SimpleSpread::is_spread_valid(100, 50));
+        assert!(!strategy.is_spread_valid(100, 50));
     }
 
     #[test]
@@ -1072,6 +1100,8 @@ mod tests {
         let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1087,7 +1117,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1110,6 +1140,8 @@ mod tests {
 
         // Zero prices
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1125,7 +1157,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1176,6 +1208,8 @@ mod tests {
         let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1191,7 +1225,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1211,6 +1245,8 @@ mod tests {
 
         // Flash crash: spread goes from normal to 500bps
         let flash_crash_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1226,7 +1262,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1252,6 +1288,8 @@ mod tests {
         // Test 1: Price too low (< $1)
         // Use a tight spread (< 100 bps) so we test price bounds, not spread volatility
         let low_price_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1267,7 +1305,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1279,6 +1317,8 @@ mod tests {
         // Test 2: Price too high (> $1M)
         // Spread here is ~67 bps which is under the 100 bps threshold
         let high_price_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1294,7 +1334,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         book.sync_from_snapshot(&high_price_snapshot);
@@ -1311,6 +1351,8 @@ mod tests {
 
         // Thin book: only 0.0005 BTC on each side
         let thin_book_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1326,7 +1368,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1351,6 +1393,8 @@ mod tests {
         let mut strategy = SimpleSpread::new();
 
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1366,7 +1410,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1435,6 +1479,8 @@ mod tests {
 
         // Test 1: Wide spread (>100 bps) triggers cancel
         let wide_spread_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1450,7 +1496,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1468,6 +1514,8 @@ mod tests {
 
         // Test 2: Low liquidity triggers cancel
         let low_liquidity_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1483,7 +1531,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         book.sync_from_snapshot(&low_liquidity_snapshot);
@@ -1500,6 +1548,8 @@ mod tests {
 
         // Test 3: Normal market conditions - should quote, not cancel
         let normal_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1515,7 +1565,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         book.sync_from_snapshot(&normal_snapshot);
@@ -1542,6 +1592,8 @@ mod tests {
 
         // Normal, production-quality market snapshot
         let good_snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -1557,7 +1609,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
 
         let mut book = L2OrderBook::new(1);
@@ -1665,7 +1717,7 @@ fn test_spread_profitability_examples() {
 use crate::test_helpers::*;
 
 #[test]
-#[ignore] // Will fail until VWAP is implemented
+
 fn test_vwap_mid_price_vs_simple() {
     // Create snapshot with 5 levels of depth
     let snapshot = create_depth_snapshot(
@@ -1708,7 +1760,7 @@ fn test_vwap_mid_price_vs_simple() {
 }
 
 #[test]
-#[ignore] // Will fail until VWAP is implemented
+
 fn test_vwap_with_sparse_depth() {
     // Create snapshot with only levels 0, 2, 5 populated
     let snapshot = create_sparse_depth_snapshot(
@@ -1732,7 +1784,7 @@ fn test_vwap_with_sparse_depth() {
 }
 
 #[test]
-#[ignore] // Will fail until VWAP is implemented
+
 fn test_vwap_depth_levels_configurable() {
     let snapshot = create_depth_snapshot(
         50_000_000_000_000,
@@ -1767,7 +1819,7 @@ fn test_vwap_depth_levels_configurable() {
 }
 
 #[test]
-#[ignore] // Will fail until VWAP is implemented
+
 fn test_vwap_with_no_depth_fallback() {
     // Create snapshot with only top-of-book (depth empty)
     let snapshot = create_basic_snapshot(
@@ -1795,7 +1847,7 @@ fn test_vwap_with_no_depth_fallback() {
 }
 
 #[test]
-#[ignore] // Will fail until VWAP is implemented
+
 fn test_vwap_calculation_correctness() {
     // Test with known values to verify VWAP formula
     let snapshot = create_multi_level_snapshot(
@@ -1839,7 +1891,7 @@ fn test_vwap_calculation_correctness() {
 // ========================================================================
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_bullish_widens_ask() {
     // Create snapshot with 3x more bid liquidity (bullish pressure)
     let snapshot = create_imbalanced_snapshot(
@@ -1864,7 +1916,7 @@ fn test_imbalance_bullish_widens_ask() {
 }
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_bearish_widens_bid() {
     // Create snapshot with 3x more ask liquidity (bearish pressure)
     let snapshot = create_imbalanced_snapshot(
@@ -1889,7 +1941,7 @@ fn test_imbalance_bearish_widens_bid() {
 }
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_neutral_no_adjustment() {
     // Create snapshot with balanced liquidity (1:1 ratio)
     let snapshot = create_imbalanced_snapshot(
@@ -1912,7 +1964,7 @@ fn test_imbalance_neutral_no_adjustment() {
 }
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_extreme_values() {
     // Test extreme imbalance (10x ratio)
     let extreme_bullish = create_imbalanced_snapshot(
@@ -1944,7 +1996,7 @@ fn test_imbalance_extreme_values() {
 }
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_calculation_uses_depth() {
     // Test that imbalance uses depth, not just top-of-book
     let shallow = create_depth_snapshot(
@@ -1985,7 +2037,7 @@ fn test_imbalance_calculation_uses_depth() {
 }
 
 #[test]
-#[ignore] // Will fail until imbalance detection is implemented
+
 fn test_imbalance_range_bounded() {
     // Imbalance should be in range [-1.0, +1.0] (in fixed-point)
     let snapshots = vec![
@@ -2033,7 +2085,7 @@ fn test_imbalance_range_bounded() {
 // ========================================================================
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_quote_at_best_level_default() {
     // Normal conditions - should quote at best level (level 0)
     let snapshot = create_depth_snapshot(
@@ -2056,7 +2108,7 @@ fn test_quote_at_best_level_default() {
 }
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_join_level_2_when_profitable() {
     // Create scenario where joining level 2 is more profitable
     let snapshot = create_multi_level_snapshot(
@@ -2087,7 +2139,7 @@ fn test_join_level_2_when_profitable() {
 }
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_dont_join_unprofitable_level() {
     // Create scenario where all deeper levels are unprofitable
     // (spread too tight after fees)
@@ -2118,7 +2170,7 @@ fn test_dont_join_unprofitable_level() {
 }
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_multi_level_respects_min_spread() {
     // Create snapshot with varying spreads at each level
     let snapshot = create_multi_level_snapshot(
@@ -2140,7 +2192,7 @@ fn test_multi_level_respects_min_spread() {
 }
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_multi_level_considers_queue_position() {
     // When multiple levels are profitable, prefer the one with better queue position
     // (fewer orders ahead of us)
@@ -2164,7 +2216,7 @@ fn test_multi_level_considers_queue_position() {
 }
 
 #[test]
-#[ignore] // Will fail until multi-level quoting is implemented
+
 fn test_calculate_quote_price_at_level() {
     let snapshot = create_depth_snapshot(
         50_000_000_000_000,

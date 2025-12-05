@@ -17,6 +17,7 @@
 use bog_core::data::MarketSnapshot;
 use bog_core::risk::circuit_breaker::CircuitBreaker;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use huginn::shm::PADDING_SIZE;
 
 /// Helper: Create normal market snapshot
 fn create_normal_snapshot() -> MarketSnapshot {
@@ -26,6 +27,8 @@ fn create_normal_snapshot() -> MarketSnapshot {
         .as_nanos() as u64;
 
     MarketSnapshot {
+        generation_start: 0,
+        generation_end: 0,
         market_id: 1,
         sequence: 100,
         exchange_timestamp_ns: now,
@@ -41,7 +44,7 @@ fn create_normal_snapshot() -> MarketSnapshot {
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 54],
+        _padding: [0; PADDING_SIZE],
     }
 }
 

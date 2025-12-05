@@ -5,7 +5,7 @@
 ## Critical Issues: 1
 ## High Issues: 1 (Fixed)
 ## Medium Issues: 2
-## Low Issues: 5
+## Low Issues: 4
 
 ## Blocking Items (must fix before production):
 
@@ -14,11 +14,9 @@
 
 ## Recommended Items (should fix before production):
 
-1.  **Pre-Trade Validator Performance**: `bog-core/src/risk/pre_trade.rs` uses `rust_decimal::Decimal` for validation. This introduces conversion overhead in the hot path.
-    *   **Action**: Rewrite `PreTradeValidator` to use `u64` fixed-point arithmetic consistent with the rest of the engine.
-2.  **Unused Config Features**: Many configuration features in `constants.rs` generate warnings during compilation.
+1.  **Unused Config Features**: Many configuration features in `constants.rs` generate warnings during compilation.
     *   **Action**: Clean up `Cargo.toml` features or use `#[allow(unexpected_cfgs)]` if they are intended for future use.
-3.  **Duplicate Position Logic**: Position limits are checked in `SimpleSpread` (strategy), `Engine` (pre-trade), and `Engine` (post-fill). While safe, this triple-check adds maintenance burden. The `Engine` check is the most robust.
+2.  **Duplicate Position Logic**: Position limits are checked in `SimpleSpread` (strategy), `Engine` (pre-trade), and `Engine` (post-fill). While safe, this triple-check adds maintenance burden. The `Engine` check is the most robust.
 
 ## Verified Correct:
 
@@ -47,4 +45,4 @@
 
 -   [ ] `LighterExecutor` replaced with real implementation.
 -   [ ] End-to-end test on Lighter Testnet completed.
--   [ ] Performance benchmark run with real network I/O (to verify `PreTradeValidator` impact).
+-   [ ] Performance benchmark run with real network I/O.

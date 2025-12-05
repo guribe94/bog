@@ -172,14 +172,46 @@ impl L2OrderBook {
     }
 
     /// Get best bid price (level 0)
+    ///
+    /// Note: This returns the corrected best bid (max of all bid levels) to handle
+    /// cases where Lighter DEX sends orderbook levels in unexpected order.
     #[inline(always)]
     pub fn best_bid_price(&self) -> u64 {
-        self.bid_prices[0]
+        // Find max bid price across all levels (handles incorrectly ordered data)
+        let mut max_bid = self.bid_prices[0];
+        for &price in &self.bid_prices[1..] {
+            if price > max_bid {
+                max_bid = price;
+            }
+        }
+        max_bid
     }
 
     /// Get best ask price (level 0)
+    ///
+    /// Note: This returns the corrected best ask (min of all non-zero ask levels) to handle
+    /// cases where Lighter DEX sends orderbook levels in unexpected order.
     #[inline(always)]
     pub fn best_ask_price(&self) -> u64 {
+        // Find min ask price across all levels, ignoring zeros (handles incorrectly ordered data)
+        let mut min_ask = self.ask_prices[0];
+        for &price in &self.ask_prices[1..] {
+            if price > 0 && (min_ask == 0 || price < min_ask) {
+                min_ask = price;
+            }
+        }
+        min_ask
+    }
+
+    /// Get raw bid price at level 0 (as received from Huginn, without correction)
+    #[inline(always)]
+    pub fn raw_bid_price(&self) -> u64 {
+        self.bid_prices[0]
+    }
+
+    /// Get raw ask price at level 0 (as received from Huginn, without correction)
+    #[inline(always)]
+    pub fn raw_ask_price(&self) -> u64 {
         self.ask_prices[0]
     }
 
@@ -831,9 +863,10 @@ mod tests {
         snapshot_incr.best_ask_price = 49_510_000_000_000; // Different
         book.incremental_update(&snapshot_incr);
 
-        // Verify level 0 changed
-        assert_eq!(book.best_bid_price(), 49_500_000_000_000);
-        assert_eq!(book.best_ask_price(), 49_510_000_000_000);
+        // Verify level 0 changed (use raw array access, not best_bid_price() which finds max)
+        // best_bid_price() returns max across all levels to handle misordered Lighter data
+        assert_eq!(book.bid_prices[0], 49_500_000_000_000);
+        assert_eq!(book.ask_prices[0], 49_510_000_000_000);
         assert_eq!(book.last_sequence, 101);
 
         // Verify levels 1-9 preserved (NOT updated from incremental)
@@ -880,8 +913,8 @@ mod tests {
 
         book.sync_from_snapshot(&snapshot_incr);
 
-        // Verify only level 0 updated
-        assert_eq!(book.best_bid_price(), 45_000_000_000_000);
+        // Verify only level 0 updated (use raw array, best_bid_price() returns max across all levels)
+        assert_eq!(book.bid_prices[0], 45_000_000_000_000);
         // Level 5 should still be the saved value
         assert_eq!(book.bid_prices[5], saved_level_5);
     }
@@ -983,7 +1016,8 @@ mod tests {
         snap2.best_bid_price = 40_000_000_000_000;
         book.sync_from_snapshot(&snap2);
 
-        assert_eq!(book.best_bid_price(), 40_000_000_000_000);
+        // Use raw array access for level 0 since best_bid_price() returns max across all levels
+        assert_eq!(book.bid_prices[0], 40_000_000_000_000);
         assert_eq!(book.bid_prices[5], level_5_after_full); // Preserved
 
         // 3. Another full snapshot (resets everything)

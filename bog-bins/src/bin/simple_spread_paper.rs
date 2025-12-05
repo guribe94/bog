@@ -16,7 +16,7 @@
 use anyhow::Result;
 use bog_bins::common::{init_logging, print_stats, setup_performance, CommonArgs};
 use bog_core::data::types::encode_market_id;
-use bog_core::data::{MarketFeed, SnapshotValidator, ValidationConfig, ValidationError};
+use bog_core::data::{MarketFeed, MarketSnapshotExt, SnapshotValidator, ValidationConfig, ValidationError};
 use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::engine::{
     AlertConfig, AlertManager, AlertType, Engine, GapRecoveryConfig, GapRecoveryManager,
@@ -31,12 +31,26 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
+/// CLI arguments for simple spread paper trading
+#[derive(Parser, Debug)]
+#[command(author, version, about = "Simple Spread Paper Trading Bot")]
+struct Args {
+    #[command(flatten)]
+    common: CommonArgs,
+
+    /// Maximum market spread in basis points to consider valid for trading.
+    /// Spreads wider than this will not trigger quotes.
+    /// Default: 500 (5%). Set higher for illiquid markets.
+    #[arg(long, default_value = "500")]
+    max_market_spread_bps: u32,
+}
+
 fn main() -> Result<()> {
     // Parse CLI arguments
-    let args = CommonArgs::parse();
+    let args = Args::parse();
 
     // Initialize logging
-    init_logging(&args.log_level)?;
+    init_logging(&args.common.log_level)?;
 
     // Install panic handler for graceful shutdown
     install_panic_handler();
@@ -45,10 +59,11 @@ fn main() -> Result<()> {
     warn!("PAPER TRADING MODE - NO REAL ORDERS WILL BE PLACED");
     warn!("Using SimulatedExecutor - This is for testing only!");
     warn!("DO NOT USE THIS BINARY FOR REAL MONEY TRADING");
-    info!("Market ID: {}", args.market_id);
+    info!("Market ID: {}", args.common.market_id);
+    info!("Max Market Spread: {} bps", args.max_market_spread_bps);
 
     // Setup performance (CPU pinning, real-time priority)
-    setup_performance(args.cpu_core, args.realtime)?;
+    setup_performance(args.common.cpu_core, args.common.realtime)?;
 
     // Create kill switch for emergency shutdown
     let kill_switch = KillSwitch::new();
@@ -63,10 +78,10 @@ fn main() -> Result<()> {
 
     // Connect to real Huginn shared memory
     // Encode market ID for Lighter DEX (dex_type=1)
-    let encoded_market_id = encode_market_id(1, args.market_id);
+    let encoded_market_id = encode_market_id(1, args.common.market_id);
     info!(
         "Connecting to Huginn shared memory for market {} (encoded: {})...",
-        args.market_id, encoded_market_id
+        args.common.market_id, encoded_market_id
     );
     let mut feed = MarketFeed::connect(encoded_market_id)?;
 
@@ -76,14 +91,36 @@ fn main() -> Result<()> {
     // Increased to 300 retries × 500ms = 150s total to handle Huginn WebSocket connection delays
     let initial_snapshot = match feed.wait_for_initial_snapshot(300, Duration::from_millis(500)) {
         Ok(snapshot) => {
+            // Log raw values from Huginn (may be incorrectly ordered)
+            let raw_spread_bps = if snapshot.best_bid_price > 0 {
+                ((snapshot.best_ask_price - snapshot.best_bid_price) * 10_000) / snapshot.best_bid_price
+            } else { 0 };
+
+            // Log corrected values using actual best bid/ask
+            let corrected_spread_bps = snapshot.corrected_spread_bps();
+            let actual_bid = snapshot.actual_best_bid();
+            let actual_ask = snapshot.actual_best_ask();
+
             info!(
-                "Received initial snapshot: seq={}, bid={}, ask={}, spread={}bps",
+                "Received initial snapshot: seq={}, raw_bid={}, raw_ask={}, raw_spread={}bps",
                 snapshot.sequence,
                 snapshot.best_bid_price,
                 snapshot.best_ask_price,
-                ((snapshot.best_ask_price - snapshot.best_bid_price) * 10_000)
-                    / snapshot.best_bid_price
+                raw_spread_bps
             );
+            info!(
+                "Corrected values: actual_bid={}, actual_ask={}, corrected_spread={}bps",
+                actual_bid,
+                actual_ask,
+                corrected_spread_bps
+            );
+
+            if raw_spread_bps != corrected_spread_bps {
+                warn!(
+                    "SPREAD MISMATCH DETECTED! Raw={}bps vs Corrected={}bps. Orderbook data may be incorrectly ordered.",
+                    raw_spread_bps, corrected_spread_bps
+                );
+            }
 
             // Validate initial snapshot
             if snapshot.best_bid_price == 0 || snapshot.best_ask_price == 0 {
@@ -91,8 +128,15 @@ fn main() -> Result<()> {
                 return Err(anyhow::anyhow!("Invalid initial snapshot"));
             }
 
-            if snapshot.best_ask_price <= snapshot.best_bid_price {
-                error!("Initial snapshot has crossed orderbook! Aborting.");
+            // Note: Crossed orderbook check removed for thin market support
+            // On thin markets, one side frequently has zero size with a stale price
+            // which appears as crossed. The validator handles this with allow_crossed_when_empty.
+            if snapshot.best_ask_price < snapshot.best_bid_price
+                && snapshot.best_bid_size > 0
+                && snapshot.best_ask_size > 0
+            {
+                // Only abort if both sides have real liquidity and it's truly crossed
+                error!("Initial snapshot has truly crossed orderbook (both sides have size)! Aborting.");
                 return Err(anyhow::anyhow!("Crossed orderbook in initial snapshot"));
             }
 
@@ -102,27 +146,34 @@ fn main() -> Result<()> {
             error!("Failed to get initial snapshot: {}", e);
             error!(
                 "Is Huginn running? Check: ls -la /dev/shm/hg_m{}",
-                args.market_id
+                args.common.market_id
             );
             return Err(e);
         }
     };
 
-    // Log initial market conditions
+    // Log initial market conditions (using corrected best bid/ask)
     info!("Initial market conditions validated:");
     info!("  - Sequence: {}", initial_snapshot.sequence);
     info!(
-        "  - Best Bid: {} (size: {})",
+        "  - Raw Bid: {} (size: {})",
         initial_snapshot.best_bid_price, initial_snapshot.best_bid_size
     );
     info!(
-        "  - Best Ask: {} (size: {})",
+        "  - Raw Ask: {} (size: {})",
         initial_snapshot.best_ask_price, initial_snapshot.best_ask_size
     );
     info!(
-        "  - Spread: {} bps",
-        ((initial_snapshot.best_ask_price - initial_snapshot.best_bid_price) * 10_000)
-            / initial_snapshot.best_bid_price
+        "  - Actual Best Bid: {}",
+        initial_snapshot.actual_best_bid()
+    );
+    info!(
+        "  - Actual Best Ask: {}",
+        initial_snapshot.actual_best_ask()
+    );
+    info!(
+        "  - Corrected Spread: {} bps",
+        initial_snapshot.corrected_spread_bps()
     );
     info!(
         "  - Is Full Snapshot: {}",
@@ -130,7 +181,7 @@ fn main() -> Result<()> {
     );
 
     // Create strategy (non-zero sized type with volatility state)
-    let strategy = SimpleSpread::new();
+    let strategy = SimpleSpread::new_with_max_spread(args.max_market_spread_bps);
     info!(
         "Strategy: SimpleSpread (size: {} bytes)",
         std::mem::size_of_val(&strategy)
@@ -138,6 +189,7 @@ fn main() -> Result<()> {
     info!("  - Target Spread: {} bps", SPREAD_BPS);
     info!("  - Order Size: {} (fixed-point)", ORDER_SIZE);
     info!("  - Min Market Spread: {} bps", MIN_SPREAD_BPS);
+    info!("  - Max Market Spread: {} bps", args.max_market_spread_bps);
 
     // Create executor
     // PAPER TRADING: Replace with LighterExecutor for live trading
@@ -194,6 +246,7 @@ fn main() -> Result<()> {
     validation_config.max_price_change_bps = 500; // 5% max change per snapshot
     validation_config.validate_depth = true; // Validate all 10 levels
     validation_config.min_total_liquidity = 0; // Allow zero liquidity (altcoins like FARTCOIN often have empty sides)
+    validation_config.allow_crossed_when_empty = true; // Thin market support: allow crossed when one side is empty
     let mut validator = SnapshotValidator::with_config(validation_config);
     info!(
         "Enhanced data validation enabled (depth={}, spike detection={}bps)",
@@ -294,6 +347,13 @@ fn main() -> Result<()> {
 
                 // Reject this snapshot - don't trade on invalid data
                 snapshot = None;
+            } else {
+                // Validation passed - if trading was halted, resume it
+                // This handles automatic recovery when market data becomes valid again
+                if alert_manager.is_trading_halted() {
+                    info!("Valid market data received - trading resumed");
+                    alert_manager.reset_halt();
+                }
             }
         }
 
@@ -372,31 +432,21 @@ fn main() -> Result<()> {
                 // Update last sequence for next gap check
                 last_sequence = snap.sequence;
 
-                // Check for invalid data conditions
-                if snap.best_bid_price >= snap.best_ask_price {
-                    let mut context = HashMap::new();
-                    context.insert("bid".to_string(), snap.best_bid_price.to_string());
-                    context.insert("ask".to_string(), snap.best_ask_price.to_string());
-                    alert_manager
-                        .raise_alert(
-                            AlertType::OrderbookCrossed,
-                            "Orderbook is crossed".to_string(),
-                            context,
-                        )
-                        .ok();
-                }
+                // Note: Crossed orderbook check removed - now handled by validator with
+                // allow_crossed_when_empty flag for thin market support
 
-                // Check for wide spreads
-                let spread_bps =
-                    ((snap.best_ask_price - snap.best_bid_price) * 10_000) / snap.best_bid_price;
+                // Check for wide spreads (using corrected best bid/ask)
+                let spread_bps = snap.corrected_spread_bps();
                 if spread_bps > 100 {
                     // > 1% spread
                     let mut context = HashMap::new();
                     context.insert("spread_bps".to_string(), spread_bps.to_string());
+                    context.insert("actual_bid".to_string(), snap.actual_best_bid().to_string());
+                    context.insert("actual_ask".to_string(), snap.actual_best_ask().to_string());
                     alert_manager
                         .raise_alert(
                             AlertType::SpreadTooWide,
-                            format!("Spread is {}bps", spread_bps),
+                            format!("Spread is {}bps (corrected)", spread_bps),
                             context,
                         )
                         .ok();

@@ -5,6 +5,8 @@
 
 #[cfg(test)]
 use bog_core::data::MarketSnapshot;
+#[cfg(test)]
+use huginn::shm::PADDING_SIZE;
 
 /// Create a basic test snapshot with top-of-book only
 #[cfg(test)]
@@ -20,6 +22,8 @@ pub fn create_basic_snapshot(
         .as_nanos() as u64;
 
     MarketSnapshot {
+        generation_start: 0,
+        generation_end: 0,
         market_id: 1,
         sequence: 100,
         exchange_timestamp_ns: now_ns,
@@ -33,9 +37,9 @@ pub fn create_basic_snapshot(
         bid_sizes: [0; 10],
         ask_prices: [0; 10],
         ask_sizes: [0; 10],
-        snapshot_flags: 0,
+        snapshot_flags: 0, // Incremental update (top-of-book only)
         dex_type: 1,
-        _padding: [0; 54],
+        _padding: [0; PADDING_SIZE],
     }
 }
 
@@ -85,6 +89,9 @@ pub fn create_depth_snapshot(
         snapshot.ask_prices[level] = best_ask + (level as u64 * tick_size);
         snapshot.ask_sizes[level] = size_per_level;
     }
+
+    // Mark as full snapshot so L2OrderBook copies depth arrays
+    snapshot.snapshot_flags = 0x01; // IS_FULL_SNAPSHOT
 
     snapshot
 }
@@ -140,6 +147,9 @@ pub fn create_imbalanced_snapshot(
         snapshot.ask_prices[level] = best_ask + (level as u64 * tick_size);
         snapshot.ask_sizes[level] = ask_size;
     }
+
+    // Mark as full snapshot so L2OrderBook copies depth arrays
+    snapshot.snapshot_flags = 0x01; // IS_FULL_SNAPSHOT
 
     snapshot
 }
@@ -198,6 +208,9 @@ pub fn create_multi_level_snapshot(
         snapshot.ask_sizes[level] = size;
     }
 
+    // Mark as full snapshot so L2OrderBook copies depth arrays
+    snapshot.snapshot_flags = 0x01; // IS_FULL_SNAPSHOT
+
     snapshot
 }
 
@@ -225,6 +238,9 @@ pub fn create_sparse_depth_snapshot(
         snapshot.ask_prices[level] = best_ask + (level as u64 * tick_size);
         snapshot.ask_sizes[level] = size_per_level;
     }
+
+    // Mark as full snapshot so L2OrderBook copies depth arrays
+    snapshot.snapshot_flags = 0x01; // IS_FULL_SNAPSHOT
 
     snapshot
 }

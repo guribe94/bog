@@ -1,6 +1,7 @@
 use bog_core::core::Position;
 use bog_core::core::Signal;
 use bog_core::data::MarketSnapshot;
+use huginn::shm::PADDING_SIZE;
 use bog_core::engine::executor_bridge::ExecutorBridge;
 use bog_core::engine::Engine;
 use bog_core::engine::Executor; // Import trait for get_fills
@@ -29,6 +30,8 @@ impl Strategy for AlwaysQuoteStrategy {
 // Helper to create correctly padded snapshot
 fn create_test_snapshot() -> MarketSnapshot {
     MarketSnapshot {
+        generation_start: 0,
+        generation_end: 0,
         market_id: 1,
         sequence: 1,
         exchange_timestamp_ns: 0,
@@ -44,7 +47,7 @@ fn create_test_snapshot() -> MarketSnapshot {
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 54],
+        _padding: [0; PADDING_SIZE],
     }
 }
 

@@ -246,20 +246,16 @@ fn test_stale_data_blocks_trading() -> Result<()> {
 
 /// Test: offline_data_halts_system
 ///
-/// Verifies offline detection halts trading
+/// Verifies offline detection halts trading.
+/// The StaleDataBreaker requires BOTH conditions to transition to Offline:
+/// 1. max_empty_polls exceeded (1000+ consecutive empty polls)
+/// 2. max_age exceeded (data is actually old, not just consumer caught up)
 #[test]
 fn test_offline_data_halts_system() -> Result<()> {
-    // Expected:
-    // 1. 1000+ consecutive empty polls
-    // 2. StaleDataBreaker.state → Offline
-    // 3. Engine halts completely
-    // 4. FeedHealth.status() → Offline
-    // 5. Alert issued to operator
-
     use bog_core::resilience::{StaleDataBreaker, StaleDataConfig, StaleDataState};
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(60),
+        max_age: Duration::from_millis(1), // Very short - will be exceeded immediately
         max_empty_polls: 1000,
     };
     let mut breaker = StaleDataBreaker::new(config);
@@ -267,14 +263,18 @@ fn test_offline_data_halts_system() -> Result<()> {
     // Initially fresh
     assert!(breaker.is_fresh());
 
+    // Wait for max_age to elapse - required for offline transition
+    std::thread::sleep(Duration::from_millis(2));
+
     // Simulate 1001 consecutive empty polls
+    // Now BOTH conditions will be met: max_empty_polls AND max_age
     for _ in 0..1001 {
         breaker.mark_empty_poll();
     }
 
     // Verify system is now offline
-    assert!(!breaker.is_fresh());
-    assert!(breaker.is_offline());
+    assert!(!breaker.is_fresh(), "Should not be fresh after empty polls + stale data");
+    assert!(breaker.is_offline(), "Should be offline");
     assert_eq!(breaker.state(), StaleDataState::Offline);
 
     Ok(())

@@ -148,6 +148,30 @@ pub trait MarketSnapshotExt {
 
     /// Calculate Huginn processing latency in nanoseconds
     fn huginn_latency_ns(&self) -> u64;
+
+    /// Get the actual best bid price (highest among all bid levels)
+    ///
+    /// This handles the case where orderbook data may not be sorted correctly.
+    /// Lighter DEX may send bids in ascending order (worst first), so we need
+    /// to find the maximum price across all bid levels.
+    ///
+    /// Returns 0 if no valid bid prices exist.
+    fn actual_best_bid(&self) -> u64;
+
+    /// Get the actual best ask price (lowest among all ask levels)
+    ///
+    /// This handles the case where orderbook data may not be sorted correctly.
+    /// Lighter DEX may send asks in descending order (worst first), so we need
+    /// to find the minimum price across all ask levels.
+    ///
+    /// Returns 0 if no valid ask prices exist.
+    fn actual_best_ask(&self) -> u64;
+
+    /// Calculate spread in basis points using corrected best bid/ask
+    ///
+    /// Uses actual_best_bid() and actual_best_ask() to ensure correct
+    /// spread calculation even if orderbook levels aren't properly sorted.
+    fn corrected_spread_bps(&self) -> u64;
 }
 
 impl MarketSnapshotExt for MarketSnapshot {
@@ -228,6 +252,43 @@ impl MarketSnapshotExt for MarketSnapshot {
             0
         }
     }
+
+    #[inline]
+    fn actual_best_bid(&self) -> u64 {
+        // Find max of best_bid_price and all bid_prices
+        // This handles incorrectly ordered orderbook data
+        let mut max_bid = self.best_bid_price;
+        for &price in &self.bid_prices {
+            if price > max_bid {
+                max_bid = price;
+            }
+        }
+        max_bid
+    }
+
+    #[inline]
+    fn actual_best_ask(&self) -> u64 {
+        // Find min of best_ask_price and all ask_prices (ignoring zeros)
+        // This handles incorrectly ordered orderbook data
+        let mut min_ask = self.best_ask_price;
+        for &price in &self.ask_prices {
+            if price > 0 && (min_ask == 0 || price < min_ask) {
+                min_ask = price;
+            }
+        }
+        min_ask
+    }
+
+    #[inline]
+    fn corrected_spread_bps(&self) -> u64 {
+        let bid = self.actual_best_bid();
+        let ask = self.actual_best_ask();
+        if bid > 0 && ask > bid {
+            ((ask - bid) * 10_000) / bid
+        } else {
+            0
+        }
+    }
 }
 
 #[cfg(test)]
@@ -247,6 +308,8 @@ mod tests {
     #[test]
     fn test_spread_bps() {
         let snapshot = MarketSnapshot {
+            generation_start: 1,
+            generation_end: 1,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -263,5 +326,142 @@ mod tests {
         let spread = MarketSnapshotExt::spread_bps(&snapshot);
         // 5 / 50000 * 10000 = 1 bp
         assert!((spread - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_actual_best_bid_correctly_sorted() {
+        // When data is correctly sorted, actual_best_bid should return best_bid_price
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            best_bid_price: conversions::f64_to_u64(100.0), // Highest (best)
+            best_ask_price: conversions::f64_to_u64(101.0),
+            bid_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(99.0);  // Second best
+                arr[1] = conversions::f64_to_u64(98.0);  // Third best
+                arr
+            },
+            ..Default::default()
+        };
+
+        // Should return the best_bid_price since it's the highest
+        assert_eq!(snapshot.actual_best_bid(), conversions::f64_to_u64(100.0));
+    }
+
+    #[test]
+    fn test_actual_best_bid_incorrectly_sorted() {
+        // When data is incorrectly sorted (ascending), actual_best_bid should find the max
+        // This simulates Lighter sending bids in ascending order (worst first)
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            best_bid_price: conversions::f64_to_u64(98.0), // WRONG: This is worst bid
+            best_ask_price: conversions::f64_to_u64(101.0),
+            bid_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(99.0);  // Middle
+                arr[1] = conversions::f64_to_u64(100.0); // BEST bid is here!
+                arr
+            },
+            ..Default::default()
+        };
+
+        // Should find 100.0 as the actual best bid
+        assert_eq!(snapshot.actual_best_bid(), conversions::f64_to_u64(100.0));
+    }
+
+    #[test]
+    fn test_actual_best_ask_correctly_sorted() {
+        // When data is correctly sorted, actual_best_ask should return best_ask_price
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            best_bid_price: conversions::f64_to_u64(100.0),
+            best_ask_price: conversions::f64_to_u64(101.0), // Lowest (best)
+            ask_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(102.0); // Second best
+                arr[1] = conversions::f64_to_u64(103.0); // Third best
+                arr
+            },
+            ..Default::default()
+        };
+
+        // Should return the best_ask_price since it's the lowest
+        assert_eq!(snapshot.actual_best_ask(), conversions::f64_to_u64(101.0));
+    }
+
+    #[test]
+    fn test_actual_best_ask_incorrectly_sorted() {
+        // When data is incorrectly sorted (descending), actual_best_ask should find the min
+        // This simulates Lighter sending asks in descending order (worst first)
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            best_bid_price: conversions::f64_to_u64(100.0),
+            best_ask_price: conversions::f64_to_u64(103.0), // WRONG: This is worst ask
+            ask_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(102.0); // Middle
+                arr[1] = conversions::f64_to_u64(101.0); // BEST ask is here!
+                arr
+            },
+            ..Default::default()
+        };
+
+        // Should find 101.0 as the actual best ask
+        assert_eq!(snapshot.actual_best_ask(), conversions::f64_to_u64(101.0));
+    }
+
+    #[test]
+    fn test_corrected_spread_bps_with_misordered_data() {
+        // Test the corrected spread calculation with misordered data
+        // Real scenario: bid at 0.38, ask at 0.382 = ~5.26 bps
+        // But if we use wrong values: bid at 0.37, ask at 0.39 = ~54 bps (10x error!)
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            // Simulating incorrectly ordered data (worst first)
+            best_bid_price: conversions::f64_to_u64(0.37),  // WRONG: worst bid
+            best_ask_price: conversions::f64_to_u64(0.39),  // WRONG: worst ask
+            bid_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(0.38);  // Actual best bid
+                arr
+            },
+            ask_prices: {
+                let mut arr = [0u64; 10];
+                arr[0] = conversions::f64_to_u64(0.382); // Actual best ask
+                arr
+            },
+            ..Default::default()
+        };
+
+        // Uncorrected spread: (0.39 - 0.37) / 0.37 * 10000 = ~540 bps
+        let uncorrected: f64 = MarketSnapshotExt::spread_bps(&snapshot);
+        assert!(uncorrected > 500.0, "Uncorrected spread should be ~540 bps, got {}", uncorrected);
+
+        // Corrected spread: (0.382 - 0.38) / 0.38 * 10000 = ~52.6 bps
+        // This is ~10x better than the uncorrected ~540 bps
+        let corrected = snapshot.corrected_spread_bps();
+        assert!(corrected < 60, "Corrected spread should be ~52 bps, got {}", corrected);
+        assert!(corrected >= 50, "Corrected spread should be ~52 bps, got {}", corrected);
+    }
+
+    #[test]
+    fn test_actual_best_ask_ignores_zeros() {
+        // Zeros in ask_prices should be ignored (empty levels)
+        let snapshot = MarketSnapshot {
+            market_id: 1,
+            sequence: 1,
+            best_bid_price: conversions::f64_to_u64(100.0),
+            best_ask_price: conversions::f64_to_u64(101.0),
+            ask_prices: [0u64; 10], // All zeros should be ignored
+            ..Default::default()
+        };
+
+        // Should return best_ask_price since all ask_prices are zero
+        assert_eq!(snapshot.actual_best_ask(), conversions::f64_to_u64(101.0));
     }
 }

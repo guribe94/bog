@@ -22,6 +22,7 @@ use bog_core::data::MarketSnapshot;
 use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_strategies::SimpleSpread;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use huginn::shm::PADDING_SIZE;
 
 /// Helper: Create market snapshot with varying price
 fn create_market_snapshot(base_price_delta: i64, sequence: u64) -> MarketSnapshot {
@@ -39,6 +40,8 @@ fn create_market_snapshot(base_price_delta: i64, sequence: u64) -> MarketSnapsho
     let ask_price = bid_price + 5_000_000_000; // +$5 (1bps spread)
 
     MarketSnapshot {
+        generation_start: 0,
+        generation_end: 0,
         market_id: 1,
         sequence,
         exchange_timestamp_ns: now,
@@ -54,7 +57,7 @@ fn create_market_snapshot(base_price_delta: i64, sequence: u64) -> MarketSnapsho
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 54],
+        _padding: [0; PADDING_SIZE],
     }
 }
 

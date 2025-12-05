@@ -139,6 +139,12 @@ pub struct ValidationConfig {
 
     /// Allow locked orderbook (bid == ask)
     pub allow_locked: bool,
+
+    /// Allow crossed orderbook when one side has zero size (thin market support)
+    /// On thin markets, when one side is empty the "price" is stale from the last order.
+    /// This creates apparent bid > ask even though the book isn't truly crossed.
+    /// Default: false for liquid markets, set true for altcoins.
+    pub allow_crossed_when_empty: bool,
 }
 
 impl Default for ValidationConfig {
@@ -151,6 +157,7 @@ impl Default for ValidationConfig {
             min_total_liquidity: 100_000_000, // 0.1 BTC in fixed-point
             validate_depth: true,
             allow_locked: true,               // Allow locked orderbooks (common on Lighter DEX)
+            allow_crossed_when_empty: false,  // Default false for liquid markets
         }
     }
 }
@@ -308,6 +315,15 @@ impl SnapshotValidator {
     fn validate_orderbook(&self, snapshot: &MarketSnapshot) -> Result<(), ValidationError> {
         // Check for crossed orderbook
         if snapshot.best_bid_price > snapshot.best_ask_price {
+            // On thin markets, crossed often means one side is empty/stale.
+            // When one side has zero size, the "price" is stale from the last order.
+            // Allow through to let strategy quote and provide liquidity.
+            if self.config.allow_crossed_when_empty
+                && (snapshot.best_bid_size == 0 || snapshot.best_ask_size == 0)
+            {
+                // Pass through - let strategy decide how to quote
+                return Ok(());
+            }
             return Err(ValidationError::OrderbookCrossed {
                 bid: snapshot.best_bid_price,
                 ask: snapshot.best_ask_price,
@@ -705,6 +721,93 @@ mod tests {
         assert!(
             matches!(result, Err(ValidationError::SpreadTooWide { .. })),
             "Wide spread should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crossed_allowed_when_empty_sided_bid() {
+        let mut config = ValidationConfig::default();
+        config.allow_crossed_when_empty = true;
+        config.min_total_liquidity = 0; // Allow zero liquidity for this test
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        // Crossed but bid side is empty (stale price)
+        snapshot.best_bid_price = 100_000_000_000;
+        snapshot.best_ask_price = 99_000_000_000; // "crossed" - bid > ask
+        snapshot.best_bid_size = 0; // Empty bid side!
+        snapshot.best_ask_size = 1_000_000_000;
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            result.is_ok(),
+            "Crossed orderbook with empty bid side should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crossed_allowed_when_empty_sided_ask() {
+        let mut config = ValidationConfig::default();
+        config.allow_crossed_when_empty = true;
+        config.min_total_liquidity = 0;
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        // Crossed but ask side is empty (stale price)
+        snapshot.best_bid_price = 100_000_000_000;
+        snapshot.best_ask_price = 99_000_000_000; // "crossed"
+        snapshot.best_bid_size = 1_000_000_000;
+        snapshot.best_ask_size = 0; // Empty ask side!
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            result.is_ok(),
+            "Crossed orderbook with empty ask side should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crossed_rejected_when_both_sides_have_size() {
+        let mut config = ValidationConfig::default();
+        config.allow_crossed_when_empty = true; // Even with this enabled
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        // Truly crossed - both sides have size
+        snapshot.best_bid_price = 100_000_000_000;
+        snapshot.best_ask_price = 99_000_000_000;
+        snapshot.best_bid_size = 1_000_000_000;
+        snapshot.best_ask_size = 1_000_000_000; // Both have size = real crossed
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            matches!(result, Err(ValidationError::OrderbookCrossed { .. })),
+            "Truly crossed orderbook should be rejected even with allow_crossed_when_empty: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_crossed_rejected_by_default() {
+        // Default config does NOT allow crossed when empty
+        let mut config = ValidationConfig::default();
+        config.min_total_liquidity = 0;
+        let mut validator = SnapshotValidator::with_config(config);
+
+        let mut snapshot = make_valid_snapshot();
+        // Crossed with empty side - but flag is false by default
+        snapshot.best_bid_price = 100_000_000_000;
+        snapshot.best_ask_price = 99_000_000_000;
+        snapshot.best_bid_size = 0; // Empty
+        snapshot.best_ask_size = 1_000_000_000;
+
+        let result = validator.validate(&snapshot);
+        assert!(
+            matches!(result, Err(ValidationError::OrderbookCrossed { .. })),
+            "Crossed should be rejected by default even with empty side: {:?}",
             result
         );
     }

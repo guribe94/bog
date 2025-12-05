@@ -106,14 +106,16 @@ mod tests {
         let snapshot_size = std::mem::size_of::<huginn::shm::MarketSnapshot>();
 
         // Calculate expected padding based on depth
+        let seqlock_fields = 16; // generation_start + generation_end (2 x u64)
         let hot_data = 72; // 9 u64 fields
         let depth_arrays_size = ORDERBOOK_DEPTH * 32; // 4 arrays of u64
         let flags_size = 2; // snapshot_flags + dex_type
 
-        let data_size = hot_data + depth_arrays_size + flags_size;
+        let data_size = seqlock_fields + hot_data + depth_arrays_size + flags_size;
         let expected_padding = SNAPSHOT_SIZE - data_size;
 
         println!("Depth: {}", ORDERBOOK_DEPTH);
+        println!("SeqLock fields: {} bytes", seqlock_fields);
         println!("Data size: {} bytes", data_size);
         println!("Expected padding: {} bytes", expected_padding);
         println!("Actual padding: {} bytes", PADDING_SIZE);

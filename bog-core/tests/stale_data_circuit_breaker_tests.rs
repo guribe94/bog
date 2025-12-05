@@ -50,19 +50,23 @@ fn test_detect_stale_by_age() {
 
 /// Test: detect_offline_by_empty_polls
 ///
-/// Verifies offline detection by consecutive empty polls
+/// Verifies offline detection by consecutive empty polls AND age
+/// Note: API requires BOTH conditions (empty polls AND max_age) for offline
 #[test]
 fn test_detect_offline_by_empty_polls() {
     use bog_core::resilience::{StaleDataBreaker, StaleDataConfig, StaleDataState};
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(5),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 10, // Low threshold for testing
     };
 
     let mut breaker = StaleDataBreaker::new(config);
     assert!(breaker.is_fresh());
+
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
 
     // Mark 11 empty polls (exceeds max_empty_polls of 10)
     for _ in 0..11 {
@@ -83,13 +87,16 @@ fn test_mark_fresh_resets_state() {
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_millis(100),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 5,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
 
-    // Make it stale
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // Make it offline (requires both empty polls AND age)
     for _ in 0..6 {
         breaker.mark_empty_poll();
     }
@@ -131,18 +138,21 @@ fn test_custom_stale_threshold() {
 
 /// Test: custom_empty_poll_threshold
 ///
-/// Verifies custom max_empty_polls configuration
+/// Verifies custom max_empty_polls configuration (offline requires both conditions)
 #[test]
 fn test_custom_empty_poll_threshold() {
     use bog_core::resilience::{StaleDataBreaker, StaleDataConfig, StaleDataState};
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(5),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 20,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
+
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
 
     // Mark empty polls exceeding threshold
     for _ in 0..21 {
@@ -182,21 +192,24 @@ fn test_state_transition_fresh_to_stale() {
 
 /// Test: state_transition_fresh_to_offline
 ///
-/// Verifies Fresh → Offline transition (via empty polls only)
+/// Verifies Fresh → Offline transition (requires both empty polls AND age)
 #[test]
 fn test_state_transition_fresh_to_offline() {
     use bog_core::resilience::{StaleDataBreaker, StaleDataConfig, StaleDataState};
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(10),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 5,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
     assert_eq!(breaker.state(), StaleDataState::Fresh);
 
-    // Go directly to offline via empty polls (without hitting stale)
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // Go to offline via empty polls AND age
     for _ in 0..6 {
         breaker.mark_empty_poll();
     }
@@ -241,13 +254,16 @@ fn test_state_transition_any_to_fresh() {
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_millis(50),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 5,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
 
-    // Go to offline
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // Go to offline (requires both empty polls AND age)
     for _ in 0..6 {
         breaker.mark_empty_poll();
     }
@@ -333,13 +349,16 @@ fn test_reset_clears_all_state() {
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_millis(50),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 5,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
 
-    // Make it go offline
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // Make it go offline (requires both empty polls AND age)
     for _ in 0..6 {
         breaker.mark_empty_poll();
     }
@@ -360,13 +379,16 @@ fn test_reset_after_offline() {
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(5),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 3,
     };
 
     let mut breaker = StaleDataBreaker::new(config);
 
-    // Go offline
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // Go offline (requires both empty polls AND age)
     for _ in 0..4 {
         breaker.mark_empty_poll();
     }
@@ -437,20 +459,23 @@ fn test_zero_max_age() {
 
 /// Test: zero_max_empty_polls
 ///
-/// Edge case: max_empty_polls = 0 (immediately offline)
+/// Edge case: max_empty_polls = 0 (immediately offline when age also exceeded)
 #[test]
 fn test_zero_max_empty_polls() {
     use bog_core::resilience::{StaleDataBreaker, StaleDataConfig};
     use std::time::Duration;
 
     let config = StaleDataConfig {
-        max_age: Duration::from_secs(5),
+        max_age: Duration::from_millis(1), // Short timeout so both conditions are met
         max_empty_polls: 0, // Zero tolerance
     };
 
     let mut breaker = StaleDataBreaker::new(config);
 
-    // First mark_empty_poll() should trigger offline
+    // Wait for max_age to elapse
+    std::thread::sleep(Duration::from_millis(2));
+
+    // First mark_empty_poll() should trigger offline (both conditions met)
     breaker.mark_empty_poll();
     assert!(breaker.is_offline());
 }

@@ -5,6 +5,7 @@
 
 use bog_core::core::{Position, Signal};
 use bog_core::data::MarketSnapshot;
+use huginn::shm::PADDING_SIZE;
 use bog_core::engine::{Engine, Executor, SimulatedExecutor, Strategy};
 use bog_strategies::SimpleSpread;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
@@ -12,6 +13,8 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 /// Create a test market snapshot
 fn create_market_snapshot(price_offset: u64) -> MarketSnapshot {
     MarketSnapshot {
+        generation_start: 0,
+        generation_end: 0,
         market_id: 1,
         sequence: 1,
         exchange_timestamp_ns: 0,
@@ -27,7 +30,7 @@ fn create_market_snapshot(price_offset: u64) -> MarketSnapshot {
         ask_sizes: [0; 10],
         snapshot_flags: 0,
         dex_type: 1,
-        _padding: [0; 54],
+        _padding: [0; PADDING_SIZE],
     }
 }
 

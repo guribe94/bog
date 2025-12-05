@@ -143,6 +143,9 @@ impl SnapshotBuilder {
     /// Use this for incremental snapshots or when depth data isn't needed.
     pub fn build(self) -> MarketSnapshot {
         MarketSnapshot {
+            // SeqLock generation counters (0 = not yet published via ring buffer)
+            generation_start: 0,
+            generation_end: 0,  // Adjacent to generation_start to avoid alignment padding
             market_id: self.market_id,
             sequence: self.sequence,
             exchange_timestamp_ns: self.exchange_timestamp_ns,

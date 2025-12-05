@@ -6,10 +6,13 @@ mod tests {
     use bog_core::engine::Strategy;
     use bog_core::orderbook::L2OrderBook;
     use bog_strategies::simple_spread::SimpleSpread;
+    use huginn::shm::PADDING_SIZE;
 
     // Helper to create snapshot
     fn create_snapshot() -> MarketSnapshot {
         MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -25,7 +28,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         }
     }
 

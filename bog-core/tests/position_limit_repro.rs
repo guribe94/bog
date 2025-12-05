@@ -7,13 +7,16 @@ mod tests {
     use bog_core::orderbook::L2OrderBook;
     use bog_core::data::MarketSnapshot;
     use bog_core::config::MAX_POSITION;
+    use huginn::shm::PADDING_SIZE;
 
     #[test]
     fn test_position_limit_overshoot() {
         let mut strategy = SimpleSpread::new();
-        
+
         // Setup market
         let snapshot = MarketSnapshot {
+            generation_start: 0,
+            generation_end: 0,
             market_id: 1,
             sequence: 1,
             exchange_timestamp_ns: 0,
@@ -29,7 +32,7 @@ mod tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; PADDING_SIZE],
         };
         
         let mut book = L2OrderBook::new(1);

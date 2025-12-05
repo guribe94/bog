@@ -427,6 +427,11 @@ impl MarketFeed {
     }
 
     /// Try to receive a market snapshot (non-blocking)
+    ///
+    /// Internally retries on torn reads (detected via SeqLock validation).
+    /// A torn read happens when the producer writes while we're reading,
+    /// resulting in a mix of old and new data. The SeqLock pattern detects
+    /// this by checking if generation_start == generation_end.
     pub fn try_recv(&mut self) -> Option<MarketSnapshot> {
         // Update time cache periodically to avoid syscalls in hot path (every 100ms)
         if self.last_time_cache_update.elapsed().as_millis() >= 100 {
@@ -437,8 +442,15 @@ impl MarketFeed {
             self.last_time_cache_update = Instant::now();
         }
 
-        match self.inner.try_recv() {
-            Some(snapshot) => {
+        // Retry loop for torn read detection
+        // The inner try_recv() returns None on torn reads (generation mismatch)
+        // We retry up to 3 times before giving up (torn reads should be rare)
+        const MAX_TORN_READ_RETRIES: u32 = 3;
+        let mut retries = 0;
+
+        loop {
+            match self.inner.try_recv() {
+                Some(snapshot) => {
                 self.last_message_time = Instant::now();
                 self.stats.messages_received += 1;
 
@@ -478,16 +490,30 @@ impl MarketFeed {
                     snapshot.latency_us()
                 );
 
-                Some(snapshot)
-            }
-            None => {
-                self.stats.empty_polls += 1;
+                    return Some(snapshot);
+                }
+                None => {
+                    // None can mean either:
+                    // 1. Ring buffer is empty (no new data)
+                    // 2. Torn read detected (generation mismatch) - should retry
+                    //
+                    // We check queue_depth to distinguish: if there's data available,
+                    // it was likely a torn read and we should retry immediately.
+                    if self.inner.queue_depth() > 0 && retries < MAX_TORN_READ_RETRIES {
+                        retries += 1;
+                        // Torn read detected - retry immediately (no sleep needed)
+                        continue;
+                    }
 
-                // Mark empty poll for stale data detection
-                self.stale_breaker.mark_empty_poll();
-                self.health.report_empty_poll();
+                    // Either ring is truly empty or we've exceeded retries
+                    self.stats.empty_polls += 1;
 
-                None
+                    // Mark empty poll for stale data detection
+                    self.stale_breaker.mark_empty_poll();
+                    self.health.report_empty_poll();
+
+                    return None;
+                }
             }
         }
     }
@@ -1168,6 +1194,8 @@ mod snapshot_recovery_tests {
 
     fn dummy_snapshot(sequence: u64) -> MarketSnapshot {
         MarketSnapshot {
+            generation_start: 1,
+            generation_end: 1,
             market_id: 1,
             sequence,
             exchange_timestamp_ns: 0,
@@ -1183,7 +1211,7 @@ mod snapshot_recovery_tests {
             ask_sizes: [0; 10],
             snapshot_flags: 0,
             dex_type: 1,
-            _padding: [0; 54],
+            _padding: [0; huginn::shm::PADDING_SIZE],
         }
     }
 
