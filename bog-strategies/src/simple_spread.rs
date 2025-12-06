@@ -153,7 +153,8 @@ use bog_core::orderbook::{L2OrderBook, DEPTH_LEVELS as BOOK_DEPTH};
     feature = "spread-3bps",
     feature = "spread-5bps",
     feature = "spread-10bps",
-    feature = "spread-20bps"
+    feature = "spread-20bps",
+    feature = "spread-30bps"
 )))]
 pub const SPREAD_BPS: u32 = 10;
 
@@ -168,6 +169,9 @@ pub const SPREAD_BPS: u32 = 10;
 
 #[cfg(feature = "spread-20bps")]
 pub const SPREAD_BPS: u32 = 20;
+
+#[cfg(feature = "spread-30bps")]
+pub const SPREAD_BPS: u32 = 30;
 
 // Compile-time assertion: spread must be profitable after fees
 const _: () = assert!(
@@ -184,6 +188,32 @@ const _: () = assert!(
 /// - ROUND_TRIP_COST_BPS = 2 (0 maker + 2 taker)
 /// - PROFIT_MARGIN_BPS = 8 bps = 0.08%
 pub const PROFIT_MARGIN_BPS: u32 = SPREAD_BPS - ROUND_TRIP_COST_BPS;
+
+// ===== QUOTE PERSISTENCE CONFIGURATION =====
+
+/// Minimum mid price movement (basis points) before repricing quotes
+///
+/// **RATIONALE:**
+/// Quote persistence prevents constantly repricing quotes on every tick,
+/// which would cause orders to track market prices too closely and prevent
+/// true spread capture. By only repricing when mid moves significantly,
+/// quotes can rest at deeper levels and capture the full spread when the
+/// market oscillates back.
+///
+/// Default: 5 bps - only reprice when mid moves 0.05%
+#[cfg(not(feature = "reprice-10bps"))]
+pub const REPRICE_THRESHOLD_BPS: u32 = 5;
+
+#[cfg(feature = "reprice-10bps")]
+pub const REPRICE_THRESHOLD_BPS: u32 = 10;
+
+/// Maximum time to hold a quote before repricing (nanoseconds)
+///
+/// Even if price hasn't moved, quotes should eventually refresh to ensure
+/// they remain relevant to current market conditions.
+///
+/// Default: 5 seconds (5_000_000_000 ns)
+pub const MAX_QUOTE_AGE_NS: u64 = 5_000_000_000;
 
 /// Order size in fixed-point (9 decimals)
 /// Default: 0.1 BTC = 100_000_000
@@ -291,6 +321,12 @@ pub struct SimpleSpread {
     /// Spreads wider than this will not trigger quotes (market too wide)
     /// Default: 500 bps (5%)
     max_market_spread_bps: u32,
+    /// Last quoted mid price (for quote persistence)
+    /// Used to determine if quotes need to be repriced
+    last_quote_mid: u64,
+    /// Timestamp of last quote (nanoseconds since epoch)
+    /// Used to ensure quotes don't become stale
+    last_quote_time_ns: u64,
 }
 
 impl SimpleSpread {
@@ -310,6 +346,9 @@ impl SimpleSpread {
             // This gives good responsiveness to volatility spikes while smoothing noise
             vol_tracker: EwmaVolatility::new(200),
             max_market_spread_bps,
+            // Quote persistence: start with no quote (will quote on first tick)
+            last_quote_mid: 0,
+            last_quote_time_ns: 0,
         }
     }
 
@@ -786,6 +825,66 @@ impl Strategy for SimpleSpread {
         // Update volatility tracker with new mid price
         self.vol_tracker.add_price(mid_price);
 
+        // === QUOTE PERSISTENCE CHECK ===
+        //
+        // Don't reprice quotes unless:
+        // 1. This is the first quote (last_quote_mid == 0), OR
+        // 2. Mid price has moved more than REPRICE_THRESHOLD_BPS from last quoted mid, OR
+        // 3. Quote has been held longer than MAX_QUOTE_AGE_NS
+        //
+        // This allows quotes to "rest" at deeper levels and capture spread when
+        // the market oscillates back, rather than constantly tracking market mid.
+        let current_time_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
+        let mid_change_bps = if self.last_quote_mid > 0 {
+            let diff = mid_price.abs_diff(self.last_quote_mid);
+            (diff * 10_000) / self.last_quote_mid
+        } else {
+            u64::MAX // Always quote on first tick
+        };
+
+        let time_since_quote = current_time_ns.saturating_sub(self.last_quote_time_ns);
+
+        // Check if we should skip repricing (keep existing quotes)
+        if self.last_quote_mid > 0
+            && mid_change_bps < REPRICE_THRESHOLD_BPS as u64
+            && time_since_quote < MAX_QUOTE_AGE_NS
+        {
+            #[cfg(feature = "logging")]
+            {
+                static SKIP_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let count = SKIP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // Log every 100th skip
+                if count % 100 == 0 {
+                    tracing::info!(
+                        "QUOTE_PERSIST: skip #{}, mid_change={}bps (thresh={}), age={}ms (max={}ms)",
+                        count,
+                        mid_change_bps,
+                        REPRICE_THRESHOLD_BPS,
+                        time_since_quote / 1_000_000,
+                        MAX_QUOTE_AGE_NS / 1_000_000
+                    );
+                }
+            }
+            // Keep existing quotes - don't generate new signal
+            return None;
+        }
+
+        #[cfg(feature = "logging")]
+        {
+            if self.last_quote_mid > 0 {
+                tracing::info!(
+                    "QUOTE_REPRICE: mid_change={}bps (thresh={}), age={}ms",
+                    mid_change_bps,
+                    REPRICE_THRESHOLD_BPS,
+                    time_since_quote / 1_000_000
+                );
+            }
+        }
+
         // === CALCULATE BASE QUOTES ===
 
         let (mut our_bid, mut our_ask) = self.calculate_quotes(mid_price);
@@ -1001,6 +1100,12 @@ impl Strategy for SimpleSpread {
             our_bid, our_ask, actual_spread_bps, ORDER_SIZE, current_qty
         );
 
+        // === UPDATE QUOTE PERSISTENCE STATE ===
+        // Record the mid price and time for this quote
+        // Next time calculate() is called, we'll compare against these values
+        self.last_quote_mid = mid_price;
+        self.last_quote_time_ns = current_time_ns;
+
         if current_qty >= max_pos || current_qty.saturating_add(ORDER_SIZE as i64) > max_pos {
             // At max long limit (or would exceed) - only quote Ask (reduce position)
             Some(Signal::quote_ask(our_ask, ORDER_SIZE))
@@ -1019,6 +1124,9 @@ impl Strategy for SimpleSpread {
 
     fn reset(&mut self) {
         self.vol_tracker.reset();
+        // Reset quote persistence state (will quote on next tick)
+        self.last_quote_mid = 0;
+        self.last_quote_time_ns = 0;
     }
 }
 
@@ -1357,8 +1465,8 @@ mod tests {
     fn test_bad_data_rejection() {
         let mut strategy = SimpleSpread::new();
 
-        // Test 1: Price too low (< $1)
-        // Use a tight spread (< 100 bps) so we test price bounds, not spread volatility
+        // Test 1: Price too low (< MIN_VALID_PRICE = $0.001)
+        // MIN_VALID_PRICE is 1_000_000 (with 9 decimal places)
         let low_price_snapshot = MarketSnapshot {
             generation_start: 0,
             generation_end: 0,
@@ -1367,9 +1475,9 @@ mod tests {
             exchange_timestamp_ns: 0,
             local_recv_ns: 0,
             local_publish_ns: 0,
-            best_bid_price: 500_000_000, // $0.50
+            best_bid_price: 500_000, // $0.0005 - below MIN_VALID_PRICE
             best_bid_size: 1_000_000_000,
-            best_ask_price: 500_500_000, // $0.5005 (10 bps spread)
+            best_ask_price: 500_050, // $0.00050005 (10 bps spread)
             best_ask_size: 1_000_000_000,
             bid_prices: [0; 10],
             bid_sizes: [0; 10],
@@ -1462,7 +1570,7 @@ mod tests {
     #[test]
     fn test_inventory_skew() {
         // Test that inventory affects quotes
-        let mut strategy = SimpleSpread::new();
+        // Use separate strategy instances to avoid quote persistence affecting results
 
         let snapshot = MarketSnapshot {
             generation_start: 0,
@@ -1488,47 +1596,54 @@ mod tests {
         let mut book = L2OrderBook::new(1);
         book.sync_from_snapshot(&snapshot);
 
-        // Test with zero position
+        // Test with zero position (fresh strategy)
+        let mut strategy_zero = SimpleSpread::new();
         let zero_position = Position::new();
-        let zero_signal = strategy.calculate(&book, &zero_position).unwrap();
+        let zero_signal = strategy_zero.calculate(&book, &zero_position).unwrap();
 
-        // Test with long position (500M = 0.5 BTC)
+        // Test with long position (fresh strategy for identical initial conditions)
+        // Use 5 BTC (50% of MAX_POSITION=10 BTC) to ensure inventory skew is triggered
+        // Skew threshold is 1% (10_000 / 1_000_000), so we need >0.1 BTC position
+        let mut strategy_long = SimpleSpread::new();
         let mut long_position = Position::new();
         // Simulate a long position by adding a buy fill
         long_position
             .process_fill_fixed_with_fee(
                 0, // BUY side
                 50_000_000_000_000,
-                500_000_000, // 0.5 BTC
-                2,           // 2bps fee
+                5_000_000_000, // 5 BTC (50% of MAX_POSITION)
+                200,           // 2bps = 200 sub-bps
             )
             .unwrap();
-        let long_signal = strategy.calculate(&book, &long_position).unwrap();
+        let long_signal = strategy_long.calculate(&book, &long_position).unwrap();
 
         // With long position, quotes shift DOWN to encourage selling (reduce long)
         // - Ask LOWER (more attractive to buyers)
         // - Bid LOWER (less attractive to sellers)
         assert!(
             long_signal.ask_price < zero_signal.ask_price,
-            "Long position should LOWER ask price to attract buyers"
+            "Long position should LOWER ask price to attract buyers. zero_ask={}, long_ask={}",
+            zero_signal.ask_price, long_signal.ask_price
         );
         assert!(
             long_signal.bid_price < zero_signal.bid_price,
             "Long position should LOWER bid price to deter sellers"
         );
 
-        // Test with short position
+        // Test with short position (fresh strategy for identical initial conditions)
+        // Use 5 BTC (50% of MAX_SHORT=10 BTC) to ensure inventory skew is triggered
+        let mut strategy_short = SimpleSpread::new();
         let mut short_position = Position::new();
         // Simulate a short position by adding a sell fill
         short_position
             .process_fill_fixed_with_fee(
                 1, // SELL side
                 50_000_000_000_000,
-                500_000_000, // 0.5 BTC
-                2,           // 2bps fee
+                5_000_000_000, // 5 BTC (50% of MAX_SHORT)
+                200,           // 2bps = 200 sub-bps
             )
             .unwrap();
-        let short_signal = strategy.calculate(&book, &short_position).unwrap();
+        let short_signal = strategy_short.calculate(&book, &short_position).unwrap();
 
         // With short position, quotes shift UP to encourage buying (reduce short)
         // - Bid HIGHER (more attractive to sellers)

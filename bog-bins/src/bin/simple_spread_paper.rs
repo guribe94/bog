@@ -202,7 +202,7 @@ fn main() -> Result<()> {
         journal_path: PathBuf::from("data/paper_trading_journal.jsonl"),
         recover_on_startup: true,
         validate_recovery: true,
-        instant_fills: true, // Keep instant fills for paper trading logic
+        instant_fills: false, // Market-crossing fills: orders fill when market crosses price
         ..Default::default()
     };
     

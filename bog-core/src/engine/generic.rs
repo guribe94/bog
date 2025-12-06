@@ -113,7 +113,7 @@
 //! - Target: <50ns engine overhead per tick **Achieved**
 
 use crate::config::{
-    MAX_POSITION, MAX_SHORT, MAX_POST_STALE_CHANGE_BPS, MIN_QUOTE_INTERVAL_NS,
+    DEFAULT_FEE_SUB_BPS, MAX_POSITION, MAX_SHORT, MAX_POST_STALE_CHANGE_BPS, MIN_QUOTE_INTERVAL_NS,
 };
 use crate::core::{Position, Signal};
 use crate::data::MarketSnapshot;
@@ -183,6 +183,19 @@ pub trait Executor {
     ///
     /// Used for conservative pre-trade risk checks.
     fn get_open_exposure(&self) -> (i64, i64);
+
+    /// Check pending orders against current market prices and generate fills
+    /// for orders that would be executed (market-crossing fill simulation).
+    ///
+    /// This is called by the engine on each tick when using market-data driven fills
+    /// instead of instant fills. Orders fill when:
+    /// - BUY orders: market ask <= order price
+    /// - SELL orders: market bid >= order price
+    ///
+    /// Default implementation does nothing (for executors with instant fills).
+    fn check_fills(&mut self, _best_bid: u64, _best_ask: u64) {
+        // Default: no-op for instant fill executors
+    }
 }
 
 /// Cache-aligned hot data (64 bytes)
@@ -355,6 +368,12 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
         // Sync internal orderbook state (always keep it updated)
         self.book.sync_from_snapshot(snapshot);
+
+        // Check for market-crossing fills on pending orders
+        // This enables realistic fill simulation where orders only fill
+        // when the market actually crosses the order price.
+        self.executor
+            .check_fills(snapshot.best_bid_price, snapshot.best_ask_price);
 
         // Early return if market hasn't changed (optimization)
         // Measured: ~2ns for this check
@@ -787,18 +806,21 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 .to_u64()
                 .ok_or_else(|| anyhow!("Failed to convert size to fixed-point"))?;
 
-            let fee_bps = if let Some(fee) = fill.fee {
+            // Fee in sub-basis points (1/100th of a bps) for fractional bps precision
+            // 1 sub-bps = 0.0001% = 0.01 bps
+            // Lighter DEX: Maker = 20 sub-bps (0.2 bps), Taker = 200 sub-bps (2 bps)
+            let fee_sub_bps = if let Some(fee) = fill.fee {
                 let notional = fill.price * fill.size;
                 if notional > rust_decimal::Decimal::ZERO {
                     let fee_rate = fee / notional;
-                    let fee_bps_decimal = fee_rate * rust_decimal::Decimal::from(10_000);
-                    // Convert to i32 (supporting negative fees/rebates)
-                    fee_bps_decimal.to_i32().unwrap_or(2)
+                    // Convert to sub-bps: rate * 1_000_000 (100 * 10_000)
+                    let fee_sub_bps_decimal = fee_rate * rust_decimal::Decimal::from(1_000_000);
+                    fee_sub_bps_decimal.to_i32().unwrap_or(DEFAULT_FEE_SUB_BPS as i32)
                 } else {
-                    2
+                    DEFAULT_FEE_SUB_BPS as i32
                 }
             } else {
-                2
+                DEFAULT_FEE_SUB_BPS as i32 // Maker: 20 sub-bps (0.2 bps)
             };
 
             // Capture PnL before fill to calculate per-trade profit
@@ -808,7 +830,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 order_side,
                 price_fixed,
                 size_fixed,
-                fee_bps,
+                fee_sub_bps,
             ) {
                 tracing::error!("Failed to process fill: {}", e);
                 return Err(anyhow!("Position update failed: {}", e));
@@ -831,15 +853,24 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
             let profit_dollars = trade_profit as f64 / 1_000_000_000.0;
             let total_pnl_dollars = realized_pnl as f64 / 1_000_000_000.0;
             let position_units = current_qty as f64 / 1_000_000_000.0;
+            let entry_price_dollars = entry_price as f64 / 1_000_000_000.0;
+            let daily_pnl_dollars = self.position.get_daily_pnl() as f64 / 1_000_000_000.0;
+            let trade_count = self.position.get_trade_count();
+            let notional = fill.price * fill.size;
 
+            // Enhanced fill logging with more context
             tracing::info!(
-                "FILL: {} {} @ ${:.5} | profit=${:.6} | total_pnl=${:.6} | position={:.4}",
+                "FILL: {} {:.4} @ ${:.6} (notional=${:.2}) | trade_profit=${:.6} | realized_pnl=${:.6} | daily_pnl=${:.6} | pos={:.4} @ ${:.6} | trades={}",
                 if order_side == 0 { "BUY" } else { "SELL" },
                 fill.size,
                 fill.price,
+                notional,
                 profit_dollars,
                 total_pnl_dollars,
-                position_units
+                daily_pnl_dollars,
+                position_units,
+                entry_price_dollars,
+                trade_count
             );
 
             if current_qty > MAX_POSITION {

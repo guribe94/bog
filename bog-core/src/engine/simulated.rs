@@ -321,8 +321,10 @@ impl Executor for SimulatedExecutor {
 
             // Create Fill with timestamp and fee
             // Fee is charged in quote currency as a percentage of notional.
+            // Uses sub-basis points for fractional bps precision (1 sub-bps = 0.01 bps)
             let notional = price * size;
-            let fee_rate = Decimal::from(crate::config::DEFAULT_FEE_BPS) / Decimal::from(10_000u32);
+            let fee_rate =
+                Decimal::from(crate::config::DEFAULT_FEE_SUB_BPS) / Decimal::from(1_000_000u32);
             let fee = Some(notional * fee_rate);
 
             // Convert core::OrderId to execution::OrderId
@@ -520,9 +522,9 @@ mod tests {
         let fill = &fills[0];
         let notional = fill.notional();
 
-        // Expected fee = notional * DEFAULT_FEE_BPS / 10_000
-        let fee_rate = rust_decimal::Decimal::from(crate::config::DEFAULT_FEE_BPS)
-            / rust_decimal::Decimal::from(10_000u32);
+        // Expected fee = notional * DEFAULT_FEE_SUB_BPS / 1_000_000
+        let fee_rate = rust_decimal::Decimal::from(crate::config::DEFAULT_FEE_SUB_BPS)
+            / rust_decimal::Decimal::from(1_000_000u32);
         let expected_fee = notional * fee_rate;
 
         let actual_fee = fill.fee.expect("fee should be present");

@@ -554,7 +554,8 @@ impl Position {
     /// * `order_side` - 0 for Buy, 1 for Sell
     /// * `price` - Fill price in fixed-point (9 decimals)
     /// * `size` - Fill size in fixed-point (9 decimals)
-    /// * `fee_bps` - Fee in basis points (e.g., 2 for 0.02%)
+    /// * `fee_sub_bps` - Fee in sub-basis points (1/100th of a bps, e.g., 20 for 0.2 bps = 0.002%)
+    ///                   Lighter DEX: Maker = 20 sub-bps (0.2 bps), Taker = 200 sub-bps (2 bps)
     ///
     /// # Returns
     ///
@@ -571,7 +572,7 @@ impl Position {
         order_side: u8,
         price: u64,
         size: u64,
-        fee_bps: i32,
+        fee_sub_bps: i32,
     ) -> Result<(), OverflowError> {
         // SeqLock: Start write (make odd)
         self.sequence.fetch_add(1, Ordering::Acquire);
@@ -626,15 +627,18 @@ impl Position {
         };
 
         // Calculate fee amount (positive = cost, negative = rebate)
-        let fee_amount: i64 = if fee_bps == 0 || price == 0 || size == 0 {
+        // fee_sub_bps is in sub-basis points (1/100th of a bps)
+        // 1 sub-bps = 0.0001% = 1/1_000_000
+        // Formula: fee = price * size * fee_sub_bps / (1_000_000 * SCALE)
+        let fee_amount: i64 = if fee_sub_bps == 0 || price == 0 || size == 0 {
             0
         } else {
-            // Use absolute fee_bps for calculation, then apply sign
-            let fee_bps_abs = fee_bps.abs() as u128;
+            // Use absolute fee_sub_bps for calculation, then apply sign
+            let fee_sub_bps_abs = fee_sub_bps.abs() as u128;
             let fee_raw = (price as u128)
                 .saturating_mul(size as u128)
-                .saturating_mul(fee_bps_abs)
-                / (10_000u128 * 1_000_000_000u128);
+                .saturating_mul(fee_sub_bps_abs)
+                / (1_000_000u128 * 1_000_000_000u128);
 
             if fee_raw > i64::MAX as u128 {
                  self.sequence.fetch_add(1, Ordering::Release);
@@ -643,8 +647,8 @@ impl Position {
                     delta: i64::MIN, // signify overflow attempt
                 });
             }
-            
-            if fee_bps < 0 {
+
+            if fee_sub_bps < 0 {
                 -(fee_raw as i64) // Rebate (negative cost -> positive PnL)
             } else {
                 fee_raw as i64 // Cost (positive cost -> negative PnL)
@@ -1355,14 +1359,15 @@ mod tests {
 
         let price: u64 = 50_000 * SCALE as u64;
         let size: u64 = 100_000_000; // 0.1 BTC
-        let fee_bps = 2;
+        let fee_sub_bps = 200; // 2 bps = 200 sub-bps (taker fee)
 
         position
-            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .process_fill_fixed_with_fee(0, price, size, fee_sub_bps)
             .expect("fee-calculation fill should succeed");
 
+        // Fee calculation: price * size * fee_sub_bps / (1_000_000 * SCALE)
         let expected_fee =
-            ((price as u128 * size as u128 * fee_bps as u128) / (10_000 * SCALE as u128)) as i64;
+            ((price as u128 * size as u128 * fee_sub_bps as u128) / (1_000_000 * SCALE as u128)) as i64;
         assert_eq!(position.get_realized_pnl(), -expected_fee);
         assert_eq!(position.get_daily_pnl(), -expected_fee);
         assert_eq!(position.get_quantity(), size as i64);
@@ -1374,17 +1379,18 @@ mod tests {
 
         let price: u64 = 50_000 * SCALE as u64;
         let size: u64 = 100_000_000; // 0.1 BTC
-        let fee_bps = 2;
+        let fee_sub_bps = 200; // 2 bps = 200 sub-bps (taker fee)
 
         position
-            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .process_fill_fixed_with_fee(0, price, size, fee_sub_bps)
             .expect("buy fill should succeed");
         position
-            .process_fill_fixed_with_fee(1, price, size, fee_bps)
+            .process_fill_fixed_with_fee(1, price, size, fee_sub_bps)
             .expect("sell fill should succeed");
 
+        // Fee calculation: price * size * fee_sub_bps / (1_000_000 * SCALE)
         let fee_per_leg =
-            ((price as u128 * size as u128 * fee_bps as u128) / (10_000 * SCALE as u128)) as i64;
+            ((price as u128 * size as u128 * fee_sub_bps as u128) / (1_000_000 * SCALE as u128)) as i64;
         let expected = -(fee_per_leg * 2);
         assert_eq!(position.get_realized_pnl(), expected);
         assert_eq!(position.get_daily_pnl(), expected);
@@ -1398,15 +1404,15 @@ mod tests {
         let buy_price: u64 = 50_000 * SCALE as u64;
         let sell_price: u64 = 60_000 * SCALE as u64;
         let one_btc: u64 = SCALE as u64;
-        let fee_bps = 2;
+        let fee_sub_bps = 200; // 2 bps = 200 sub-bps (taker fee)
 
         // Long 1 BTC
         position
-            .process_fill_fixed_with_fee(0, buy_price, one_btc, fee_bps)
+            .process_fill_fixed_with_fee(0, buy_price, one_btc, fee_sub_bps)
             .expect("long entry should succeed");
         // Sell 2 BTC (flatten + open short)
         position
-            .process_fill_fixed_with_fee(1, sell_price, one_btc * 2, fee_bps)
+            .process_fill_fixed_with_fee(1, sell_price, one_btc * 2, fee_sub_bps)
             .expect("flip fill should succeed");
 
         assert_eq!(position.get_quantity(), -(one_btc as i64));
@@ -1414,10 +1420,11 @@ mod tests {
         let closed_qty = one_btc as i64;
         let price_diff = sell_price as i64 - buy_price as i64;
         let gross_profit = ((price_diff as i128 * closed_qty as i128) / SCALE as i128) as i64;
-        let entry_fee = ((buy_price as u128 * one_btc as u128 * fee_bps as u128)
-            / (10_000 * SCALE as u128)) as i64;
-        let flip_fee = ((sell_price as u128 * (one_btc * 2) as u128 * fee_bps as u128)
-            / (10_000 * SCALE as u128)) as i64;
+        // Fee calculation: price * size * fee_sub_bps / (1_000_000 * SCALE)
+        let entry_fee = ((buy_price as u128 * one_btc as u128 * fee_sub_bps as u128)
+            / (1_000_000 * SCALE as u128)) as i64;
+        let flip_fee = ((sell_price as u128 * (one_btc * 2) as u128 * fee_sub_bps as u128)
+            / (1_000_000 * SCALE as u128)) as i64;
         let expected_realized = gross_profit - (entry_fee + flip_fee);
         assert_eq!(position.get_realized_pnl(), expected_realized);
         assert_eq!(position.get_daily_pnl(), expected_realized);
@@ -1430,20 +1437,45 @@ mod tests {
 
         let price: u64 = 50_000 * SCALE as u64;
         let size: u64 = 100_000_000; // 0.1 BTC
-        let fee_bps = -2; // -2 bps rebate (maker)
+        let fee_sub_bps = -200; // -2 bps rebate (maker) = -200 sub-bps
 
         // Buy with rebate
         position
-            .process_fill_fixed_with_fee(0, price, size, fee_bps)
+            .process_fill_fixed_with_fee(0, price, size, fee_sub_bps)
             .expect("rebate fill should succeed");
 
         // Rebate = 50,000 * 0.1 * 0.0002 = $1.00
         // PnL should be +$1.00 (positive because we got paid)
+        // Fee calculation: price * size * fee_sub_bps / (1_000_000 * SCALE)
         let expected_rebate =
-            ((price as u128 * size as u128 * fee_bps.abs() as u128) / (10_000 * SCALE as u128)) as i64;
-        
+            ((price as u128 * size as u128 * fee_sub_bps.abs() as u128) / (1_000_000 * SCALE as u128)) as i64;
+
         assert_eq!(expected_rebate, SCALE); // $1.00
         assert_eq!(position.get_realized_pnl(), expected_rebate);
         assert_eq!(position.get_daily_pnl(), expected_rebate);
+    }
+
+    #[test]
+    fn test_fractional_bps_maker_fee() {
+        // Test 0.2 bps maker fee (Lighter DEX maker fee)
+        let position = Position::new();
+
+        let price: u64 = 50_000 * SCALE as u64; // $50,000
+        let size: u64 = 1_000_000_000; // 1.0 unit
+        let fee_sub_bps = 20; // 0.2 bps = 20 sub-bps (Lighter maker fee)
+
+        position
+            .process_fill_fixed_with_fee(0, price, size, fee_sub_bps)
+            .expect("fractional bps fill should succeed");
+
+        // Fee = 50,000 * 1.0 * 0.00002 = $1.00
+        // 0.2 bps = 0.002% = 0.00002
+        // Fee calculation: price * size * 20 / (1_000_000 * SCALE)
+        let expected_fee =
+            ((price as u128 * size as u128 * fee_sub_bps as u128) / (1_000_000 * SCALE as u128)) as i64;
+
+        // $50,000 * 1.0 * 20 / 1_000_000 = $1.00 = 1_000_000_000 in fixed-point
+        assert_eq!(expected_fee, SCALE); // $1.00
+        assert_eq!(position.get_realized_pnl(), -expected_fee);
     }
 }

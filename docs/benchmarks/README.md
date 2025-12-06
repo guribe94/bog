@@ -233,4 +233,105 @@ If you're unsure about:
 - Latency targets → See latency-budget.md
 - Historical context → See results/README.md
 
-**Last Updated**: 2025-11-23
+---
+
+## Writing New Benchmarks
+
+### Template
+
+```rust
+//! Benchmark: <Component> Performance
+//!
+//! Purpose: <What you're measuring and why>
+//! Target: <Performance target>
+//!
+//! What's Measured:
+//! - <Specific operation 1>
+//! - <Specific operation 2>
+//!
+//! Why This Matters:
+//! <Explain business/technical importance>
+
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn bench_my_operation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("my_group");
+    group.significance_level(0.01).sample_size(10000);
+
+    // Setup code here
+
+    group.bench_function("my_test", |b| {
+        b.iter(|| {
+            black_box(my_operation(black_box(input)));
+        });
+    });
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_my_operation);
+criterion_main!(benches);
+```
+
+### Key Points
+
+1. Always use `black_box()` to prevent compiler over-optimization
+2. Set `significance_level(0.01)` for 99% confidence
+3. Use `sample_size(10000)` for micro-benchmarks (<100ns)
+4. Use `sample_size(100-1000)` for heavy operations (>1μs)
+5. Add clear comments explaining what's measured and why
+6. Document expected performance target
+
+### Sample Size Selection
+
+| Operation Type | Sample Size | Reason |
+|----------------|-------------|--------|
+| <100ns micro-op | 10,000 | Need high precision |
+| 100ns-1μs | 1,000 | Balance precision/time |
+| 1μs-100μs | 100 | Prevent timeout |
+| >100μs | 50 | Very slow operations |
+
+### Checklist for New Benchmarks
+
+- [ ] Uses Criterion.rs framework
+- [ ] Has clear documentation header
+- [ ] Uses `black_box()` appropriately
+- [ ] Sets significance level (0.01)
+- [ ] Sets appropriate sample size
+- [ ] Documents performance target
+- [ ] Compiles without errors
+- [ ] Added to Cargo.toml
+- [ ] Added to bog-core/benches/README.md
+
+---
+
+## Troubleshooting
+
+### High Variance
+
+**Problem**: Wide confidence intervals
+**Causes**: Background processes, CPU frequency scaling, thermal throttling
+
+**Solutions**:
+- Close all applications
+- Use dedicated benchmark machine
+- Pin to specific CPU core (`taskset -c 0 cargo bench`)
+
+### Long Run Times
+
+**Problem**: Benchmarks take hours
+
+**Solutions**:
+- Use `--quick` flag for faster runs
+- Run specific benchmarks: `--bench engine_bench`
+- Use `--test` instead of full benchmark for quick checks
+
+---
+
+## External Resources
+
+- **Criterion.rs Guide**: https://bheisler.github.io/criterion.rs/book/
+- **Rust Performance Book**: https://nnethercote.github.io/perf-book/benchmarking.html
+- **Flamegraph Guide**: https://github.com/flamegraph-rs/flamegraph
+
+**Last Updated**: 2025-12-05

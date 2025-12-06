@@ -537,6 +537,123 @@ impl JournaledExecutor {
             self.metrics.total_volume_usd(),
         )
     }
+
+    /// Check pending orders against current market prices and generate fills
+    /// for orders that would be executed.
+    ///
+    /// This implements market-crossing fill simulation:
+    /// - BUY orders fill when market ask <= order price
+    /// - SELL orders fill when market bid >= order price
+    ///
+    /// # Arguments
+    /// * `best_bid` - Current best bid price in u64 fixed-point (9 decimals)
+    /// * `best_ask` - Current best ask price in u64 fixed-point (9 decimals)
+    ///
+    /// # Returns
+    /// Vector of fills that were generated (also pushed to pending_fills)
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Place order at $0.385
+    /// executor.place_order(Order::limit(Side::Buy, dec!(0.385), dec!(0.1)));
+    /// // Check if market crosses our price
+    /// let fills = executor.check_fills(380_000_000, 385_000_000); // ask=$0.385
+    /// // If ask <= our bid, order fills
+    /// assert_eq!(fills.len(), 1);
+    /// ```
+    pub fn check_fills(&mut self, best_bid: u64, best_ask: u64) -> Vec<Fill> {
+        // Only check for market-crossing fills when instant_fills is disabled
+        if self.config.instant_fills {
+            return Vec::new();
+        }
+
+        let scale = Decimal::from(crate::core::fixed_point::SCALE);
+        let mut fills = Vec::new();
+        let now = SystemTime::now();
+
+        // Latency simulation: orders can only be filled after the maker latency period
+        // This simulates the time it takes for the order to appear in the orderbook
+        // Standard account: 200ms, Premium account: 0ms
+        let maker_latency = Duration::from_nanos(crate::config::MAKER_LATENCY_NS);
+
+        // Collect order IDs that should be filled
+        let mut orders_to_fill = Vec::new();
+
+        for entry in self.orders.iter() {
+            let state = entry.value();
+            let order = &state.order;
+
+            // Only check open orders
+            if order.status != OrderStatus::Open {
+                continue;
+            }
+
+            // Latency check: only fill orders that have been "in the book" long enough
+            // An order can only be filled if it was acknowledged and enough time has passed
+            if let Some(ack_time) = state.acknowledged_at {
+                match now.duration_since(ack_time) {
+                    Ok(elapsed) if elapsed >= maker_latency => {
+                        // Order has been in book long enough, can be filled
+                    }
+                    Ok(elapsed) => {
+                        // Order is still in latency period, cannot be filled yet
+                        debug!(
+                            "Order {} waiting for latency: {:.0}ms of {:.0}ms elapsed",
+                            order.id,
+                            elapsed.as_millis(),
+                            maker_latency.as_millis()
+                        );
+                        continue;
+                    }
+                    Err(_) => {
+                        // Clock went backwards, skip this order
+                        continue;
+                    }
+                }
+            } else {
+                // Order not yet acknowledged, cannot be filled
+                continue;
+            }
+
+            // Convert order price to u64 fixed-point for comparison
+            let order_price_u64 = (order.price * scale).to_u64().unwrap_or(0);
+
+            let should_fill = match order.side {
+                super::Side::Buy => {
+                    // BUY fills when market ask <= our bid price
+                    best_ask > 0 && best_ask <= order_price_u64
+                }
+                super::Side::Sell => {
+                    // SELL fills when market bid >= our ask price
+                    best_bid > 0 && best_bid >= order_price_u64
+                }
+            };
+
+            if should_fill {
+                orders_to_fill.push(entry.key().clone());
+            }
+        }
+
+        // Now process fills (separate loop to avoid borrowing issues)
+        for order_id in orders_to_fill {
+            if let Some(mut entry) = self.orders.get_mut(&order_id) {
+                let order_state = entry.value_mut();
+                if let Some(fill) = self.simulate_fill(order_state) {
+                    order_state.fills.push(fill.clone());
+                    fills.push(fill);
+                }
+            }
+        }
+
+        // Push fills to pending_fills so they can be consumed by get_fills
+        if !fills.is_empty() {
+            let mut pending = self.pending_fills.lock();
+            pending.extend(fills.clone());
+            debug!("check_fills: {} orders filled at bid={} ask={}", fills.len(), best_bid, best_ask);
+        }
+
+        fills
+    }
 }
 
 impl Executor for JournaledExecutor {
@@ -719,6 +836,12 @@ impl Executor for JournaledExecutor {
         // This ensures correct journaling (Cancel -> Submit) and metric tracking
         self.cancel_order(order_id)?;
         self.place_order(new_order)
+    }
+
+    fn check_fills(&mut self, best_bid: u64, best_ask: u64) {
+        // Delegate to the existing implementation and drop the return value
+        // (the fills are pushed to pending_fills internally)
+        let _ = JournaledExecutor::check_fills(self, best_bid, best_ask);
     }
 }
 
@@ -1043,5 +1166,148 @@ mod tests {
         assert!(metrics_text.contains("bog_trading_orders_total"));
         assert!(metrics_text.contains("bog_trading_fills_total"));
         assert!(metrics_text.contains("bog_trading_volume"));
+    }
+
+    // ==================== Market-Crossing Fill Tests ====================
+
+    #[test]
+    fn test_buy_order_fills_when_ask_crosses() {
+        let config = JournaledExecutorConfig {
+            enable_journal: false,
+            instant_fills: false, // Market-crossing mode
+            ..Default::default()
+        };
+        let mut executor = JournaledExecutor::new(config);
+
+        // Place buy order at $0.385 (385_000_000 in 9-decimal fixed-point)
+        let order = Order::limit(Side::Buy, dec!(0.385), dec!(0.1));
+        executor.place_order(order).unwrap();
+
+        // No fills yet - order should be pending
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
+        assert!(fills.is_empty(), "Should not fill immediately with instant_fills=false");
+
+        // Wait for latency period (200ms for Standard account simulation)
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        // Market ask at $0.390 - should NOT fill (ask > order price)
+        let fills = executor.check_fills(380_000_000, 390_000_000);
+        assert!(fills.is_empty(), "Should not fill when ask > order price");
+
+        // Market ask drops to $0.385 - should fill (ask <= order price)
+        let fills = executor.check_fills(380_000_000, 385_000_000);
+        assert_eq!(fills.len(), 1, "Should fill when ask <= order price");
+        assert_eq!(fills[0].side, Side::Buy);
+    }
+
+    #[test]
+    fn test_sell_order_fills_when_bid_crosses() {
+        let config = JournaledExecutorConfig {
+            enable_journal: false,
+            instant_fills: false,
+            ..Default::default()
+        };
+        let mut executor = JournaledExecutor::new(config);
+
+        // Place sell order at $0.390
+        let order = Order::limit(Side::Sell, dec!(0.390), dec!(0.1));
+        executor.place_order(order).unwrap();
+
+        // No fills yet
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
+        assert!(fills.is_empty(), "Should not fill immediately with instant_fills=false");
+
+        // Wait for latency period (200ms for Standard account simulation)
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        // Market bid at $0.385 - should NOT fill (bid < order price)
+        let fills = executor.check_fills(385_000_000, 395_000_000);
+        assert!(fills.is_empty(), "Should not fill when bid < order price");
+
+        // Market bid rises to $0.390 - should fill (bid >= order price)
+        let fills = executor.check_fills(390_000_000, 395_000_000);
+        assert_eq!(fills.len(), 1, "Should fill when bid >= order price");
+        assert_eq!(fills[0].side, Side::Sell);
+    }
+
+    #[test]
+    fn test_instant_fills_backward_compatible() {
+        let config = JournaledExecutorConfig {
+            enable_journal: false,
+            instant_fills: true, // Legacy mode
+            ..Default::default()
+        };
+        let mut executor = JournaledExecutor::new(config);
+
+        // Place order
+        let order = Order::limit(Side::Buy, dec!(0.385), dec!(0.1));
+        executor.place_order(order).unwrap();
+
+        // With instant_fills=true, fill should be generated immediately
+        let mut fills = Vec::new();
+        executor.get_fills(&mut fills);
+        assert_eq!(fills.len(), 1, "instant_fills=true should fill immediately");
+
+        // check_fills should return nothing when instant_fills=true
+        let fills = executor.check_fills(380_000_000, 385_000_000);
+        assert!(fills.is_empty(), "check_fills should be no-op with instant_fills=true");
+    }
+
+    #[test]
+    fn test_pending_order_cancelled_does_not_fill() {
+        let config = JournaledExecutorConfig {
+            enable_journal: false,
+            instant_fills: false,
+            ..Default::default()
+        };
+        let mut executor = JournaledExecutor::new(config);
+
+        // Place order
+        let order = Order::limit(Side::Buy, dec!(0.385), dec!(0.1));
+        let order_id = executor.place_order(order).unwrap();
+
+        // Cancel it
+        executor.cancel_order(&order_id).unwrap();
+
+        // Even if market crosses, should not fill
+        let fills = executor.check_fills(380_000_000, 385_000_000);
+        assert!(fills.is_empty(), "Cancelled order should not fill");
+    }
+
+    #[test]
+    fn test_multiple_pending_orders_selective_fill() {
+        let config = JournaledExecutorConfig {
+            enable_journal: false,
+            instant_fills: false,
+            ..Default::default()
+        };
+        let mut executor = JournaledExecutor::new(config);
+
+        // Place multiple buy orders at different prices
+        let order1 = Order::limit(Side::Buy, dec!(0.380), dec!(0.1)); // Far from market
+        let order2 = Order::limit(Side::Buy, dec!(0.385), dec!(0.1)); // Close to market
+        let order3 = Order::limit(Side::Buy, dec!(0.390), dec!(0.1)); // At market
+        let order1_id = order1.id.clone();
+
+        executor.place_order(order1).unwrap();
+        executor.place_order(order2).unwrap();
+        executor.place_order(order3).unwrap();
+
+        // Wait for latency period (200ms for Standard account simulation)
+        std::thread::sleep(std::time::Duration::from_millis(250));
+
+        // Market ask at $0.385 - should fill orders at 0.385 and 0.390 (ask <= order price)
+        let fills = executor.check_fills(380_000_000, 385_000_000);
+        assert_eq!(fills.len(), 2, "Should fill orders at 0.385 and 0.390");
+
+        // The order at 0.380 should NOT have filled (ask $0.385 > order price $0.380)
+        let order1_status = executor.get_order_status(&order1_id);
+        assert_eq!(order1_status, Some(OrderStatus::Open), "Order at 0.380 should still be open");
+
+        // Now lower the ask to 0.380 - should fill the remaining order
+        let more_fills = executor.check_fills(375_000_000, 380_000_000);
+        assert_eq!(more_fills.len(), 1, "Should fill remaining order at 0.380");
     }
 }

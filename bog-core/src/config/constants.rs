@@ -6,18 +6,18 @@
 // ===== ENGINE RISK LIMITS =====
 
 /// Maximum long position limit (in fixed-point with 9 decimals)
-/// Default: 1 BTC
+/// Default: 10 units (for paper trading with market-crossing fills)
 #[cfg(not(feature = "max-position-2btc"))]
-pub const MAX_POSITION: i64 = 1_000_000_000;
+pub const MAX_POSITION: i64 = 10_000_000_000;
 #[cfg(feature = "max-position-2btc")]
-pub const MAX_POSITION: i64 = 2_000_000_000;
+pub const MAX_POSITION: i64 = 20_000_000_000;
 
 /// Maximum short position limit (in fixed-point with 9 decimals)
-/// Default: 1 BTC
+/// Default: 10 units (for paper trading with market-crossing fills)
 #[cfg(not(feature = "max-short-2btc"))]
-pub const MAX_SHORT: i64 = 1_000_000_000;
+pub const MAX_SHORT: i64 = 10_000_000_000;
 #[cfg(feature = "max-short-2btc")]
-pub const MAX_SHORT: i64 = 2_000_000_000;
+pub const MAX_SHORT: i64 = 20_000_000_000;
 
 /// Maximum drawdown allowed before halting (fraction, 9-decimal fixed-point)
 /// Default: 5% drawdown from peak realized PnL
@@ -144,12 +144,18 @@ pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
 
 // ===== FEE CONFIGURATION =====
 
-/// Default exchange fee rate (basis points)
-/// Default: 2 bps (0.02%)
+/// Default exchange fee rate in sub-basis points (1/100th of a basis point)
+/// This allows fractional bps precision: 1 sub-bps = 0.0001% = 0.01 bps
+///
+/// Lighter DEX fees:
+/// - Maker: 0.2 bps (0.002%) = 20 sub-bps
+/// - Taker: 2 bps (0.02%) = 200 sub-bps
+///
+/// We use maker fee since we're placing limit orders as a market maker.
 #[cfg(not(feature = "fee-5bps"))]
-pub const DEFAULT_FEE_BPS: u32 = 2;
+pub const DEFAULT_FEE_SUB_BPS: u32 = 20; // Maker fee: 0.2 bps = 20 sub-bps
 #[cfg(feature = "fee-5bps")]
-pub const DEFAULT_FEE_BPS: u32 = 5;
+pub const DEFAULT_FEE_SUB_BPS: u32 = 500; // 5 bps = 500 sub-bps
 
 /// Exchange tick size (price increment) in fixed-point (9 decimals)
 /// Default: $0.00001 (smallest tick on Lighter DEX for meme coins)
@@ -193,6 +199,41 @@ pub const MAX_ORDER_SIZE: u64 = 500_000_000;
 /// Maximum price distance from mid allowed for quotes (basis points)
 /// Default: 50 bps (0.5%)
 pub const MAX_PRICE_DISTANCE_BPS: u32 = 50;
+
+// ===== EXCHANGE LATENCY SIMULATION =====
+//
+// Lighter DEX applies latency to orders based on account type.
+// We simulate these latencies in paper trading to accurately model execution.
+//
+// Standard Account (default, more conservative):
+// - Maker orders: 200ms delay before they appear in orderbook
+// - Taker orders: 300ms delay before fill
+// - Cancel orders: 100ms delay before order is removed
+//
+// Premium Account:
+// - Maker/Cancel: 0ms (instant)
+// - Taker: 150ms delay
+
+/// Maker order latency in nanoseconds (time before order appears in book)
+/// Default: 200ms (Standard account - more conservative)
+#[cfg(not(feature = "latency-premium"))]
+pub const MAKER_LATENCY_NS: u64 = 200_000_000; // 200ms
+#[cfg(feature = "latency-premium")]
+pub const MAKER_LATENCY_NS: u64 = 0; // 0ms for premium
+
+/// Taker order latency in nanoseconds (time before fill)
+/// Default: 300ms (Standard account - more conservative)
+#[cfg(not(feature = "latency-premium"))]
+pub const TAKER_LATENCY_NS: u64 = 300_000_000; // 300ms
+#[cfg(feature = "latency-premium")]
+pub const TAKER_LATENCY_NS: u64 = 150_000_000; // 150ms for premium
+
+/// Cancel order latency in nanoseconds (time before order is removed)
+/// Default: 100ms (Standard account)
+#[cfg(not(feature = "latency-premium"))]
+pub const CANCEL_LATENCY_NS: u64 = 100_000_000; // 100ms
+#[cfg(feature = "latency-premium")]
+pub const CANCEL_LATENCY_NS: u64 = 0; // 0ms for premium
 
 // ===== TIME CONSTANTS =====
 

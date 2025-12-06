@@ -210,6 +210,23 @@ pub trait Executor: Send {
         self.cancel_order(order_id)?;
         self.place_order(new_order)
     }
+
+    /// Check pending orders against current market prices and generate fills
+    /// for orders that would be executed (market-crossing fill simulation).
+    ///
+    /// This enables realistic paper trading where orders only fill when the market
+    /// actually crosses the order price:
+    /// - BUY orders: fill when market ask <= order price
+    /// - SELL orders: fill when market bid >= order price
+    ///
+    /// # Arguments
+    /// * `best_bid` - Current best bid price in fixed-point (9 decimals)
+    /// * `best_ask` - Current best ask price in fixed-point (9 decimals)
+    ///
+    /// Default implementation does nothing (for executors with instant fills).
+    fn check_fills(&mut self, _best_bid: u64, _best_ask: u64) {
+        // Default: no-op for instant fill executors
+    }
 }
 
 #[cfg(test)]

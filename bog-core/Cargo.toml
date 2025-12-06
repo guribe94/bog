@@ -151,11 +151,15 @@ stale-recovery-5pct = []    # Recover from stale data with 5% buffer
 breaker-gap-5000 = []       # Circuit breaker triggers at 5000 message gap
 breaker-spike-10pct = []    # Circuit breaker triggers on 10% price spike
 breaker-zero-5 = []         # Circuit breaker triggers on 5 zero prices
+breaker-spread-100bps = []  # Circuit breaker max spread 100bps
 inventory-impact-10bps = [] # Inventory impact parameter 10bps
 vol-threshold-200bps = []   # Volatility threshold 200bps
-fee-5bps = []               # Fee 5bps
+fee-5bps = []               # Fee 5bps (500 sub-bps)
 fill-batch-200 = []         # Fill batch size 200
 pool-size-2048 = []         # Pool size 2048
+
+# Latency simulation (for Lighter DEX account types)
+latency-premium = []        # Use Premium account latencies (0ms maker, 150ms taker)
 
 # Testing features
 testing = []                # Enable test-only code paths

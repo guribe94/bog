@@ -18,6 +18,12 @@ impl<E: ExecExecutor> ExecutorBridge<E> {
     pub fn new(executor: E) -> Self {
         Self { executor }
     }
+
+    /// Get mutable access to the inner executor for advanced operations
+    /// like calling check_fills for market-crossing fill simulation
+    pub fn executor_mut(&mut self) -> &mut E {
+        &mut self.executor
+    }
 }
 
 impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
@@ -164,5 +170,10 @@ impl<E: ExecExecutor> EngineExecutor for ExecutorBridge<E> {
 
     fn get_open_exposure(&self) -> (i64, i64) {
         self.executor.get_open_exposure()
+    }
+
+    fn check_fills(&mut self, best_bid: u64, best_ask: u64) {
+        // Delegate to inner executor's check_fills for market-crossing simulation
+        self.executor.check_fills(best_bid, best_ask);
     }
 }

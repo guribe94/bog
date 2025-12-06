@@ -722,53 +722,7 @@ grep "Sequence gap" /var/log/bog/bog.log
 
 ---
 
-## PART 11: DEPLOYMENT TIMELINE
-
-### Week 1: Final Testing (Simulated Mode)
-
-- [x] Security audit complete
-- [x] State machines implemented
-- [x] L2 orderbook implemented
-- [x] Safety infrastructure complete
-- [x] Visualization tools ready
-- [ ] Run 24-hour dry run
-- [ ] Verify no crashes
-- [ ] Validate PnL calculations
-- [ ] Test all alert scenarios
-
-### Week 2: Lighter SDK Integration
-
-- [ ] Implement REST API client
-- [ ] Implement WebSocket for fills
-- [ ] Add authentication
-- [ ] Test on Lighter testnet
-- [ ] Verify order placement
-- [ ] Verify fill tracking
-- [ ] Test error scenarios
-
-### Week 3: Integration Testing
-
-- [ ] End-to-end test (data → strategy → order → fill → PnL)
-- [ ] Failover testing (Huginn restart, network issues)
-- [ ] Load testing (high market activity)
-- [ ] Circuit breaker testing
-- [ ] Kill switch testing
-- [ ] Position reconciliation
-
-### Week 4: Production Deployment
-
-- [ ] Deploy to production server
-- [ ] Start in DRY RUN mode (48 hours)
-- [ ] Monitor all metrics
-- [ ] Verify no issues
-- [ ] Switch to LIVE mode
-- [ ] Start with minimum position sizes
-- [ ] Gradually increase limits
-- [ ] 24/7 monitoring first week
-
----
-
-## PART 12: FILES REFERENCE
+## PART 11: FILES REFERENCE
 
 ### Core Trading Logic
 - `bog-core/src/core/types.rs` - OrderId, Position, Signal
@@ -810,7 +764,7 @@ grep "Sequence gap" /var/log/bog/bog.log
 
 ---
 
-## PART 13: SECURITY SUMMARY
+## PART 12: SECURITY SUMMARY
 
 ### Verified Secure 
 
@@ -834,7 +788,7 @@ grep "Sequence gap" /var/log/bog/bog.log
 
 ---
 
-## PART 14: HANDOFF TO OPERATIONS TEAM
+## PART 13: HANDOFF TO OPERATIONS TEAM
 
 ### What's Complete
 
@@ -871,7 +825,7 @@ grep "Sequence gap" /var/log/bog/bog.log
 
 ---
 
-## PART 15: FINAL SIGN-OFF
+## PART 14: FINAL SIGN-OFF
 
 ### Code Quality:  OUTSTANDING
 
@@ -911,9 +865,8 @@ The codebase demonstrates **exceptional engineering discipline** and has been th
 
 ---
 
-**Prepared by:** Claude (Sonnet 4.5)
-**Date:** 2025-11-11
-**Version:** 2.0 (Post-Audit)
+**Date:** 2025-12-05
+**Version:** 2.1 (Documentation Refactor)
 
 **For questions or clarifications, refer to:**
 - [../architecture/STATE_MACHINES.md](../architecture/STATE_MACHINES.md) - State machine patterns

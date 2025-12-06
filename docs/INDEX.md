@@ -32,7 +32,7 @@ Master navigation for all documentation.
 ### For Performance Engineers
 - [Benchmark Results](benchmarks/LATEST.md) - Latest performance data
 - [Latency Budget](benchmarks/latency-budget.md) - Component breakdown
-- [Benchmark Guide](guides/benchmark-guide.md) - How to run benchmarks
+- [Benchmark Guide](benchmarks/README.md) - How to run benchmarks
 
 ## By Topic
 
@@ -81,7 +81,6 @@ User-facing tutorials and references
 | [trait-implementation-guide.md](guides/trait-implementation-guide.md) | ~600 | Custom Strategy/Executor guide |
 | [error-handling-guide.md](guides/error-handling-guide.md) | ~450 | Production error patterns |
 | [monitoring-guide.md](guides/monitoring-guide.md) | ~550 | Metrics and alerts |
-| [benchmark-guide.md](guides/benchmark-guide.md) | ~500 | Performance testing |
 | [command-reference.md](guides/command-reference.md) | 134 | CLI commands |
 | [market-selection.md](guides/market-selection.md) | 77 | Market configuration |
 
@@ -96,14 +95,6 @@ External system connections
 
 **Dependency**: Huginn v0.4.0+ for market data
 
-### Design
-Historical design documents
-
-| Document | Lines | Purpose |
-|----------|-------|---------|
-| [PHASE4_REALISTIC_FILLS.md](design/PHASE4_REALISTIC_FILLS.md) | 462 | Realistic fill simulation |
-
-**Note**: Historical context, may be outdated
 
 ---
 

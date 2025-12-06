@@ -858,7 +858,7 @@ impl Strategy {
 ## Further Reading
 
 - [Market Making Guide](./market-making-guide.md) - Strategy design patterns
-- [Benchmark Guide](./benchmark-guide.md) - Performance testing
+- [Benchmark Guide](../benchmarks/README.md) - Performance testing
 - [bog-core API docs](../../bog-core/README.md) - Core types reference
 - [bog-strategies source](../../bog-strategies/src/) - Example implementations
 
