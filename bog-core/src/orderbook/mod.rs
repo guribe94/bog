@@ -136,11 +136,11 @@
 //!
 //! | Operation | Target | Achieved |
 //! |-----------|--------|----------|
-//! | **Full sync** | <50ns | **~20ns** ✅ |
-//! | **Incremental sync** | <20ns | **~10ns** ✅ |
-//! | **VWAP calculation** | <20ns | **~10ns** ✅ |
-//! | **Imbalance calculation** | <15ns | **~8ns** ✅ |
-//! | **Mid price** | <5ns | **~2ns** ✅ |
+//! | **Full sync** | <50ns | **~20ns** |
+//! | **Incremental sync** | <20ns | **~10ns** |
+//! | **VWAP calculation** | <20ns | **~10ns** |
+//! | **Imbalance calculation** | <15ns | **~8ns** |
+//! | **Mid price** | <5ns | **~2ns** |
 //!
 //! ## Thread Safety
 //!

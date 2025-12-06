@@ -27,6 +27,7 @@ huginn = { path = "../../huginn" }
 default = []
 
 # SimpleSpread spread configurations
+spread-3bps = []
 spread-5bps = []
 spread-10bps = []
 spread-20bps = []

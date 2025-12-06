@@ -145,6 +145,12 @@ pub struct ValidationConfig {
     /// This creates apparent bid > ask even though the book isn't truly crossed.
     /// Default: false for liquid markets, set true for altcoins.
     pub allow_crossed_when_empty: bool,
+
+    /// Tolerance for future timestamps in nanoseconds (clock skew allowance)
+    /// Network latency and clock drift can cause exchange timestamps to appear
+    /// slightly in the future. This field sets how much "future" is acceptable.
+    /// Default: 100_000_000 (100ms) - handles typical network jitter
+    pub future_timestamp_tolerance_ns: u64,
 }
 
 impl Default for ValidationConfig {
@@ -158,6 +164,7 @@ impl Default for ValidationConfig {
             validate_depth: true,
             allow_locked: true,               // Allow locked orderbooks (common on Lighter DEX)
             allow_crossed_when_empty: false,  // Default false for liquid markets
+            future_timestamp_tolerance_ns: 1_000_000_000, // 1s tolerance for clock skew (dev machines)
         }
     }
 }
@@ -291,8 +298,9 @@ impl SnapshotValidator {
             .unwrap_or_default()
             .as_nanos() as u64;
 
-        // Check for future timestamp (clock skew)
-        if snapshot.exchange_timestamp_ns > now_ns {
+        // Check for future timestamp (clock skew) with tolerance
+        // Small clock skew is normal due to network latency variance
+        if snapshot.exchange_timestamp_ns > now_ns + self.config.future_timestamp_tolerance_ns {
             return Err(ValidationError::FutureTimestamp {
                 timestamp_ns: snapshot.exchange_timestamp_ns,
                 now_ns,
@@ -474,7 +482,7 @@ impl SnapshotValidator {
 
         if let Ok(mut file) = File::create(&filename) {
             let _ = file.write_all(debug_info.as_bytes());
-            eprintln!("📸 Captured invalid snapshot to: {}", filename);
+            eprintln!("Captured invalid snapshot to: {}", filename);
         }
     }
 

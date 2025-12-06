@@ -147,10 +147,10 @@
 //! compile-time feature flags for performance-critical settings.
 //!
 //! **Status**:
-//! - ✅ Strategy parameters → Compile-time (bog-strategies features)
-//! - ✅ Risk limits → Compile-time (bog-core features)
+//! - Strategy parameters → Compile-time (bog-strategies features)
+//! - Risk limits → Compile-time (bog-core features)
 //! - 🚧 Execution mode → Partial (still runtime in some places)
-//! - ✅ Metrics/monitoring → Runtime (appropriate for cold path)
+//! - Metrics/monitoring → Runtime (appropriate for cold path)
 
 pub mod constants;
 pub mod profiles;

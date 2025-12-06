@@ -11,13 +11,13 @@
 //! ## Performance Achieved
 //!
 //! **Target**: <100ns strategy calculation
-//! **Measured**: **~5ns** average (20x faster than target) ✅
+//! **Measured**: **~5ns** average (20x faster than target) 
 //!
 //! All strategies are **zero-sized types (ZSTs)** - they occupy **0 bytes** of memory.
 //!
 //! ## Available Strategies
 //!
-//! ### [`SimpleSpread`] - Basic Market Making ✅ Production Ready
+//! ### [`SimpleSpread`] - Basic Market Making Production Ready
 //!
 //! Places symmetric quotes around mid-price with configurable spread and size.
 //!
@@ -135,9 +135,9 @@
 //!
 //! | Benchmark | Target | Measured | Status |
 //! |-----------|--------|----------|--------|
-//! | Strategy calculation | <100ns | ~5ns | ✅ 20x under |
-//! | Complete tick-to-trade | <1000ns | ~15ns | ✅ 67x under |
-//! | Signal creation | N/A | ~1ns | ✅ Negligible |
+//! | Strategy calculation | <100ns | ~5ns | 20x under |
+//! | Complete tick-to-trade | <1000ns | ~15ns | 67x under |
+//! | Signal creation | N/A | ~1ns | Negligible |
 //!
 //! See [Performance Report](../PERFORMANCE_REPORT.md) for detailed benchmarks.
 

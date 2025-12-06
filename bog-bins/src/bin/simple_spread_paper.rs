@@ -26,9 +26,10 @@ use bog_core::resilience::{install_panic_handler, KillSwitch};
 use bog_strategies::simple_spread::{MIN_SPREAD_BPS, ORDER_SIZE, SPREAD_BPS};
 use bog_strategies::SimpleSpread;
 use clap::Parser;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 
 /// CLI arguments for simple spread paper trading
@@ -257,6 +258,10 @@ fn main() -> Result<()> {
     // Track last sequence for gap detection
     let mut last_sequence = initial_snapshot.sequence;
 
+    // Periodic status logging to diagnose quoting decisions
+    let last_status_time = Cell::new(Instant::now());
+    let status_interval = Duration::from_secs(10);
+
     // Create feed function that provides data from Huginn
     let feed_fn = || {
         // Check kill switch
@@ -451,6 +456,21 @@ fn main() -> Result<()> {
                         )
                         .ok();
                 }
+
+                // Periodic status logging (every 10 seconds)
+                if last_status_time.get().elapsed() >= status_interval {
+                    let should_quote = spread_bps >= MIN_SPREAD_BPS as u64 && spread_bps <= 500;
+                    info!(
+                        "STATUS: seq={}, bid={}, ask={}, spread={}bps, target={}bps, should_quote={}",
+                        snap.sequence,
+                        snap.actual_best_bid(),
+                        snap.actual_best_ask(),
+                        spread_bps,
+                        SPREAD_BPS,
+                        should_quote
+                    );
+                    last_status_time.set(Instant::now());
+                }
             }
         }
 
@@ -492,9 +512,19 @@ fn main() -> Result<()> {
         }
 
         // Don't trade during recovery or if alerts have halted trading
-        let should_trade = !gap_recovery.should_pause_trading()
-            && !alert_manager.is_trading_halted()
-            && data_fresh;
+        let pause_for_recovery = gap_recovery.should_pause_trading();
+        let trading_halted = alert_manager.is_trading_halted();
+        let should_trade = !pause_for_recovery && !trading_halted && data_fresh;
+
+        // DEBUG: Log should_trade decision periodically
+        if last_status_time.get().elapsed() >= status_interval {
+            if !should_trade {
+                warn!(
+                    "NOT TRADING: pause_for_recovery={}, trading_halted={}, data_fresh={}",
+                    pause_for_recovery, trading_halted, data_fresh
+                );
+            }
+        }
 
         Ok((snapshot, should_trade))
     };

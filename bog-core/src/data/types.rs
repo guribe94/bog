@@ -255,28 +255,16 @@ impl MarketSnapshotExt for MarketSnapshot {
 
     #[inline]
     fn actual_best_bid(&self) -> u64 {
-        // Find max of best_bid_price and all bid_prices
-        // This handles incorrectly ordered orderbook data
-        let mut max_bid = self.best_bid_price;
-        for &price in &self.bid_prices {
-            if price > max_bid {
-                max_bid = price;
-            }
-        }
-        max_bid
+        // Huginn now computes the correct best bid (max price) before publishing
+        // Just return the pre-computed value
+        self.best_bid_price
     }
 
     #[inline]
     fn actual_best_ask(&self) -> u64 {
-        // Find min of best_ask_price and all ask_prices (ignoring zeros)
-        // This handles incorrectly ordered orderbook data
-        let mut min_ask = self.best_ask_price;
-        for &price in &self.ask_prices {
-            if price > 0 && (min_ask == 0 || price < min_ask) {
-                min_ask = price;
-            }
-        }
-        min_ask
+        // Huginn now computes the correct best ask (min non-zero price) before publishing
+        // Just return the pre-computed value
+        self.best_ask_price
     }
 
     #[inline]

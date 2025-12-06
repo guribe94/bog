@@ -113,8 +113,9 @@ pub const DEFAULT_FEE_BPS: u32 = 2;
 pub const DEFAULT_FEE_BPS: u32 = 5;
 
 /// Exchange tick size (price increment) in fixed-point (9 decimals)
-/// Default: $0.01
-pub const TICK_SIZE: u64 = 10_000_000;
+/// Default: $0.00001 (smallest tick on Lighter DEX for meme coins)
+/// For POPCAT at $0.098, each tick is 0.01 bps
+pub const TICK_SIZE: u64 = 10_000;
 
 // ===== PERFORMANCE TUNING =====
 

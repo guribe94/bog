@@ -110,7 +110,7 @@
 //! - Cache-aligned hot data (prevents false sharing)
 //! - Market change detection: ~2ns (early exit optimization)
 //! - Complete tick processing: ~27ns average
-//! - Target: <50ns engine overhead per tick ✅ **Achieved**
+//! - Target: <50ns engine overhead per tick **Achieved**
 
 use crate::config::{
     MAX_POSITION, MAX_SHORT, MAX_POST_STALE_CHANGE_BPS, MIN_QUOTE_INTERVAL_NS,
@@ -589,7 +589,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // ====================================================================
         // CRITICAL: Wait for first VALID snapshot before trading
         // ====================================================================
-        tracing::info!("⏳ Waiting for initial valid market snapshot...");
+        tracing::info!("Waiting for initial valid market snapshot...");
         tracing::info!("   This ensures orderbook is populated before trading starts.");
 
         let mut retries = 0u32;
@@ -609,7 +609,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                             / snapshot.best_bid_price as u128) as u32;
 
                     tracing::info!(
-                        "✅ Received VALID initial snapshot (attempt {}): \
+                        "Received VALID initial snapshot (attempt {}): \
                          seq={}, bid={}, ask={}, spread={}bps",
                         retries + 1,
                         snapshot.sequence,
@@ -620,12 +620,12 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
                     // Process initial snapshot to populate orderbook (always fresh during init)
                     self.process_tick(&snapshot, true)?;
-                    tracing::info!("🚀 Initial orderbook populated - READY TO TRADE");
+                    tracing::info!("Initial orderbook populated - READY TO TRADE");
                     break;
                 }
                 (Some(snapshot), _) => {
                     tracing::warn!(
-                        "⚠️ Received INVALID initial snapshot (attempt {}): \
+                        "WARN: Received INVALID initial snapshot (attempt {}): \
                          bid={}, ask={}, bid_size={}, ask_size={}, crossed={}",
                         retries + 1,
                         snapshot.best_bid_price,
@@ -639,7 +639,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 (None, _) => {
                     if retries % 10 == 0 {
                         tracing::info!(
-                            "⏳ Ring buffer empty, waiting for Huginn data... (attempt {}/{})",
+                            "Ring buffer empty, waiting for Huginn data... (attempt {}/{})",
                             retries + 1,
                             MAX_INIT_RETRIES
                         );
@@ -650,7 +650,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
 
             if retries >= MAX_INIT_RETRIES {
                 return Err(anyhow!(
-                    "❌ INITIALIZATION FAILED: No valid snapshot received after {} retries ({:.1}s). \
+                    "INITIALIZATION FAILED: No valid snapshot received after {} retries ({:.1}s). \
                      \n   Verify: \
                      \n   1. Huginn is running (ps aux | grep huginn) \
                      \n   2. Huginn is connected to Lighter exchange (check Huginn logs) \
@@ -667,7 +667,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
         // ====================================================================
         // Main trading loop (only entered after valid initial snapshot!)
         // ====================================================================
-        tracing::info!("📈 Entering main trading loop (orderbook validated)");
+        tracing::info!("Entering main trading loop (orderbook validated)");
 
         while !self.shutdown.load(Ordering::Acquire) {
             match feed_fn()? {
@@ -675,7 +675,7 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                     // Defense in depth: Validate every snapshot
                     if !crate::data::is_valid_snapshot(&snapshot) {
                         tracing::error!(
-                            "🚨 INVALID SNAPSHOT during trading: bid={}, ask={}, skipping tick",
+                            "ERROR: INVALID SNAPSHOT during trading: bid={}, ask={}, skipping tick",
                             snapshot.best_bid_price,
                             snapshot.best_ask_price
                         );

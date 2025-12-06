@@ -7,9 +7,9 @@
 //!
 //! ```text
 //! Strategy → Risk Limits → Circuit Breaker → Rate Limiter → RISK MANAGER → Exchange
-//!            ✓ Position     ✓ Flash crash   ✓ Not spam     ✓ Kill Switch
-//!            ✓ Order size   ✓ Spread        ✓ Burst OK     ✓ Tick Size
-//!            ✓ Daily loss   ✓ Liquidity                    ✓ Price Sanity
+//!            Position     Flash crash   Not spam     Kill Switch
+//!            Order size   Spread        Burst OK     Tick Size
+//!            Daily loss   Liquidity                    Price Sanity
 //! ```
 
 use crate::config::constants::*;
@@ -69,8 +69,8 @@ impl Default for RiskLimits {
             max_outstanding_orders: 10,
             max_daily_loss: MAX_DAILY_LOSS,
             max_drawdown: MAX_DRAWDOWN,
-            tick_size: 10_000_000, // $0.01 tick size (9 decimals)
-            max_price_distance_bps: 500, // 5% from mid
+            tick_size: TICK_SIZE, // Use centralized constant from config
+            max_price_distance_bps: 50, // 0.5% from mid (more sensible for market making)
         }
     }
 }
@@ -510,8 +510,8 @@ mod tests {
             max_outstanding_orders: 10,
             max_daily_loss: 5_000 * 1_000_000_000, // 5000 USD
             max_drawdown: 50_000_000, // 5%
-            tick_size: 10_000_000, // 0.01
-            max_price_distance_bps: 500, // 5%
+            tick_size: TICK_SIZE, // Use centralized constant
+            max_price_distance_bps: 50, // 0.5% from mid
         }
     }
 

@@ -110,9 +110,9 @@
 //!
 //! | Operation | Target | SimulatedExecutor |
 //! |-----------|--------|-------------------|
-//! | **execute()** | <200ns | **~50ns** ✅ |
-//! | **get_fills()** | <100ns | **~25ns** ✅ |
-//! | **Fill generation** | <150ns | **~75ns** ✅ |
+//! | **execute()** | <200ns | **~50ns** |
+//! | **get_fills()** | <100ns | **~25ns** |
+//! | **Fill generation** | <150ns | **~75ns** |
 //!
 //! See [execution benchmarks](../../docs/benchmarks/) for details.
 

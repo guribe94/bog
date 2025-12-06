@@ -108,7 +108,7 @@ impl GapRecoveryManager {
         // Alert if configured
         if self.config.alert_on_gap {
             warn!(
-                "🚨 SEQUENCE GAP DETECTED: {} messages missed ({}→{})",
+                "SEQUENCE GAP DETECTED: {} messages missed ({}→{})",
                 gap_size, last_seq, current_seq
             );
         }
@@ -137,7 +137,7 @@ impl GapRecoveryManager {
         // Start recovery
         self.recovery_in_progress = true;
         info!(
-            "🔄 Starting automatic gap recovery (attempt 1/{})",
+            "Starting automatic gap recovery (attempt 1/{})",
             self.config.max_recovery_attempts
         );
 
@@ -160,7 +160,7 @@ impl GapRecoveryManager {
                     }
 
                     info!(
-                        "✅ Gap recovery successful! Recovered {} messages in {:.3}s (attempt {}/{})",
+                        "Gap recovery successful! Recovered {} messages in {:.3}s (attempt {}/{})",
                         gap_size,
                         recovery_time.as_secs_f64(),
                         attempt,
@@ -196,7 +196,7 @@ impl GapRecoveryManager {
                 .unwrap_or_else(|| "Unknown error".to_string())
         );
 
-        error!("❌ {}", error_msg);
+        error!("{}", error_msg);
         Err(anyhow!(error_msg))
     }
 
@@ -211,11 +211,11 @@ impl GapRecoveryManager {
 
         // CRITICAL FIX: Request snapshot from Huginn BEFORE waiting for it
         // This increments an atomic counter that Huginn's snapshot polling task monitors
-        info!("📸 REQUESTING snapshot from Huginn (atomic signal via shared memory)...");
+        info!("REQUESTING snapshot from Huginn (atomic signal via shared memory)...");
         feed.request_snapshot();
 
         info!(
-            "⏳ Waiting for snapshot from Huginn (timeout: {:?})...",
+            "Waiting for snapshot from Huginn (timeout: {:?})...",
             self.config.snapshot_timeout
         );
         let snapshot = feed
@@ -228,7 +228,7 @@ impl GapRecoveryManager {
             })?;
 
         info!(
-            "✅ Snapshot received successfully: seq={}",
+            "Snapshot received successfully: seq={}",
             snapshot.sequence
         );
 
@@ -252,7 +252,7 @@ impl GapRecoveryManager {
         //   - NEW behavior: reset to 1,882,808 → next message at 1,882,809 → no gap!
         let reset_seq = current_seq.saturating_sub(1);
         info!(
-            "📊 Gap detector reset: using current_seq-1={} (snapshot had stale seq={})",
+            "Gap detector reset: using current_seq-1={} (snapshot had stale seq={})",
             reset_seq, snapshot.sequence
         );
         feed.mark_recovery_complete(reset_seq);

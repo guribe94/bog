@@ -85,7 +85,7 @@ impl RuntimeMonitor {
     pub fn log_position_reconciliation(&self, position_qty: i64, realized_pnl: i64, trades: usize) {
         if self.tick_count % self.config.reconciliation_interval_ticks == 0 {
             info!(
-                "📊 POSITION RECONCILIATION (tick {})\n\
+                "POSITION RECONCILIATION (tick {})\n\
                  - Quantity: {} (fixed-point, divide by 1e9 for BTC)\n\
                  - Realized PnL: {} (fixed-point, divide by 1e9 for USD)\n\
                  - Total Trades: {}\n\
@@ -131,13 +131,13 @@ impl RuntimeMonitor {
         // Alert if memory grew beyond threshold
         if growth_factor > (1.0 + self.config.memory_threshold) {
             error!(
-                "🚨 MEMORY THRESHOLD EXCEEDED 🚨\n\
+                "MEMORY THRESHOLD EXCEEDED \n\
                  - Current: {} bytes ({:.2} MB)\n\
                  - Initial: {} bytes ({:.2} MB)\n\
                  - Growth: {:.1}% (threshold: {:.0}%)\n\
                  - Peak: {} bytes ({:.2} MB)\n\
                  - Uptime: {}\n\
-                 ⚠️  POTENTIAL MEMORY LEAK - Monitor closely!",
+                  POTENTIAL MEMORY LEAK - Monitor closely!",
                 current_memory,
                 current_memory as f64 / 1_048_576.0,
                 self.initial_memory_bytes,
@@ -151,7 +151,7 @@ impl RuntimeMonitor {
         } else if growth_factor > 1.5 {
             // Warning at 50% growth
             warn!(
-                "⚠️  Memory usage growing\n\
+                " Memory usage growing\n\
                  - Current: {} bytes ({:.2} MB)\n\
                  - Growth: {:.1}% from baseline\n\
                  - Peak: {} bytes ({:.2} MB)",
@@ -171,7 +171,7 @@ impl RuntimeMonitor {
         let tps = self.tick_count as f64 / uptime.as_secs_f64();
 
         info!(
-            "📈 STATUS REPORT (tick {})\n\
+            "STATUS REPORT (tick {})\n\
              - Uptime: {}\n\
              - Ticks processed: {}\n\
              - Average TPS: {:.1}\n\

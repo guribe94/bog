@@ -595,7 +595,7 @@ impl MarketFeed {
         retry_delay: Duration,
     ) -> Result<MarketSnapshot> {
         info!(
-            "⏳ Waiting for initial valid market snapshot (timeout: {}s)...",
+            "Waiting for initial valid market snapshot (timeout: {}s)...",
             max_retries as f64 * retry_delay.as_secs_f64()
         );
 
@@ -605,7 +605,7 @@ impl MarketFeed {
             match self.try_recv() {
                 Some(snapshot) if validate_snapshot(&snapshot, MAX_DATA_AGE_NS).is_ok() => {
                     info!(
-                        "✅ Received valid initial snapshot after {} attempts: seq={}, bid={}, ask={}",
+                        "Received valid initial snapshot after {} attempts: seq={}, bid={}, ask={}",
                         attempt + 1,
                         snapshot.sequence,
                         types::conversions::u64_to_f64(snapshot.best_bid_price),
@@ -615,7 +615,7 @@ impl MarketFeed {
                 }
                 Some(snapshot) => {
                     warn!(
-                        "⚠️ Received INVALID snapshot (attempt {}): bid={}, ask={}, crossed={}",
+                        "WARN: Received INVALID snapshot (attempt {}): bid={}, ask={}, crossed={}",
                         attempt + 1,
                         snapshot.best_bid_price,
                         snapshot.best_ask_price,
@@ -807,7 +807,7 @@ impl MarketFeed {
     /// Initialization should complete in <1 second (vs 10 seconds with polling)
     pub fn initialize_with_snapshot(&mut self, timeout: Duration) -> Result<MarketSnapshot> {
         info!(
-            "⏳ Initializing with snapshot protocol (timeout: {:.1}s)...",
+            "Initializing with snapshot protocol (timeout: {:.1}s)...",
             timeout.as_secs_f64()
         );
 
@@ -816,7 +816,7 @@ impl MarketFeed {
         let snapshot = perform_snapshot_recovery(self, timeout)?;
 
         info!(
-            "✅ Snapshot received: seq={}, bid={}, ask={}, took {:.3}s",
+            "Snapshot received: seq={}, bid={}, ask={}, took {:.3}s",
             snapshot.sequence,
             types::conversions::u64_to_f64(snapshot.best_bid_price),
             types::conversions::u64_to_f64(snapshot.best_ask_price),
@@ -890,7 +890,7 @@ impl MarketFeed {
 
         if current_epoch != self.last_epoch {
             warn!(
-                "🔄 Huginn restart detected! Epoch changed: {} → {} (market_id={}) - triggering snapshot recovery",
+                "Huginn restart detected! Epoch changed: {} -> {} (market_id={}) - triggering snapshot recovery",
                 self.last_epoch, current_epoch, self.market_id
             );
 
@@ -1005,7 +1005,7 @@ impl MarketFeed {
         // Detect transition to backpressure
         if now_triggered && !self.backpressure_triggered {
             warn!(
-                "⚠️ Backpressure triggered! Queue depth {} > threshold {}",
+                "Backpressure triggered! Queue depth {} > threshold {}",
                 queue_depth, threshold
             );
             self.stats.backpressure_events += 1;
@@ -1015,7 +1015,7 @@ impl MarketFeed {
         // Release backpressure when recovered
         if !now_triggered && self.backpressure_triggered {
             info!(
-                "✅ Backpressure released. Queue depth normalized to {}",
+                "Backpressure released. Queue depth normalized to {}",
                 queue_depth
             );
             self.backpressure_triggered = false;

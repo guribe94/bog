@@ -12,7 +12,7 @@
 //! ## Performance Achieved
 //!
 //! **Target**: <1μs tick-to-trade latency
-//! **Measured**: **~15ns** average (67x faster than target) ✅
+//! **Measured**: **~15ns** average (67x faster than target) 
 //!
 //! ### Component Breakdown
 //! - Engine overhead: ~2ns
@@ -43,14 +43,14 @@
 //!         ↓
 //!   Bog Bot (huginn::MarketFeed)
 //!    • try_recv() reads from memory (50-150ns)
-//!    • NO API calls to Lighter for market data ✅
+//!    • NO API calls to Lighter for market data 
 //! ```
 //!
 //! **Key Points:**
-//! - ✅ Market data: Shared memory IPC only (no Lighter API connection)
-//! - ✅ Zero serialization: `MarketSnapshot` is cache-aligned struct
-//! - ✅ Ultra-low latency: 50-150ns reads from `/dev/shm`
-//! - ⚠️ Order execution: Will use Lighter API (currently stubbed)
+//! - Market data: Shared memory IPC only (no Lighter API connection)
+//! - Zero serialization: `MarketSnapshot` is cache-aligned struct
+//! - Ultra-low latency: 50-150ns reads from `/dev/shm`
+//! - Order execution: Will use Lighter API (currently stubbed)
 //!
 //! ### Order Execution (Future: Lighter API)
 //!

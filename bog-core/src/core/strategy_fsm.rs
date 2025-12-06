@@ -45,7 +45,7 @@
 //!
 //! // Stop strategy (terminal state)
 //! let strategy = strategy.stop();
-//! // strategy.resume(); // ❌ COMPILE ERROR - Stopped has no resume()
+//! // strategy.resume(); // COMPILE ERROR - Stopped has no resume()
 //! ```
 
 use std::time::{Duration, SystemTime};

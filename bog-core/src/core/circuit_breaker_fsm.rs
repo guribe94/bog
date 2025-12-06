@@ -48,7 +48,7 @@
 //! let breaker = BinaryNormal::new();
 //! let breaker = breaker.trip(HaltReason::Manual("Flash crash detected".to_string()));
 //! // Now in Halted state - cannot trade!
-//! // breaker.check_market(); // ❌ COMPILE ERROR - Halted has no check_market()
+//! // breaker.check_market(); // COMPILE ERROR - Halted has no check_market()
 //! let breaker = breaker.reset(); // Manual reset required
 //!
 //! // Three-state breaker (resilience)

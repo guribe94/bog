@@ -123,7 +123,7 @@
 //! Cache lines used:    1 (fits in 64 bytes)
 //! ```
 //!
-//! Target: <100ns signal generation ✅ **Achieved: ~5ns** (20x faster)
+//! Target: <100ns signal generation **Achieved: ~5ns** (20x faster)
 
 use crate::fees::{MIN_PROFITABLE_SPREAD_BPS, ROUND_TRIP_COST_BPS};
 use crate::volatility::EwmaVolatility;
@@ -143,17 +143,22 @@ use bog_core::orderbook::{L2OrderBook, DEPTH_LEVELS as BOOK_DEPTH};
 /// profitability after fees.
 ///
 /// For Lighter DEX (0bps maker + 2bps taker = 2bps round-trip):
-/// - 5bps spread → 3bps profit per round-trip ✅
-/// - 10bps spread → 8bps profit per round-trip ✅
-/// - 20bps spread → 18bps profit per round-trip ✅
+/// - 3bps spread → 1bps profit per round-trip (tightest, most competitive)
+/// - 5bps spread → 3bps profit per round-trip
+/// - 10bps spread → 8bps profit per round-trip
+/// - 20bps spread → 18bps profit per round-trip 
 ///
 /// Default: 10 basis points (0.1% spread, 0.08% profit)
 #[cfg(not(any(
+    feature = "spread-3bps",
     feature = "spread-5bps",
     feature = "spread-10bps",
     feature = "spread-20bps"
 )))]
 pub const SPREAD_BPS: u32 = 10;
+
+#[cfg(feature = "spread-3bps")]
+pub const SPREAD_BPS: u32 = 3;
 
 #[cfg(feature = "spread-5bps")]
 pub const SPREAD_BPS: u32 = 5;
@@ -224,8 +229,9 @@ pub const MIN_SPREAD_BPS: u32 = 10;
 pub const MAX_SPREAD_BPS: u32 = 50;
 
 /// Minimum price considered valid (in fixed-point)
-/// Below this is likely bad data (< $1)
-pub const MIN_VALID_PRICE: u64 = 1_000_000_000; // $1
+/// Below this is likely bad data (< $0.001)
+/// Lowered from $1 to support sub-$1 meme coins like POPCAT, FARTCOIN, etc.
+pub const MIN_VALID_PRICE: u64 = 1_000_000; // $0.001 (with 9 decimal places)
 
 /// Maximum price considered valid (in fixed-point)
 /// Above this is likely bad data (> $1M per BTC)
@@ -684,9 +690,34 @@ impl SimpleSpread {
 impl Strategy for SimpleSpread {
     #[inline(always)]
     fn calculate(&mut self, book: &L2OrderBook, position: &Position) -> Option<Signal> {
+        // DEBUG: Log entry to calculate (every call for debugging)
+        #[cfg(feature = "logging")]
+        {
+            static CALL_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let count = CALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            // Log first 10 entries, then every 100
+            if count < 10 || count % 100 == 0 {
+                tracing::info!(
+                    "CALC: entry #{}, bid={}, ask={}",
+                    count,
+                    book.best_bid_price(),
+                    book.best_ask_price()
+                );
+            }
+        }
+
         // === CHECK IF WE SHOULD CANCEL ALL ORDERS ===
         // Check market conditions FIRST before doing anything else
         if Self::should_cancel_orders(book) {
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "CANCEL_ALL: bid_size={}, ask_size={}, spread={}bps",
+                book.best_bid_size(),
+                book.best_ask_size(),
+                if book.best_bid_price() > 0 {
+                    (book.best_ask_price().saturating_sub(book.best_bid_price()) * 10_000) / book.best_bid_price()
+                } else { 0 }
+            );
             // Market conditions warrant cancelling all orders
             return Some(Signal::cancel_all());
         }
@@ -699,22 +730,44 @@ impl Strategy for SimpleSpread {
 
         // 1. Basic sanity check
         if bid == 0 || ask == 0 || ask <= bid {
+            #[cfg(feature = "logging")]
+            tracing::info!("SANITY_FAIL: bid={}, ask={}", bid, ask);
             return None;
         }
 
         // 2. Price bounds validation (prevent trading on bad data)
         if !Self::is_price_valid(bid) || !Self::is_price_valid(ask) {
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "PRICE_INVALID: bid={} (valid={}), ask={} (valid={}), min={}, max={}",
+                bid, Self::is_price_valid(bid),
+                ask, Self::is_price_valid(ask),
+                MIN_VALID_PRICE, MAX_VALID_PRICE
+            );
             return None;
         }
 
         // 3. Spread validation (MIN <= spread <= configured max)
         // This catches both too-tight spreads and flash crashes
         if !self.is_spread_valid(bid, ask) {
+            #[cfg(feature = "logging")]
+            {
+                let spread_bps = (ask - bid) * 10_000 / bid;
+                tracing::info!(
+                    "SPREAD_FAIL: spread={}bps outside range [{}, {}]",
+                    spread_bps, MIN_SPREAD_BPS, self.max_market_spread_bps
+                );
+            }
             return None;
         }
 
         // 4. Liquidity validation (sufficient size on both sides)
         if !Self::is_liquidity_sufficient(book.best_bid_size(), book.best_ask_size()) {
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "LIQUIDITY_FAIL: bid_size={}, ask_size={}, min={}",
+                book.best_bid_size(), book.best_ask_size(), MIN_SIZE_THRESHOLD
+            );
             return None;
         }
 
@@ -901,17 +954,32 @@ impl Strategy for SimpleSpread {
 
         // Final sanity check on our quotes
         if our_bid == 0 || our_ask == 0 || our_ask <= our_bid {
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "FINAL_SANITY_FAIL: our_bid={}, our_ask={}",
+                our_bid, our_ask
+            );
             return None;
         }
 
         // Ensure our spread is still profitable after adjustments
         if !self.is_spread_valid(our_bid, our_ask) {
+            #[cfg(feature = "logging")]
+            {
+                let our_spread_bps = (our_ask - our_bid) * 10_000 / our_bid;
+                tracing::info!(
+                    "OUR_SPREAD_FAIL: our quotes spread={}bps invalid (our_bid={}, our_ask={})",
+                    our_spread_bps, our_bid, our_ask
+                );
+            }
             return None;
         }
 
         // CRITICAL: Runtime profitability check after all adjustments
         // Check for zero bid to prevent division by zero
         if our_bid == 0 {
+            #[cfg(feature = "logging")]
+            tracing::info!("OUR_BID_ZERO: our_bid=0, rejecting");
             return None; // Invalid bid price
         }
 
@@ -921,8 +989,11 @@ impl Strategy for SimpleSpread {
 
         // Ensure spread is profitable after fees
         if actual_spread_bps < MIN_PROFITABLE_SPREAD_BPS as u64 {
-            // Log warning as this indicates our adjustments made the spread unprofitable
-            // This should be rare but MUST be caught to prevent losses
+            #[cfg(feature = "logging")]
+            tracing::info!(
+                "UNPROFITABLE: spread={}bps < MIN_PROFITABLE={}",
+                actual_spread_bps, MIN_PROFITABLE_SPREAD_BPS
+            );
             return None; // Don't quote unprofitable spreads
         }
 
@@ -930,6 +1001,12 @@ impl Strategy for SimpleSpread {
         let current_qty = position.get_quantity();
         let max_pos = MAX_POSITION as i64;
         let max_short = -(MAX_SHORT as i64);
+
+        #[cfg(feature = "logging")]
+        tracing::info!(
+            "SIGNAL: our_bid={}, our_ask={}, spread={}bps, size={}, pos={}",
+            our_bid, our_ask, actual_spread_bps, ORDER_SIZE, current_qty
+        );
 
         if current_qty >= max_pos || current_qty.saturating_add(ORDER_SIZE as i64) > max_pos {
             // At max long limit (or would exceed) - only quote Ask (reduce position)
@@ -1067,9 +1144,11 @@ mod tests {
     fn test_price_bounds() {
         // Valid price range
         assert!(SimpleSpread::is_price_valid(50_000_000_000_000)); // $50k
-        assert!(!SimpleSpread::is_price_valid(500_000_000)); // $0.50
-        assert!(!SimpleSpread::is_price_valid(1_500_000_000_000_000)); // $1.5M
-        assert!(SimpleSpread::is_price_valid(MIN_VALID_PRICE)); // Exactly $1
+        assert!(SimpleSpread::is_price_valid(500_000_000)); // $0.50 - valid for meme coins
+        assert!(SimpleSpread::is_price_valid(97_000_000)); // $0.097 - POPCAT price range
+        assert!(!SimpleSpread::is_price_valid(500_000)); // $0.0005 - too low
+        assert!(!SimpleSpread::is_price_valid(1_500_000_000_000_000)); // $1.5M - too high
+        assert!(SimpleSpread::is_price_valid(MIN_VALID_PRICE)); // Exactly $0.001
         assert!(SimpleSpread::is_price_valid(MAX_VALID_PRICE)); // Exactly $1M
         assert!(!SimpleSpread::is_price_valid(MIN_VALID_PRICE - 1));
         assert!(!SimpleSpread::is_price_valid(MAX_VALID_PRICE + 1));

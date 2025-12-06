@@ -279,7 +279,7 @@ impl AlertManager {
         if severity == AlertSeverity::Critical && self.config.halt_on_critical {
             self.trading_halted = true;
             error!(
-                "🚨 CRITICAL ALERT: Trading halted due to {}: {}",
+                "CRITICAL ALERT: Trading halted due to {}: {}",
                 alert_type.to_string(),
                 message
             );
@@ -354,7 +354,7 @@ impl AlertManager {
             }
             AlertSeverity::Warning => {
                 warn!(
-                    "⚠️ ALERT [{}]: {} | {}",
+                    "ALERT [{}]: {} | {}",
                     alert.alert_type.to_string(),
                     alert.message,
                     context_str
@@ -362,7 +362,7 @@ impl AlertManager {
             }
             AlertSeverity::Error => {
                 error!(
-                    "❌ ALERT [{}]: {} | {}",
+                    "ALERT [{}]: {} | {}",
                     alert.alert_type.to_string(),
                     alert.message,
                     context_str
@@ -370,7 +370,7 @@ impl AlertManager {
             }
             AlertSeverity::Critical => {
                 error!(
-                    "🚨 CRITICAL [{}]: {} | {}",
+                    "CRITICAL [{}]: {} | {}",
                     alert.alert_type.to_string(),
                     alert.message,
                     context_str

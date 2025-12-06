@@ -18,7 +18,7 @@
 //! let bid_prices: [u64; ORDERBOOK_DEPTH] = [0; ORDERBOOK_DEPTH];
 //!
 //! // WRONG: Never hardcode!
-//! // let bid_prices: [u64; 10] = [0; 10];  // ❌ DON'T DO THIS
+//! // let bid_prices: [u64; 10] = [0; 10];  // DON'T DO THIS
 //! ```
 
 pub use huginn::shm::{ORDERBOOK_DEPTH, PADDING_SIZE, SNAPSHOT_SIZE};

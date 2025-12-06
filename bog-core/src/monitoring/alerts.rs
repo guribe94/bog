@@ -44,9 +44,9 @@ impl AlertSeverity {
     pub fn emoji(&self) -> &'static str {
         match self {
             Self::Info => "ℹ️",
-            Self::Warning => "⚠️",
-            Self::Error => "❌",
-            Self::Critical => "🚨",
+            Self::Warning => "",
+            Self::Error => "",
+            Self::Critical => "",
         }
     }
 }
