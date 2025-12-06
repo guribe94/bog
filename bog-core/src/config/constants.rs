@@ -26,6 +26,12 @@ pub const MAX_DRAWDOWN: i64 = 50_000_000;
 #[cfg(feature = "max-drawdown-10pct")]
 pub const MAX_DRAWDOWN: i64 = 100_000_000;
 
+/// Minimum peak PnL required before drawdown check applies (quote currency, 9 decimals)
+/// Below this threshold, drawdown protection is skipped to avoid false triggers
+/// on small simulated PnL values in paper trading.
+/// Default: $10
+pub const MIN_DRAWDOWN_PEAK_THRESHOLD: i64 = 10_000_000_000;
+
 /// Maximum daily loss allowed (quote currency, 9 decimals)
 /// Default: $5,000 loss
 #[cfg(not(feature = "max-daily-loss-20pct"))]
@@ -85,6 +91,29 @@ pub const CIRCUIT_BREAKER_ZERO_MARKETS: u32 = 3;
 #[cfg(feature = "breaker-zero-5")]
 pub const CIRCUIT_BREAKER_ZERO_MARKETS: u32 = 5;
 
+/// Maximum spread in basis points before circuit breaker trips
+/// Default: 1000bps (10%) - suitable for volatile low-liquidity altcoins
+#[cfg(not(feature = "breaker-spread-100bps"))]
+pub const CIRCUIT_BREAKER_MAX_SPREAD_BPS: u64 = 1000;
+#[cfg(feature = "breaker-spread-100bps")]
+pub const CIRCUIT_BREAKER_MAX_SPREAD_BPS: u64 = 100;
+
+/// Maximum price change between ticks (percentage) before circuit breaker trips
+/// Default: 10% - anything larger is likely erroneous data
+pub const CIRCUIT_BREAKER_MAX_PRICE_CHANGE_PCT: u64 = 10;
+
+/// Minimum bid/ask size in fixed-point (9 decimals) for circuit breaker
+/// Default: 0 - disabled for altcoin trading where one side is often empty
+pub const CIRCUIT_BREAKER_MIN_LIQUIDITY: u64 = 0;
+
+/// Maximum data age in nanoseconds before considered stale
+/// Default: 5 seconds
+pub const CIRCUIT_BREAKER_MAX_DATA_AGE_NS: i64 = 5_000_000_000;
+
+/// Consecutive violations before circuit breaker trips
+/// Prevents single spurious tick from halting trading
+pub const CIRCUIT_BREAKER_VIOLATIONS_THRESHOLD: u32 = 3;
+
 // ===== STRATEGY PARAMETERS =====
 
 /// Inventory impact on quotes (basis points)
@@ -102,6 +131,16 @@ pub const INVENTORY_IMPACT_BPS: u64 = 10;
 pub const VOLATILITY_SPIKE_THRESHOLD_BPS: u64 = 100;
 #[cfg(feature = "vol-threshold-200bps")]
 pub const VOLATILITY_SPIKE_THRESHOLD_BPS: u64 = 200;
+
+/// Orderbook imbalance threshold for spread adjustment (fixed-point fraction)
+/// If imbalance > +20% (bullish) or < -20% (bearish), adjust spreads
+/// Default: 0.2 (20% imbalance triggers adjustment)
+pub const IMBALANCE_THRESHOLD: i64 = 200_000_000;
+
+/// Spread adjustment amount in basis points
+/// When imbalance detected, adjust bid/ask by this amount
+/// Default: 2bps adjustment
+pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
 
 // ===== FEE CONFIGURATION =====
 
@@ -132,6 +171,33 @@ pub const MAX_FILL_BATCH_SIZE: usize = 200;
 pub const OBJECT_POOL_SIZE: usize = 1024;
 #[cfg(feature = "pool-size-2048")]
 pub const OBJECT_POOL_SIZE: usize = 2048;
+
+// ===== BASIS POINT CALCULATIONS =====
+
+/// Scale factor for basis point calculations (1 bp = 0.01% = 0.0001)
+/// 10_000 bps = 100%
+pub const BPS_SCALE: u64 = 10_000;
+
+// ===== ORDER SIZE LIMITS =====
+
+/// Minimum order size (in fixed-point with 9 decimals)
+/// Default: 0.01 units
+pub const MIN_ORDER_SIZE: u64 = 10_000_000;
+
+/// Maximum order size (in fixed-point with 9 decimals)
+/// Default: 0.5 units
+pub const MAX_ORDER_SIZE: u64 = 500_000_000;
+
+// ===== PRICE VALIDATION =====
+
+/// Maximum price distance from mid allowed for quotes (basis points)
+/// Default: 50 bps (0.5%)
+pub const MAX_PRICE_DISTANCE_BPS: u32 = 50;
+
+// ===== TIME CONSTANTS =====
+
+/// Seconds per day for daily reset calculations
+pub const SECONDS_PER_DAY: u64 = 86400;
 
 #[cfg(test)]
 mod tests {

@@ -92,27 +92,14 @@ use crate::data::MarketSnapshot;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{error, warn};
 
-/// Maximum spread in basis points before circuit breaker trips
-/// Default: 1000bps (10%) - suitable for volatile low-liquidity altcoins like FARTCOIN
-/// Note: Major pairs like BTC may want 100bps, but altcoins often have 5-10% spreads
-pub const MAX_SPREAD_BPS: u64 = 1000;
-
-/// Maximum price change between ticks (percentage)
-/// Default: 10% - anything larger is likely erroneous data
-pub const MAX_PRICE_CHANGE_PCT: u64 = 10;
-
-/// Minimum bid/ask size in fixed-point (9 decimals)
-/// Default: 0 - disabled for altcoin trading where one side is often empty
-/// For major pairs, consider setting to 10_000_000 (0.01 BTC)
-pub const MIN_LIQUIDITY: u64 = 0;
-
-/// Maximum data age in nanoseconds (5 seconds)
-/// Older data is considered stale
-pub const MAX_DATA_AGE_NS: i64 = 5_000_000_000;
-
-/// Consecutive violations before halting
-/// Prevents single spurious tick from halting trading
-pub const CONSECUTIVE_VIOLATIONS_THRESHOLD: u32 = 3;
+// Re-export centralized constants for backward compatibility
+pub use crate::config::constants::{
+    CIRCUIT_BREAKER_MAX_DATA_AGE_NS as MAX_DATA_AGE_NS,
+    CIRCUIT_BREAKER_MAX_PRICE_CHANGE_PCT as MAX_PRICE_CHANGE_PCT,
+    CIRCUIT_BREAKER_MAX_SPREAD_BPS as MAX_SPREAD_BPS,
+    CIRCUIT_BREAKER_MIN_LIQUIDITY as MIN_LIQUIDITY,
+    CIRCUIT_BREAKER_VIOLATIONS_THRESHOLD as CONSECUTIVE_VIOLATIONS_THRESHOLD,
+};
 
 /// Circuit breaker state (for backwards compatibility)
 ///

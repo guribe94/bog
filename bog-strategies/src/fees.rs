@@ -1,7 +1,7 @@
 /// Exchange fee configuration for profitable market making
 ///
 /// Fees are expressed in basis points (bps) where 1 bp = 0.01% = 0.0001
-/// All calculations use u64 fixed-point with scale factor 10,000 for bps.
+/// All calculations use u64 fixed-point with scale factor BPS_SCALE (10,000) for bps.
 ///
 /// # Lighter DEX Fee Structure (Premium Accounts)
 /// - Maker fee: 0.2 bps (essentially free)
@@ -13,6 +13,8 @@
 /// ```bash
 /// cargo build --features maker-fee-5bps,taker-fee-10bps
 /// ```
+
+use bog_core::config::BPS_SCALE;
 
 /// Maker fee in basis points (fee paid when posting passive liquidity)
 ///
@@ -136,9 +138,9 @@ pub const MIN_PROFITABLE_SPREAD_BPS: u32 = ROUND_TRIP_COST_BPS;
 /// ```
 #[inline(always)]
 pub fn calculate_fee(price: u64, fee_bps: u32) -> u64 {
-    // price * fee_bps / 10_000
+    // price * fee_bps / BPS_SCALE
     // Use u128 to prevent overflow
-    let fee = (price as u128 * fee_bps as u128) / 10_000;
+    let fee = (price as u128 * fee_bps as u128) / BPS_SCALE as u128;
     fee as u64
 }
 
@@ -207,12 +209,12 @@ pub fn calculate_quotes(mid_price: u64, target_spread_bps: u32) -> (u64, u64) {
     // Half-spread in bps
     let half_spread_bps = target_spread_bps / 2;
 
-    // Calculate bid: mid * (1 - half_spread / 10_000)
-    let bid_adjustment = (mid_price as u128 * half_spread_bps as u128) / 10_000;
+    // Calculate bid: mid * (1 - half_spread / BPS_SCALE)
+    let bid_adjustment = (mid_price as u128 * half_spread_bps as u128) / BPS_SCALE as u128;
     let bid_price = mid_price.saturating_sub(bid_adjustment as u64);
 
-    // Calculate ask: mid * (1 + half_spread / 10_000)
-    let ask_adjustment = (mid_price as u128 * half_spread_bps as u128) / 10_000;
+    // Calculate ask: mid * (1 + half_spread / BPS_SCALE)
+    let ask_adjustment = (mid_price as u128 * half_spread_bps as u128) / BPS_SCALE as u128;
     let ask_price = mid_price.saturating_add(ask_adjustment as u64);
 
     (bid_price, ask_price)

@@ -269,15 +269,8 @@ pub const DEPTH_LEVELS: usize = 5;
 #[cfg(feature = "depth-10")]
 pub const DEPTH_LEVELS: usize = 10;
 
-/// Imbalance threshold for spread adjustment (fixed-point)
-/// If imbalance > +20% (bullish) or < -20% (bearish), adjust spreads
-/// Default: 0.2 (20% imbalance triggers adjustment)
-pub const IMBALANCE_THRESHOLD: i64 = 200_000_000; // 0.2 in fixed-point
-
-/// Spread adjustment amount in basis points
-/// When imbalance detected, adjust bid/ask by this amount
-/// Default: 2bps adjustment
-pub const SPREAD_ADJUSTMENT_BPS: u32 = 2;
+// Re-export centralized constants for backward compatibility
+pub use bog_core::config::{IMBALANCE_THRESHOLD, SPREAD_ADJUSTMENT_BPS};
 
 // Note: We calculate spread dynamically rather than pre-computing
 // to allow for const generic parameters to work with any spread value

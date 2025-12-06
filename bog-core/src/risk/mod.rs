@@ -70,7 +70,7 @@ impl Default for RiskLimits {
             max_daily_loss: MAX_DAILY_LOSS,
             max_drawdown: MAX_DRAWDOWN,
             tick_size: TICK_SIZE, // Use centralized constant from config
-            max_price_distance_bps: 50, // 0.5% from mid (more sensible for market making)
+            max_price_distance_bps: MAX_PRICE_DISTANCE_BPS, // Use centralized constant
         }
     }
 }
@@ -203,8 +203,8 @@ impl RiskManager {
             .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_secs();
 
-        // Round down to start of day (86400 seconds in a day)
-        (now / 86400) * 86400
+        // Round down to start of day
+        (now / SECONDS_PER_DAY) * SECONDS_PER_DAY
     }
 
     /// Check if we need to reset daily stats
@@ -243,10 +243,18 @@ impl RiskManager {
     }
 
     /// Check drawdown limit
+    ///
+    /// Drawdown protection only applies when peak_pnl exceeds MIN_DRAWDOWN_PEAK_THRESHOLD.
+    /// This prevents false triggers on tiny simulated PnL values in paper trading.
     pub fn check_drawdown(&self, daily_total_pnl: i64, peak_pnl: i64) -> Result<()> {
+        // Skip check if peak PnL is below threshold (avoids false triggers in paper trading)
+        if peak_pnl < MIN_DRAWDOWN_PEAK_THRESHOLD {
+            return Ok(());
+        }
+
         // Drawdown is peak - current.
         let drawdown = peak_pnl.saturating_sub(daily_total_pnl);
-        
+
         if peak_pnl > 0 && self.limits.max_drawdown > 0 {
              let allowed_drawdown = ((peak_pnl as i128) * self.limits.max_drawdown as i128 / fixed_point::SCALE as i128)
                 .clamp(i64::MIN as i128, i64::MAX as i128)
@@ -454,8 +462,8 @@ impl RiskManager {
             };
 
             // Calculate distance in BPS using u128 to prevent overflow
-            // bps = (distance * 10000) / mid_price
-            let distance_bps = (distance as u128 * 10_000) / mid_price as u128;
+            // bps = (distance * BPS_SCALE) / mid_price
+            let distance_bps = (distance as u128 * BPS_SCALE as u128) / mid_price as u128;
             let distance_bps = distance_bps as u32;
 
             if distance_bps > self.limits.max_price_distance_bps {
@@ -511,7 +519,7 @@ mod tests {
             max_daily_loss: 5_000 * 1_000_000_000, // 5000 USD
             max_drawdown: 50_000_000, // 5%
             tick_size: TICK_SIZE, // Use centralized constant
-            max_price_distance_bps: 50, // 0.5% from mid
+            max_price_distance_bps: MAX_PRICE_DISTANCE_BPS, // Use centralized constant
         }
     }
 
