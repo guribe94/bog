@@ -801,6 +801,9 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 2
             };
 
+            // Capture PnL before fill to calculate per-trade profit
+            let pnl_before = self.position.get_realized_pnl();
+
             if let Err(e) = self.position.process_fill_fixed_with_fee(
                 order_side,
                 price_fixed,
@@ -821,6 +824,22 @@ impl<S: Strategy, E: Executor> Engine<S, E> {
                 entry_price,
                 realized_pnl,
                 self.position.get_trade_count()
+            );
+
+            // Calculate profit on this specific trade and log at INFO level
+            let trade_profit = realized_pnl - pnl_before;
+            let profit_dollars = trade_profit as f64 / 1_000_000_000.0;
+            let total_pnl_dollars = realized_pnl as f64 / 1_000_000_000.0;
+            let position_units = current_qty as f64 / 1_000_000_000.0;
+
+            tracing::info!(
+                "FILL: {} {} @ ${:.5} | profit=${:.6} | total_pnl=${:.6} | position={:.4}",
+                if order_side == 0 { "BUY" } else { "SELL" },
+                fill.size,
+                fill.price,
+                profit_dollars,
+                total_pnl_dollars,
+                position_units
             );
 
             if current_qty > MAX_POSITION {
